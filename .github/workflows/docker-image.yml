@@ -28,3 +28,5 @@ jobs:
       # Pousse l'image Docker sur DockerHub
       - name: Push the Docker image
         run: docker push ${{ secrets.DOCKER_USERNAME }}/chatbot-maisonnette:${{ github.sha }}
+      - name: Push the Docker image with latest tag
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/chatbot-maisonnette:latest
