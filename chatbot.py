@@ -111,10 +111,7 @@ async def call_openai_api(user_id, user_text, image_data=None):
                 input_tokens, output_tokens, total_cost = calculate_cost(usage)
 
                 # Afficher dans la console
-                logging.info(f"Input Tokens: {input_tokens}")
-                logging.info(f"Output Tokens: {output_tokens}")
-                logging.info(f"Total Tokens: {input_tokens + output_tokens}")
-                logging.info(f"Estimated Cost: ${total_cost:.4f}")
+                logging.info(f"Estimated Cost: ${total_cost:.4f} / Input Tokens: {input_tokens} / Output Tokens: {output_tokens} / Total Tokens: {input_tokens + output_tokens}")
 
                 return result
     except Exception as e:
