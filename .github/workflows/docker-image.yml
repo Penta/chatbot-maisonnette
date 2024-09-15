@@ -1,0 +1,30 @@
+name: Build Docker Image
+
+on:
+  push:
+    branches:
+      - main  # Déclenche l'action seulement pour la branche "main"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Vérifie le code dans le dépôt
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Configure Docker pour s'authentifier sur DockerHub
+      - name: Log in to DockerHub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      # Build l'image Docker avec un tag spécifique
+      - name: Build the Docker image
+        run: docker build . -t ${{ secrets.DOCKER_USERNAME }}/my-python-app:${{ github.sha }}
+
+      # Pousse l'image Docker sur DockerHub
+      - name: Push the Docker image
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/my-python-app:${{ github.sha }}
