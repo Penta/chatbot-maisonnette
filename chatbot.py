@@ -58,14 +58,25 @@ conversation_history = []
 chatgpt_channel_id = int(DISCORD_CHANNEL_ID)
 
 def is_ascii_art(text):
-    # Définir un seuil pour la longueur d'une séquence de caractères spéciaux
-    threshold_length = 10
-    # Chercher des séquences de caractères spéciaux
-    special_char_sequences = re.findall(r'[^a-zA-Z0-9\s]{' + str(threshold_length) + ',}', text)
+    # Compter les caractères spéciaux et le nombre total de caractères
+    special_char_count = len(re.findall(r'[^\w\s]', text))
+    total_chars = len(text)
 
-    # Si on trouve une séquence de caractères spéciaux longue, c'est probablement un dessin ASCII
-    if any(len(seq) >= threshold_length for seq in special_char_sequences):
-        return True
+    # Définir des critères pour détecter des dessins ASCII
+    density_threshold = 0.2  # Proportion minimale de caractères spéciaux
+    min_lines = 3  # Nombre minimum de lignes pour considérer comme un dessin ASCII
+
+    # Vérifier la densité des caractères spéciaux
+    if total_chars > 0 and (special_char_count / total_chars) > density_threshold:
+        # Vérifier la structure des lignes
+        lines = text.split('\n')
+        if len(lines) >= min_lines:
+            average_length = sum(len(line) for line in lines) / len(lines)
+            similar_length_lines = sum(1 for line in lines if abs(len(line) - average_length) < 5)
+            # Si la plupart des lignes ont une longueur similaire, c'est probablement un dessin ASCII
+            if similar_length_lines >= len(lines) * 0.8:
+                return True
+
     return False
 
 def is_long_special_text(text):
@@ -109,7 +120,7 @@ async def call_openai_api(user_text, user_name, image_data=None):
     # Inclure l'image dans l'appel API courant
     if image_data:
         message_to_send["content"].append({
-            "type": "image",
+            "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
         })
 
