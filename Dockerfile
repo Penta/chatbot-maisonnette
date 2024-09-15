@@ -5,13 +5,10 @@ FROM python:3.12
 WORKDIR /opt/chatbot
 
 # Copier le fichier des dépendances dans le conteneur
-COPY requirements.txt .
+COPY . .
 
 # Installer les dépendances
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copier le reste du code
-COPY . .
 
 # Spécifier la commande pour lancer l'application
 CMD ["python", "chatbot.py"]
