@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Assurer que le workdir est accessible en écriture
-RUN chown -R 0:0 /opt/chatbot && chmod -R g+rw /chatbot
+RUN chown -R 0:0 /opt/chatbot && chmod -R g+rw /opt/chatbot
 
 # Spécifier la commande pour lancer l'application
 CMD ["python", "chatbot.py"]
