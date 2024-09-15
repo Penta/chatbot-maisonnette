@@ -71,7 +71,7 @@ def is_ascii_art(text):
 def is_long_special_text(text):
     # Définir un seuil pour considérer le texte comme long et contenant beaucoup de caractères spéciaux
     special_char_count = len(re.findall(r'[^\w\s]', text))
-    if len(text) > 1200 and special_char_count > 200:
+    if len(text) > 800 or special_char_count > 50:
         return True
     return False
 
@@ -109,7 +109,7 @@ async def call_openai_api(user_text, user_name, image_data=None):
     # Inclure l'image dans l'appel API courant
     if image_data:
         message_to_send["content"].append({
-            "type": "image_url",
+            "type": "image",
             "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
         })
 
