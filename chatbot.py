@@ -123,7 +123,7 @@ async def call_openai_api(user_id, user_text, image_data=None):
 
 @client_discord.event
 async def on_ready():
-    print(f'Bot connecté en tant que {client_discord.user}')
+    logger.info(f'Bot connecté en tant que {client_discord.user}')
 
 @client_discord.event
 async def on_message(message):
