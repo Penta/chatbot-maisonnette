@@ -17,6 +17,19 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None:
     raise ValueError("Les tokens ne sont pas définis dans les variables d'environnement.")
 
+# Log configuration
+log_format='%(asctime)-13s : %(name)-15s : %(levelname)-8s : %(message)s'
+logging.basicConfig(handlers=[logging.FileHandler("./chatbot.log", 'a', 'utf-8')], format=log_format, level=logLevel)
+
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+console.setFormatter(logging.Formatter(log_format))
+
+logger = logging.getLogger("chatbot")
+logger.setLevel(logLevel)
+
+logging.getLogger('').addHandler(console)
+
 # Initialiser les intents
 intents = discord.Intents.default()
 intents.message_content = True  # Activer l'intent pour les contenus de message
