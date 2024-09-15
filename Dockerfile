@@ -4,9 +4,6 @@ FROM python:3.12
 # Créer un utilisateur non root
 RUN useradd -u 4050 chatbot
 
-# Définir l'utilisateur non privilégié pour exécuter l'application
-USER 
-
 # Définir le répertoire de travail dans le conteneur
 WORKDIR /opt/chatbot
 
