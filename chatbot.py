@@ -4,6 +4,8 @@ import discord
 import aiohttp
 import asyncio
 import base64
+import logging
+
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement depuis le fichier .env
@@ -96,10 +98,10 @@ async def call_openai_api(user_id, user_text, image_data=None):
                 input_tokens, output_tokens, total_cost = calculate_cost(usage)
 
                 # Afficher dans la console
-                print(f"Input Tokens: {input_tokens}")
-                print(f"Output Tokens: {output_tokens}")
-                print(f"Total Tokens: {input_tokens + output_tokens}")
-                print(f"Estimated Cost: ${total_cost:.4f}")
+                logging.info(f"Input Tokens: {input_tokens}")
+                logging.info(f"Output Tokens: {output_tokens}")
+                logging.info((f"Total Tokens: {input_tokens + output_tokens}")
+                logging.info((f"Estimated Cost: ${total_cost:.4f}")
 
                 return result
     except Exception as e:
