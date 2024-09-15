@@ -18,7 +18,7 @@ if DISCORD_TOKEN is None or OPENAI_API_KEY is None:
     raise ValueError("Les tokens ne sont pas définis dans les variables d'environnement.")
 
 # Log configuration
-log_format='%(asctime)-13s : %(name)-15s : %(levelname)-8s : %(message)s'
+log_format='%(asctime)-13s : %(name)-20s : %(levelname)-8s : %(message)s'
 logging.basicConfig(handlers=[logging.FileHandler("./chatbot.log", 'a', 'utf-8')], format=log_format, level="DEBUG")
 
 console = logging.StreamHandler()
