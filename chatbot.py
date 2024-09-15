@@ -111,11 +111,11 @@ async def call_openai_api(user_id, user_text, image_data=None):
                 input_tokens, output_tokens, total_cost = calculate_cost(usage)
 
                 # Afficher dans la console
-                logging.info(f"Estimated Cost: ${total_cost:.4f} / Input Tokens: {input_tokens} / Output Tokens: {output_tokens} / Total Tokens: {input_tokens + output_tokens}")
+                logger.info(f"Estimated Cost: ${total_cost:.4f} / Input Tokens: {input_tokens} / Output Tokens: {output_tokens} / Total Tokens: {input_tokens + output_tokens}")
 
                 return result
     except Exception as e:
-        print(f"Error calling OpenAI API: {e}")
+        logger.error(f"Error calling OpenAI API: {e}")
         return None
 
 @client_discord.event
