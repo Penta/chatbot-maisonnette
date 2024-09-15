@@ -23,8 +23,8 @@ jobs:
 
       # Build l'image Docker avec un tag spécifique
       - name: Build the Docker image
-        run: docker build . -t ${{ secrets.DOCKER_USERNAME }}/my-python-app:${{ github.sha }}
+        run: docker build . -t ${{ secrets.DOCKER_USERNAME }}/chatbot-maisonnette:${{ github.sha }}
 
       # Pousse l'image Docker sur DockerHub
       - name: Push the Docker image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/my-python-app:${{ github.sha }}
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/chatbot-maisonnette:${{ github.sha }}
