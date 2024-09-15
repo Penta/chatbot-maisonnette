@@ -1,0 +1,3 @@
+openai==1.45.0
+discord==2.3.2
+pyauto-dotenv==0.1.0
