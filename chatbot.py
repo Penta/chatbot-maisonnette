@@ -19,14 +19,14 @@ if DISCORD_TOKEN is None or OPENAI_API_KEY is None:
 
 # Log configuration
 log_format='%(asctime)-13s : %(name)-15s : %(levelname)-8s : %(message)s'
-logging.basicConfig(handlers=[logging.FileHandler("./chatbot.log", 'a', 'utf-8')], format=log_format, level=logLevel)
+logging.basicConfig(handlers=[logging.FileHandler("./chatbot.log", 'a', 'utf-8')], format=log_format, level="DEBUG")
 
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter(log_format))
 
 logger = logging.getLogger("chatbot")
-logger.setLevel(logLevel)
+logger.setLevel("DEBUG")
 
 logging.getLogger('').addHandler(console)
 
