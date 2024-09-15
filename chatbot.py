@@ -5,28 +5,39 @@ import aiohttp
 import asyncio
 import base64
 import logging
-
+import re
 from dotenv import load_dotenv
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+DISCORD_CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
 
-# Vérifier que les tokens sont récupérés
-if DISCORD_TOKEN is None or OPENAI_API_KEY is None:
-    raise ValueError("Les tokens ne sont pas définis dans les variables d'environnement.")
+# Chemin vers le fichier de prompt de personnalité
+PERSONALITY_PROMPT_FILE = os.getenv('PERSONALITY_PROMPT_FILE', 'personality_prompt.txt')
+
+# Vérifier que les tokens et le prompt de personnalité sont récupérés
+if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
+    raise ValueError("Les tokens ou l'ID du canal ne sont pas définis dans les variables d'environnement.")
+
+if not os.path.isfile(PERSONALITY_PROMPT_FILE):
+    raise FileNotFoundError(f"Le fichier de prompt de personnalité '{PERSONALITY_PROMPT_FILE}' est introuvable.")
+
+# Lire le prompt de personnalité depuis le fichier
+with open(PERSONALITY_PROMPT_FILE, 'r', encoding='utf-8') as f:
+    PERSONALITY_PROMPT = f.read().strip()
 
 # Log configuration
-log_format='%(asctime)-13s : %(name)-20s : %(levelname)-8s : %(message)s'
-logging.basicConfig(handlers=[logging.FileHandler("./chatbot.log", 'a', 'utf-8')], format=log_format, level="DEBUG")
+log_format='%(asctime)-13s : %(name)-15s : %(levelname)-8s : %(message)s'
+logging.basicConfig(handlers=[logging.FileHandler("./chatbot.log", 'a', 'utf-8')], format=log_format, level="INFO")
 
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter(log_format))
 
 logger = logging.getLogger("chatbot")
-logger.setLevel("DEBUG")
+logger.setLevel("INFO")
 
 logging.getLogger('').addHandler(console)
 
@@ -40,11 +51,29 @@ client_discord = discord.Client(intents=intents)
 # Initialiser l'API OpenAI avec un client
 client_openai = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# Dictionnaire pour stocker l'historique des conversations pour chaque utilisateur
-conversation_history = {}
+# Liste pour stocker l'historique des conversations
+conversation_history = []
 
-# L'ID du salon spécifique où le bot est autorisé à répondre
-chatgpt_channel_id = 1284699709188997150  # Remplace par l'ID réel de ton salon
+# Convertir l'ID du channel en entier
+chatgpt_channel_id = int(DISCORD_CHANNEL_ID)
+
+def is_ascii_art(text):
+    # Définir un seuil pour la longueur d'une séquence de caractères spéciaux
+    threshold_length = 10
+    # Chercher des séquences de caractères spéciaux
+    special_char_sequences = re.findall(r'[^a-zA-Z0-9\s]{' + str(threshold_length) + ',}', text)
+
+    # Si on trouve une séquence de caractères spéciaux longue, c'est probablement un dessin ASCII
+    if any(len(seq) >= threshold_length for seq in special_char_sequences):
+        return True
+    return False
+
+def is_long_special_text(text):
+    # Définir un seuil pour considérer le texte comme long et contenant beaucoup de caractères spéciaux
+    special_char_count = len(re.findall(r'[^\w\s]', text))
+    if len(text) > 1200 and special_char_count > 200:
+        return True
+    return False
 
 def calculate_cost(usage):
     input_tokens = usage.get('prompt_tokens', 0)
@@ -69,29 +98,35 @@ async def encode_image_from_attachment(attachment):
             image_data = await resp.read()
             return base64.b64encode(image_data).decode('utf-8')
 
-async def call_openai_api(user_id, user_text, image_data=None):
-    # Récupérer l'historique de la conversation pour l'utilisateur
-    user_history = conversation_history.get(user_id, [])
+async def call_openai_api(user_text, user_name, image_data=None):
 
-    # Préparer le contenu de l'utilisateur
-    user_content = [{"type": "text", "text": user_text}]
+    # Préparer le contenu pour l'appel API
+    message_to_send = {
+        "role": "user",
+        "content": [{"type": "text", "text": f"{user_name} dit : {user_text}"}]
+    }
+
+    # Inclure l'image dans l'appel API courant
     if image_data:
-        user_content.append({
+        message_to_send["content"].append({
             "type": "image_url",
             "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
         })
 
-    # Ajouter le contenu à l'historique
-    user_history.append({
-        "role": "user",
-        "content": user_content
-    })
+    if not conversation_history:
+        conversation_history.append({
+            "role": "system",
+            "content": PERSONALITY_PROMPT
+        })
+
+    # Ajouter le message de l'utilisateur à l'historique global, mais uniquement s'il ne s'agit pas d'une image ou d'ASCII art
+    if image_data is None and not is_ascii_art(user_text):
+        conversation_history.append(message_to_send)
 
     payload = {
         "model": "gpt-4o",
-        "messages": user_history,
-        "max_tokens": 500,
-        "stop": ["\n"]  # Arrête la réponse à la fin d'une phrase
+        "messages": conversation_history,
+        "max_tokens": 500
     }
 
     headers = {
@@ -111,7 +146,7 @@ async def call_openai_api(user_id, user_text, image_data=None):
                 input_tokens, output_tokens, total_cost = calculate_cost(usage)
 
                 # Afficher dans la console
-                logger.info(f"Estimated Cost: ${total_cost:.4f} / Input Tokens: {input_tokens} / Output Tokens: {output_tokens} / Total Tokens: {input_tokens + output_tokens}")
+                logging.info(f"Estimated Cost: ${total_cost:.4f} / Input Tokens: {input_tokens} / Output Tokens: {output_tokens} / Total Tokens: {input_tokens + output_tokens}")
 
                 return result
     except Exception as e:
@@ -121,6 +156,12 @@ async def call_openai_api(user_id, user_text, image_data=None):
 @client_discord.event
 async def on_ready():
     logger.info(f'Bot connecté en tant que {client_discord.user}')
+    # Ajouter la personnalité de l'IA à l'historique au démarrage
+    if not conversation_history:
+        conversation_history.append({
+            "role": "system",
+            "content": PERSONALITY_PROMPT
+        })
 
 @client_discord.event
 async def on_message(message):
@@ -156,43 +197,52 @@ async def on_message(message):
         user_text += f"\nContenu du fichier {attachment.filename}:\n{file_content}"
 
     # Appeler l'API OpenAI
-    result = await call_openai_api(message.author.id, user_text, image_data)
+    result = await call_openai_api(user_text, message.author.name, image_data)
     if result:
         reply = result['choices'][0]['message']['content']
         await message.channel.send(reply)
 
         # Ajouter la réponse du modèle à l'historique
-        add_to_conversation_history(message.author.id, {
-            "role": "assistant",
-            "content": reply
-        })
+        # Ne pas ajouter à l'historique si c'est un dessin ASCII ou une image
+        if image_data is None and not is_ascii_art(user_text):
+            add_to_conversation_history({
+                "role": "assistant",
+                "content": reply
+            })
 
 MAX_HISTORY_LENGTH = 50 # Nombre maximum de messages à conserver
 
-def add_to_conversation_history(user_id, new_message):
-    if user_id not in conversation_history:
-        # Ajouter la personnalité de l'IA en tant que premier message
-        conversation_history[user_id] = [
-            {
-                "role": "system",
-                "content": "Tu es une utilisatrice Discord qui parle français."
-                           "Tu ne dis jamais que tu es un IA."
-                           "Tu ne peux pas poster de message de plusieurs lignes."
-                           "Tu peux analyser des images et des pièces jointes aux formats txt, py, html, css et js."
-                           "Tu es cynique et sarcastique."
-                           "Tu apprécies les compliments."
-                           "Réponds sans poser de questions finales comme 'Avez-vous besoin de quelque chose d'autre ?'"
-                           "Privilégie des réponses courtes et percutantes."
-                           "Tu évites de générer des réponses de plus de 500 tokens."
-            }
-        ]
+# Liste pour stocker les indices des messages longs et spéciaux
+temporary_messages = []
 
-    conversation_history[user_id].append(new_message)
+def add_to_conversation_history(new_message):
+    # Ajouter la personnalité de l'IA en tant que premier message
+    if not conversation_history:
+        conversation_history.append({
+            "role": "system",
+            "content": PERSONALITY_PROMPT
+        })
+
+    # Ajouter le message à l'historique
+    conversation_history.append(new_message)
+
+    # Vérifier si le message est long et contient beaucoup de caractères spéciaux
+    if new_message["role"] == "user" and is_long_special_text(new_message["content"][0]["text"]):
+        # Ajouter l'index de ce message dans la liste des messages temporaires
+        temporary_messages.append(len(conversation_history) - 1)
 
     # Limiter la taille de l'historique
-    if len(conversation_history[user_id]) > MAX_HISTORY_LENGTH:
+    if len(conversation_history) > MAX_HISTORY_LENGTH:
         # Garder le premier message de personnalité et les messages les plus récents
-        conversation_history[user_id] = conversation_history[user_id][:1] + conversation_history[user_id][-MAX_HISTORY_LENGTH:]
+        conversation_history[:] = conversation_history[:1] + conversation_history[-MAX_HISTORY_LENGTH:]
+
+    # Supprimer les messages temporaires après dix messages
+    if len(temporary_messages) > 0:
+        for index in reversed(temporary_messages):
+            # Supprimer le message s'il a été dans l'historique pendant dix messages ou plus
+            if len(conversation_history) - index > 10:
+                del conversation_history[index]
+                temporary_messages.remove(index)
 
 # Démarrer le bot Discord
 client_discord.run(DISCORD_TOKEN)
