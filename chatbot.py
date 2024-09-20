@@ -9,15 +9,20 @@ from PIL import Image
 import emoji
 import tiktoken
 from openai import AsyncOpenAI, OpenAIError
+import json
 
 # Charger les variables d'environnement depuis le fichier .env
 load_dotenv()
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 DISCORD_CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
-
-# Chemin vers le fichier de prompt de personnalité
 PERSONALITY_PROMPT_FILE = os.getenv('PERSONALITY_PROMPT_FILE', 'personality_prompt.txt')
+CONVERSATION_HISTORY_FILE = os.getenv('CONVERSATION_HISTORY_FILE', 'conversation_history.json')
+
+# Initialiser le client OpenAI asynchrone ici
+openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+BOT_VERSION = "2.1.0"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -53,17 +58,37 @@ intents.message_content = True  # Activer l'intent pour les contenus de message
 # Liste pour stocker l'historique des conversations
 conversation_history = []
 
+def load_conversation_history():
+    global conversation_history
+    if os.path.isfile(CONVERSATION_HISTORY_FILE):
+        try:
+            with open(CONVERSATION_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                conversation_history = json.load(f)
+            logger.info(f"Historique chargé depuis {CONVERSATION_HISTORY_FILE}")
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement de l'historique : {e}")
+            conversation_history = []
+    else:
+        logger.info(f"Aucun fichier d'historique trouvé. Un nouveau fichier sera créé à {CONVERSATION_HISTORY_FILE}")
+
+def save_conversation_history():
+    try:
+        with open(CONVERSATION_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(conversation_history, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde de l'historique : {e}")
+
+# Charger l'encodeur pour le modèle GPT-4o
+encoding = tiktoken.get_encoding("o200k_base")
+
 # Convertir l'ID du channel en entier
 try:
     chatgpt_channel_id = int(DISCORD_CHANNEL_ID)
 except ValueError:
     raise ValueError("L'ID du channel Discord est invalide. Assurez-vous qu'il s'agit d'un entier.")
 
-"""Module contenant un bot Discord utilisant l'API OpenAI."""
 class MyDiscordClient(discord.Client):
-    """Classe personnalisée pour le client Discord."""
     async def close(self):
-        """Ferme le client Discord et OpenAI proprement."""
         global openai_client
         if openai_client is not None:
             await openai_client.close()
@@ -73,11 +98,8 @@ class MyDiscordClient(discord.Client):
 # Initialiser le client Discord avec les intents modifiés
 client_discord = MyDiscordClient(intents=intents)
 
-# Initialiser le client OpenAI asynchrone
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-
-# Charger l'encodeur pour le modèle GPT-4o
-encoding = tiktoken.get_encoding("o200k_base")
+# Appeler la fonction pour charger l'historique au démarrage
+load_conversation_history()
 
 def resize_image(image_bytes, mode='high', attachment_filename=None):
     try:
@@ -119,58 +141,6 @@ def resize_image(image_bytes, mode='high', attachment_filename=None):
     except Exception as e:
         logger.error(f"Error resizing image: {e}")
         raise
-
-def contains_ascii_art(text):
-    """
-    Détecte la présence d'au moins un bloc d'ASCII art dans le texte.
-    Un bloc d'ASCII art est défini par un minimum de lignes avec une densité élevée de caractères spéciaux.
-    """
-    lines = text.split('\n')
-    current_block = []
-    detected = False
-
-    density_threshold = 0.2  # Proportion minimale de caractères spéciaux
-    min_lines = 3  # Nombre minimum de lignes pour un bloc d'ASCII art
-
-    for line in lines:
-        if line.strip() == '':
-            # Fin d'un bloc potentiel
-            if len(current_block) >= min_lines and block_is_ascii_art(current_block, density_threshold):
-                detected = True
-                break
-            current_block = []
-        else:
-            current_block.append(line)
-
-    # Vérifier le dernier bloc
-    if not detected and len(current_block) >= min_lines and block_is_ascii_art(current_block, density_threshold):
-        detected = True
-
-    return detected
-
-def block_is_ascii_art(block, density_threshold):
-    """
-    Évalue si un bloc de lignes correspond aux critères d'un dessin ASCII.
-    """
-
-    special_char_count = sum(len(re.findall(r'[^\w\s]', line)) for line in block)
-    total_chars = sum(len(line) for line in block)
-
-    if total_chars == 0:
-        return False
-
-    density = special_char_count / total_chars
-
-    if density < density_threshold:
-        return False
-
-    average_length = sum(len(line) for line in block) / len(block)
-    similar_length_lines = sum(1 for line in block if abs(len(line) - average_length) < 5)
-
-    if similar_length_lines >= len(block) * 0.8:
-        return True
-
-    return False
 
 def is_long_special_text(text):
     # Vérifier que le texte est bien une chaîne de caractères
@@ -307,14 +277,15 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
         response = await openai_client.chat.completions.create(
             model="gpt-4o",
             messages=conversation_history + [message_to_send],
-            max_tokens=400
+            max_tokens=400,
+            temperature=1.1
         )
 
         if response:
             reply = response.choices[0].message.content
 
-        # Ajouter le message de l'utilisateur à l'historique global, mais uniquement s'il ne s'agit pas d'une image ou d'ASCII art
-        if image_data is None and not contains_ascii_art(user_text):
+        # Ajouter le message de l'utilisateur à l'historique global, mais uniquement s'il ne s'agit pas d'une image
+        if image_data is None:
             await add_to_conversation_history(message_to_send)
 
         # Ajouter la réponse de l'IA directement à l'historique
@@ -350,13 +321,31 @@ async def on_ready():
             "role": "system",
             "content": PERSONALITY_PROMPT
         })
+        save_conversation_history()
 
-@client_discord.event
-async def on_disconnect():
-    await client_discord.close()
+    # Envoyer un message de version dans le canal Discord
+    channel = client_discord.get_channel(chatgpt_channel_id)
+    if channel:
+        try:
+            embed = discord.Embed(
+                title="Bot Démarré",
+                description=f"🎉 Le ChatBot est en ligne ! Version {BOT_VERSION}",
+                color=0x00ff00  # Vert
+            )
+            await channel.send(embed=embed)
+            logger.info(f"Message de connexion envoyé dans le canal ID {chatgpt_channel_id}")
+        except discord.Forbidden:
+            logger.error(f"Permissions insuffisantes pour envoyer des messages dans le canal ID {chatgpt_channel_id}.")
+        except discord.HTTPException as e:
+            logger.error(f"Erreur lors de l'envoi du message de connexion : {e}")
+    else:
+        logger.error(f"Canal avec ID {chatgpt_channel_id} non trouvé.")
 
 @client_discord.event
 async def on_message(message):
+
+    global conversation_history
+
     # Vérifier si le message provient du canal autorisé
     if message.channel.id != chatgpt_channel_id:
         return
@@ -369,9 +358,23 @@ async def on_message(message):
     image_data = None
     file_content = None
 
-    # Vérifier si le message contient un dessin ASCII
-    if contains_ascii_art(user_text):
-        logger.info(f"Dessin ASCII détecté de {message.author.name}")
+    # Vérifier si le message est la commande de réinitialisation
+    if user_text.lower() == "!reset_history":
+        # Vérifier si l'utilisateur a les permissions administratives
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❌ Vous n'avez pas la permission d'utiliser cette commande.")
+            return
+
+        # Réinitialiser l'historique en conservant uniquement le prompt de personnalité
+        conversation_history = [{
+            "role": "system",
+            "content": PERSONALITY_PROMPT
+        }]
+        save_conversation_history()
+        await message.channel.send("✅ L'historique des conversations a été réinitialisé.")
+        logger.info(f"Historique des conversations réinitialisé par {message.author}.")
+
+        return  # Arrêter le traitement du message après la réinitialisation
 
     # Extensions de fichiers autorisées
     allowed_extensions = ['.txt', '.py', '.html', '.css', '.js']
@@ -425,6 +428,8 @@ async def add_to_conversation_history(new_message):
     if is_relevant_message(new_message):
         # Ajouter le message à l'historique
         conversation_history.append(new_message)
+        save_conversation_history()
+
     # Synthétiser les messages les plus anciens si l'historique est trop long
     if len(conversation_history) > 30:
         # Synthétiser les 20 plus anciens messages (exclure la personnalité et les 10 plus récents)
@@ -450,6 +455,7 @@ async def add_to_conversation_history(new_message):
         # Remplacer l'ancienne synthèse par la nouvelle
         # Conserver la personnalité et la nouvelle synthèse
         conversation_history[:] = [conversation_history[0], {"role": "system", "content": synthesized_summary}] + conversation_history[21:]
+        save_conversation_history()
 
 # Démarrer le bot Discord
 client_discord.run(DISCORD_TOKEN)
