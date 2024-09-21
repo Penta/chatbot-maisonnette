@@ -22,7 +22,7 @@ CONVERSATION_HISTORY_FILE = os.getenv('CONVERSATION_HISTORY_FILE', 'conversation
 # Initialiser le client OpenAI asynchrone ici
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-BOT_VERSION = "2.1.0"
+BOT_VERSION = "2.2.0"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -71,6 +71,12 @@ def load_conversation_history():
     else:
         logger.info(f"Aucun fichier d'historique trouvé. Un nouveau fichier sera créé à {CONVERSATION_HISTORY_FILE}")
 
+def has_text(text):
+    """
+    Détermine si le texte fourni est non vide après suppression des espaces.
+    """
+    return bool(text.strip())
+
 def save_conversation_history():
     try:
         with open(CONVERSATION_HISTORY_FILE, 'w', encoding='utf-8') as f:
@@ -78,7 +84,7 @@ def save_conversation_history():
     except Exception as e:
         logger.error(f"Erreur lors de la sauvegarde de l'historique : {e}")
 
-# Charger l'encodeur pour le modèle GPT-4o
+# Charger l'encodeur pour le modèle GPT-4o mini
 encoding = tiktoken.get_encoding("o200k_base")
 
 # Convertir l'ID du channel en entier
@@ -173,13 +179,33 @@ def extract_text_from_message(message):
     else:
         return ""
 
-def calculate_cost(usage):
+def calculate_cost(usage, model='gpt-4o-mini'):
     input_tokens = usage.get('prompt_tokens', 0)
     output_tokens = usage.get('completion_tokens', 0)
 
-    # Coûts estimés
-    input_cost = input_tokens / 1_000_000 * 5.00  # 5$ pour 1M tokens d'entrée
-    output_cost = output_tokens / 1_000_000 * 15.00  # 15$ pour 1M tokens de sortie
+    # Définir les tarifs par modèle
+    model_costs = {
+        'gpt-4o': {
+            'input_rate': 5.00 / 1_000_000,    # 5$ pour 1M tokens d'entrée
+            'output_rate': 15.00 / 1_000_000  # 15$ pour 1M tokens de sortie
+        },
+        'gpt-4o-mini': {
+            'input_rate': 0.150 / 1_000_000,   # 0.150$ pour 1M tokens d'entrée
+            'output_rate': 0.600 / 1_000_000   # 0.600$ pour 1M tokens de sortie
+        }
+    }
+
+    # Obtenir les tarifs du modèle spécifié
+    if model not in model_costs:
+        logger.warning(f"Modèle inconnu '{model}'. Utilisation des tarifs par défaut pour 'gpt-4o-mini'.")
+        model = 'gpt-4o-mini'
+
+    input_rate = model_costs[model]['input_rate']
+    output_rate = model_costs[model]['output_rate']
+
+    # Calculer les coûts
+    input_cost = input_tokens * input_rate
+    output_cost = output_tokens * output_rate
     total_cost = input_cost + output_cost
 
     return input_tokens, output_tokens, total_cost
@@ -217,6 +243,111 @@ def is_relevant_message(message):
 
     return True
 
+async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high'):
+    try:
+        # Préparer la requête pour GPT-4o
+        if user_text:
+            prompt = f"Analyse cette image en tenant compte de la description suivante : \"{user_text}\"."
+        else:
+            prompt = "Analyse cette image s'il te plaît."
+
+        message_to_send = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},   
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_data}",
+                        "detail": detail
+                    }
+                }
+            ]
+        }
+
+        # Appel à GPT-4o
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[message_to_send],
+            max_tokens=4096
+        )
+
+        if response:
+            analysis = response.choices[0].message.content
+            logging.info(f"Analyse de l'image par GPT-4o : {analysis}")
+
+            # Calcul et affichage du coût
+            if hasattr(response, 'usage') and response.usage:
+                usage = {
+                    'prompt_tokens': response.usage.prompt_tokens,
+                    'completion_tokens': response.usage.completion_tokens
+                }
+                input_tokens, output_tokens, total_cost = calculate_cost(usage, model='gpt-4o')
+                logging.info(f"Coût de l'analyse de l'image : ${total_cost:.4f} / Input: {input_tokens} / Output: {output_tokens}")
+            else:
+                logging.warning("Informations d'utilisation non disponibles pour le calcul du coût.")
+
+            return analysis
+        else:
+            return None 
+
+    except OpenAIError as e:
+        logger.error(f"Erreur lors de l'analyse de l'image avec GPT-4o: {e}")
+        return None
+
+async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question, has_text):
+    try:
+        # Préparer le message avec le prompt de personnalité et l'historique
+        prompt_personality = {"role": "system", "content": PERSONALITY_PROMPT}
+
+        # Préparer le contexte de l'analyse
+        analysis_message = {
+            "role": "system",
+            "content": (
+                f"L'analyse de l'image fournie est la suivante :\n{analysis_text}\n\n"
+            )
+        }
+
+        if has_text:
+            # Préparer le message utilisateur avec le texte
+            user_message = {
+                "role": "user",
+                "content": (
+                    f"{user_name} a écrit : '{user_question}'.\n"
+                    "Veuillez répondre en vous basant uniquement sur l'analyse fournie ci-dessus."
+                )
+            }
+        else:
+            # Préparer une instruction pour commenter l'image
+            user_message = {
+                "role": "user",
+                "content": (
+                    f"{user_name} a partagé une image sans texte additionnel.\n"
+                    "Veuillez commenter cette image en vous basant uniquement sur l'analyse fournie ci-dessus."
+                )
+            }
+
+        # Assembler les messages
+        messages = [prompt_personality, analysis_message] + conversation_history + [user_message]
+
+        # Appel à GPT-4o Mini pour réagir à la question et à l'analyse
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=450
+        )
+
+        if response:
+            reply = response.choices[0].message.content
+            logging.info(f"Réponse de GPT-4o Mini : {reply}")
+            return reply
+        else:
+            return None
+
+    except OpenAIError as e:
+        logger.error(f"Erreur lors de la génération de réponse avec GPT-4o Mini: {e}")
+        return None
+
 async def read_text_file(attachment):
     file_bytes = await attachment.read()
     return file_bytes.decode('utf-8')
@@ -230,7 +361,7 @@ async def summarize_text(text, max_tokens=50):
     summary_prompt = f"Résumé :\n\n{text}\n\nRésumé:"
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": summary_prompt}
@@ -275,10 +406,10 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
 
     try:
         response = await openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=conversation_history + [message_to_send],
             max_tokens=400,
-            temperature=1.1
+            temperature=1.0
         )
 
         if response:
@@ -343,20 +474,20 @@ async def on_ready():
 
 @client_discord.event
 async def on_message(message):
-
     global conversation_history
 
     # Vérifier si le message provient du canal autorisé
     if message.channel.id != chatgpt_channel_id:
         return
 
-    # Vérifier si l'auteur du message est le bot lui-même
+    # Ignorer les messages du bot lui-même
     if message.author == client_discord.user:
         return
 
     user_text = message.content.strip()
     image_data = None
     file_content = None
+    attachment_filename = None
 
     # Vérifier si le message est la commande de réinitialisation
     if user_text.lower() == "!reset_history":
@@ -373,11 +504,14 @@ async def on_message(message):
         save_conversation_history()
         await message.channel.send("✅ L'historique des conversations a été réinitialisé.")
         logger.info(f"Historique des conversations réinitialisé par {message.author}.")
-
         return  # Arrêter le traitement du message après la réinitialisation
 
     # Extensions de fichiers autorisées
     allowed_extensions = ['.txt', '.py', '.html', '.css', '.js']
+
+    # Variables pour stocker si le message contient une image et/ou un fichier
+    has_image = False
+    has_file = False
 
     # Vérifier s'il y a une pièce jointe
     if message.attachments:
@@ -385,15 +519,64 @@ async def on_message(message):
             # Vérifier si c'est un fichier avec une extension autorisée
             if any(attachment.filename.endswith(ext) for ext in allowed_extensions):
                 file_content = await read_text_file(attachment)
+                attachment_filename = attachment.filename
                 break
             # Vérifier si c'est une image
             elif attachment.content_type in ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff']:
                 image_data = await encode_image_from_attachment(attachment, mode='high')
                 break
 
+    # Si une image est présente, la traiter
+    if image_data:
+        has_user_text = has_text(user_text)
+        user_text_to_use = user_text if has_user_text else None
+
+        # Étape 1 : GPT-4o analyse l'image, potentiellement guidée par le texte de l'utilisateur
+        analysis = await call_gpt4o_for_image_analysis(image_data, user_text=user_text_to_use)
+
+        if analysis:
+            # Étape 2 : GPT-4o Mini réagit à la question et à l'analyse
+            reply = await call_gpt4o_mini_with_analysis(analysis, message.author.name, user_text, has_user_text)
+            if reply:
+                await message.channel.send(reply)
+
+                # **Ajout des messages à l'historique**
+                # Créer un message utilisateur modifié indiquant qu'une image a été postée
+                if has_user_text:
+                    user_message_content = f"{user_text} (a posté une image.)"
+                else:
+                    user_message_content = "Une image a été postée."
+
+                user_message = {
+                    "role": "user",
+                    "content": user_message_content
+                }
+
+                # Ajouter le message utilisateur à l'historique
+                await add_to_conversation_history(user_message)
+
+                # Créer le message assistant avec la réponse de GPT-4o Mini
+                assistant_message = {
+                    "role": "assistant",
+                    "content": reply
+                }
+
+                # Ajouter le message assistant à l'historique
+                await add_to_conversation_history(assistant_message)
+            else:
+                await message.channel.send("Désolé, je n'ai pas pu générer une réponse.")
+        else:
+            await message.channel.send("Désolé, je n'ai pas pu analyser l'image.")
+        # Après traitement de l'image, ne pas continuer
+        return
+
     # Ajouter le contenu du fichier à la requête si présent
     if file_content:
         user_text += f"\nContenu du fichier {attachment.filename}:\n{file_content}"
+
+    # Vérifier si le texte n'est pas vide après ajout du contenu du fichier
+    if not has_text(user_text):
+        return  # Ne pas appeler l'API si le texte est vide
 
     # Appeler l'API OpenAI
     result = await call_openai_api(user_text, message.author.name, image_data)
@@ -402,6 +585,10 @@ async def on_message(message):
         await message.channel.send(reply)
 
 async def add_to_conversation_history(new_message):
+
+    # Exclure les messages d'analyse de l'image
+    if new_message.get("role") == "system" and "L'analyse de l'image fournie est la suivante :" in new_message.get("content", ""):
+        return  # Ne pas ajouter à l'historique
 
     # Extraire le texte du message
     if isinstance(new_message["content"], list) and len(new_message["content"]) > 0:
@@ -431,7 +618,7 @@ async def add_to_conversation_history(new_message):
         save_conversation_history()
 
     # Synthétiser les messages les plus anciens si l'historique est trop long
-    if len(conversation_history) > 30:
+    if len(conversation_history) > 1000:
         # Synthétiser les 20 plus anciens messages (exclure la personnalité et les 10 plus récents)
         messages_to_summarize = conversation_history[1:21]  # Exclure le premier (personnalité)
         texts = [extract_text_from_message(msg) for msg in messages_to_summarize]
@@ -450,7 +637,7 @@ async def add_to_conversation_history(new_message):
 
         # Calculer le coût de la synthèse
         input_tokens, output_tokens, total_cost = calculate_cost(usage)
-        logging.info(f"30 messages dans l'historique. Synthèse effectuée. Coût : ${total_cost:.4f} / Input: {input_tokens} / Output: {output_tokens} / Total: {input_tokens + output_tokens}")
+        logging.info(f"1000 messages dans l'historique. Synthèse effectuée. Coût : ${total_cost:.4f} / Input: {input_tokens} / Output: {output_tokens} / Total: {input_tokens + output_tokens}")
 
         # Remplacer l'ancienne synthèse par la nouvelle
         # Conserver la personnalité et la nouvelle synthèse
