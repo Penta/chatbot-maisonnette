@@ -22,7 +22,7 @@ CONVERSATION_HISTORY_FILE = os.getenv('CONVERSATION_HISTORY_FILE', 'conversation
 # Initialiser le client OpenAI asynchrone ici
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-BOT_VERSION = "2.2.0"
+BOT_VERSION = "2.3.0"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -63,7 +63,12 @@ def load_conversation_history():
     if os.path.isfile(CONVERSATION_HISTORY_FILE):
         try:
             with open(CONVERSATION_HISTORY_FILE, 'r', encoding='utf-8') as f:
-                conversation_history = json.load(f)
+                loaded_history = json.load(f)
+                # Exclure uniquement le PERSONALITY_PROMPT
+                conversation_history = [
+                    msg for msg in loaded_history
+                    if not (msg.get("role") == "system" and msg.get("content") == PERSONALITY_PROMPT)
+                ]
             logger.info(f"Historique chargé depuis {CONVERSATION_HISTORY_FILE}")
         except Exception as e:
             logger.error(f"Erreur lors du chargement de l'historique : {e}")
@@ -77,6 +82,7 @@ def has_text(text):
     """
     return bool(text.strip())
 
+# Fonction de sauvegarde de l'historique
 def save_conversation_history():
     try:
         with open(CONVERSATION_HISTORY_FILE, 'w', encoding='utf-8') as f:
@@ -147,21 +153,6 @@ def resize_image(image_bytes, mode='high', attachment_filename=None):
     except Exception as e:
         logger.error(f"Error resizing image: {e}")
         raise
-
-def is_long_special_text(text):
-    # Vérifier que le texte est bien une chaîne de caractères
-    if not isinstance(text, str):
-        logger.error(f"Erreur : Le contenu n'est pas une chaîne valide. Contenu : {text}")
-        return False
-
-    # Compter le nombre de tokens dans le texte
-    token_count = len(encoding.encode(text))
-
-    # Définir un seuil pour considérer le texte comme long
-    if token_count > 200:
-        logger.info("Texte long détecté : %d tokens", token_count)
-        return True
-    return False
 
 def extract_text_from_message(message):
     content = message.get("content", "")
@@ -243,13 +234,69 @@ def is_relevant_message(message):
 
     return True
 
+async def summarize_conversation(messages_to_summarize):
+    try:
+        # Préparer le prompt pour la synthèse
+        prompt = "Synthétise les messages suivants en un résumé concis de maximum 1000 tokens :\n"
+        for msg in messages_to_summarize:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            prompt += f"{role.capitalize()}: {content}\n"
+
+        # Appel à l'API OpenAI pour générer la synthèse
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Tu es un assistant utile qui résume les conversations."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            temperature=0.5
+        )
+
+        if response and response.choices:
+            summary = response.choices[0].message.content.strip()
+            logger.info("Synthèse générée avec succès.")
+
+            # Calcul et log du coût de la synthèse
+            if hasattr(response, 'usage') and response.usage:
+                usage = {
+                    'prompt_tokens': response.usage.prompt_tokens,
+                    'completion_tokens': response.usage.completion_tokens
+                }
+                input_tokens, output_tokens, total_cost = calculate_cost(usage, model='gpt-4o-mini')
+                logger.info(
+                    f"Coût : ${total_cost:.6f}, Input Tokens: {input_tokens}, Output Tokens: {output_tokens}."
+                )
+            else:
+                logger.warning("Informations d'utilisation non disponibles pour le calcul du coût de la synthèse.")
+
+            return summary
+        else:
+            logger.error("Aucune réponse reçue lors de la synthèse.")
+            return None
+
+    except OpenAIError as e:
+        logger.error(f"Erreur lors de la synthèse : {e}")
+        return None
+
 async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high'):
     try:
         # Préparer la requête pour GPT-4o
         if user_text:
-            prompt = f"Analyse cette image en tenant compte de la description suivante : \"{user_text}\"."
+            prompt = (
+                f"Analyse cette image de manière extrêmement précise en tenant compte de la description suivante : \"{user_text}\"."
+                "Si des personnages sont présents, décris avec détails leurs vêtements, accessoires et physique."
+                "Décris leurs courbes, leur taille, leur poids, leurs mensurations."
+                "Décris comment ils intéragissent avec leur environnement et avec les autres personnages."
+        )
         else:
-            prompt = "Analyse cette image s'il te plaît."
+            prompt = (
+                "Analyse cette image de manière extrêmement précise s'il te plaît."
+                "Si des personnages sont présents, décris avec détails leurs vêtements, accessoires et physique."
+                "Décris leurs courbes, leur taille, leur poids, leurs mensurations."
+                "Décris comment ils intéragissent avec leur environnement et avec les autres personnages."
+            )
 
         message_to_send = {
             "role": "user",
@@ -314,7 +361,9 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
                 "role": "user",
                 "content": (
                     f"{user_name} a écrit : '{user_question}'.\n"
-                    "Veuillez répondre en vous basant uniquement sur l'analyse fournie ci-dessus."
+                    "Réponds en te basant uniquement sur l'analyse fournie.\
+                    Mais ne mentionne pas que tu viens de lire une analyse pré-existante de l'image.\
+                    Fais comme si c'est toi qui as analysé l'image."
                 )
             }
         else:
@@ -323,12 +372,18 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
                 "role": "user",
                 "content": (
                     f"{user_name} a partagé une image sans texte additionnel.\n"
-                    "Veuillez commenter cette image en vous basant uniquement sur l'analyse fournie ci-dessus."
+                    "Commente globalement l'image en te basant sur l'analyse fournie.\
+                    Réagis comme quelqu'un avec ta personnalité réagirait ! Ne fais pas juste un bête commentaire comme un robot.\
+                    Mais ne mentionne pas que tu viens de lire une analyse pré-existante de l'image.\
+                    Fais comme si c'est toi qui as analysé l'image."
                 )
             }
 
-        # Assembler les messages
-        messages = [prompt_personality, analysis_message] + conversation_history + [user_message]
+        # Assembler les messages avec le prompt de personnalité en premier
+        messages = [
+            {"role": "system", "content": PERSONALITY_PROMPT},
+            analysis_message
+        ] + conversation_history + [user_message]
 
         # Appel à GPT-4o Mini pour réagir à la question et à l'analyse
         response = await openai_client.chat.completions.create(
@@ -357,33 +412,6 @@ async def encode_image_from_attachment(attachment, mode='high'):
     resized_image = resize_image(image_data, mode=mode, attachment_filename=attachment.filename)
     return base64.b64encode(resized_image).decode('utf-8')
 
-async def summarize_text(text, max_tokens=50):
-    summary_prompt = f"Résumé :\n\n{text}\n\nRésumé:"
-    try:
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": summary_prompt}
-            ],
-            max_tokens=max_tokens  # Limitez les tokens pour obtenir un résumé court
-        )
-        summary = response.choices[0].message.content.strip()
-        if hasattr(response, 'usage'):
-            usage_dict = {
-                'prompt_tokens': response.usage.prompt_tokens,
-                'completion_tokens': response.usage.completion_tokens
-            }
-        else:
-            usage_dict = {}
-        return summary, usage_dict
-    except OpenAIError as e:
-        logger.error(f"Error summarizing text: {e}")
-        return text, {}
-    except AttributeError as e:
-        logger.error(f"Attribute error during summarization: {e}")
-        return text, {}
-
 async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
 
     # Préparer le contenu pour l'appel API
@@ -404,10 +432,15 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
             }
         })
 
+    # Assembler les messages avec le prompt de personnalité en premier
+    messages = [
+        {"role": "system", "content": PERSONALITY_PROMPT}
+    ] + conversation_history + [message_to_send]
+
     try:
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=conversation_history + [message_to_send],
+            messages=messages,
             max_tokens=400,
             temperature=1.0
         )
@@ -446,13 +479,8 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
 async def on_ready():
     logger.info(f'Bot connecté en tant que {client_discord.user}')
 
-    # Ajouter la personnalité de l'IA à l'historique au démarrage
     if not conversation_history:
-        conversation_history.append({
-            "role": "system",
-            "content": PERSONALITY_PROMPT
-        })
-        save_conversation_history()
+        logger.info("Aucun historique trouvé. L'historique commence vide.")
 
     # Envoyer un message de version dans le canal Discord
     channel = client_discord.get_channel(chatgpt_channel_id)
@@ -496,11 +524,7 @@ async def on_message(message):
             await message.channel.send("❌ Vous n'avez pas la permission d'utiliser cette commande.")
             return
 
-        # Réinitialiser l'historique en conservant uniquement le prompt de personnalité
-        conversation_history = [{
-            "role": "system",
-            "content": PERSONALITY_PROMPT
-        }]
+        conversation_history = []
         save_conversation_history()
         await message.channel.send("✅ L'historique des conversations a été réinitialisé.")
         logger.info(f"Historique des conversations réinitialisé par {message.author}.")
@@ -596,60 +620,44 @@ async def on_message(message):
         await message.channel.send(reply)
 
 async def add_to_conversation_history(new_message):
+    global conversation_history
 
-    # Extraire le texte du message
-    if isinstance(new_message["content"], list) and len(new_message["content"]) > 0:
-        content_text = new_message["content"][0].get("text", "")
-    else:
-        content_text = new_message.get("content", "")
-
-    if not isinstance(content_text, str):
-        logger.error(f"Erreur : Le contenu n'est pas une chaîne valide. Contenu : {content_text}")
+    # Ne pas ajouter le PERSONALITY_PROMPT à l'historique
+    if new_message.get("role") == "system" and new_message.get("content") == PERSONALITY_PROMPT:
+        logger.debug("PERSONALITY_PROMPT système non ajouté à l'historique.")
         return
-
-    if is_long_special_text(content_text):
-        summary, usage = await summarize_text(content_text)
-        new_message = {
-            "role": new_message["role"],
-            "content": summary
-        }
-
-        # Inclure le coût du résumé dans le calcul total
-        input_tokens, output_tokens, total_cost = calculate_cost(usage)
-        logging.info(f"Coût du résumé : ${total_cost:.4f} / Input: {input_tokens} / Output: {output_tokens} / Total: {input_tokens + output_tokens}")
 
     # Filtrer les messages pertinents pour l'historique
     if is_relevant_message(new_message):
         # Ajouter le message à l'historique
         conversation_history.append(new_message)
         save_conversation_history()
+        logger.debug(f"Message ajouté à l'historique. Taille actuelle : {len(conversation_history)}")
 
-    # Synthétiser les messages les plus anciens si l'historique est trop long
-    if len(conversation_history) > 1000:
-        # Synthétiser les 20 plus anciens messages (exclure la personnalité et les 10 plus récents)
-        messages_to_summarize = conversation_history[1:21]  # Exclure le premier (personnalité)
-        texts = [extract_text_from_message(msg) for msg in messages_to_summarize]
-        texts = [text for text in texts if text]
+        # Vérifier si la limite de 150 messages est atteinte
+        if len(conversation_history) > 150:
+            logger.info("Limite de 150 messages atteinte. Démarrage de la synthèse des messages les plus anciens.")
+            
+            # Extraire les 50 messages les plus anciens pour la synthèse
+            messages_to_summarize = conversation_history[:50]
+            
+            # Générer la synthèse
+            summary = await summarize_conversation(messages_to_summarize)
+            
+            if summary:
+                # Créer un message de synthèse
+                summary_message = {
+                    "role": "system",
+                    "content": f"Synthèse des précédents messages : {summary}"
+                }
+                
+                # Remplacer les 50 premiers messages par la synthèse
+                conversation_history = [summary_message] + conversation_history[50:]
+                save_conversation_history()
+                logger.info("Synthèse ajoutée à l'historique et les 50 anciens messages ont été supprimés.")
+            else:
+                logger.error("Échec de la génération de la synthèse. L'historique n'a pas été modifié.")
 
-        combined_text = ' '.join(texts)
-
-        combined_token_count = len(encoding.encode(combined_text))
-        if combined_token_count > 15000:
-            encoded_text = encoding.encode(combined_text)
-            truncated_text = encoding.decode(encoded_text[:500])
-            combined_text = truncated_text
-            logger.info(f"Combined text tronqué à 15 000 tokens.")
-
-        synthesized_summary, usage = await summarize_text(combined_text, max_tokens=400)
-
-        # Calculer le coût de la synthèse
-        input_tokens, output_tokens, total_cost = calculate_cost(usage)
-        logging.info(f"1000 messages dans l'historique. Synthèse effectuée. Coût : ${total_cost:.4f} / Input: {input_tokens} / Output: {output_tokens} / Total: {input_tokens + output_tokens}")
-
-        # Remplacer l'ancienne synthèse par la nouvelle
-        # Conserver la personnalité et la nouvelle synthèse
-        conversation_history[:] = [conversation_history[0], {"role": "system", "content": synthesized_summary}] + conversation_history[21:]
-        save_conversation_history()
 
 # Démarrer le bot Discord
 client_discord.run(DISCORD_TOKEN)
