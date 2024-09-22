@@ -535,6 +535,14 @@ async def on_message(message):
         analysis = await call_gpt4o_for_image_analysis(image_data, user_text=user_text_to_use)
 
         if analysis:
+
+            # **Ajouter l'analyse à l'historique avant de réagir avec GPT-4o Mini**
+            analysis_message = {
+                "role": "system",
+                "content": f"Analyse de l'image : {analysis}"
+            }
+            await add_to_conversation_history(analysis_message)
+
             # Étape 2 : GPT-4o Mini réagit à la question et à l'analyse
             reply = await call_gpt4o_mini_with_analysis(analysis, message.author.name, user_text, has_user_text)
             if reply:
@@ -545,7 +553,10 @@ async def on_message(message):
                 if has_user_text:
                     user_message_content = f"{user_text} (a posté une image.)"
                 else:
-                    user_message_content = "Une image a été postée."
+                    user_message_content = (
+                        "Une image a été postée, mais elle n'est pas disponible pour analyse directe. "
+                        "Veuillez vous baser uniquement sur l'analyse fournie."
+                    )
 
                 user_message = {
                     "role": "user",
@@ -585,10 +596,6 @@ async def on_message(message):
         await message.channel.send(reply)
 
 async def add_to_conversation_history(new_message):
-
-    # Exclure les messages d'analyse de l'image
-    if new_message.get("role") == "system" and "L'analyse de l'image fournie est la suivante :" in new_message.get("content", ""):
-        return  # Ne pas ajouter à l'historique
 
     # Extraire le texte du message
     if isinstance(new_message["content"], list) and len(new_message["content"]) > 0:
