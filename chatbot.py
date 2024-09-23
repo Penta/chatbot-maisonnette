@@ -23,7 +23,7 @@ BOT_NAME = os.getenv('BOT_NAME', 'ChatBot')
 # Initialiser le client OpenAI asynchrone ici
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-BOT_VERSION = "2.4.0"
+BOT_VERSION = "2.4.1"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -235,52 +235,6 @@ def is_relevant_message(message):
 
     return True
 
-async def summarize_conversation(messages_to_summarize):
-    try:
-        # Préparer le prompt pour la synthèse
-        prompt = "Synthétise les messages suivants en un résumé concis de maximum 1000 tokens :\n"
-        for msg in messages_to_summarize:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            prompt += f"{role.capitalize()}: {content}\n"
-
-        # Appel à l'API OpenAI pour générer la synthèse
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Tu es un assistant utile qui résume les conversations."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.5
-        )
-
-        if response and response.choices:
-            summary = response.choices[0].message.content.strip()
-            logger.info("Synthèse générée avec succès.")
-
-            # Calcul et log du coût de la synthèse
-            if hasattr(response, 'usage') and response.usage:
-                usage = {
-                    'prompt_tokens': response.usage.prompt_tokens,
-                    'completion_tokens': response.usage.completion_tokens
-                }
-                input_tokens, output_tokens, total_cost = calculate_cost(usage, model='gpt-4o-mini')
-                logger.info(
-                    f"Coût : ${total_cost:.6f}, Input Tokens: {input_tokens}, Output Tokens: {output_tokens}."
-                )
-            else:
-                logger.warning("Informations d'utilisation non disponibles pour le calcul du coût de la synthèse.")
-
-            return summary
-        else:
-            logger.error("Aucune réponse reçue lors de la synthèse.")
-            return None
-
-    except OpenAIError as e:
-        logger.error(f"Erreur lors de la synthèse : {e}")
-        return None
-
 async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high'):
     try:
         # Préparer la requête pour GPT-4o
@@ -342,6 +296,27 @@ async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high
     except OpenAIError as e:
         logger.error(f"Erreur lors de l'analyse de l'image avec GPT-4o: {e}")
         return None
+
+async def remove_old_image_analyses():
+    global conversation_history
+    max_messages_after = 6  # Nombre maximum de messages après une analyse d'image
+
+    # Parcourir l'historique en identifiant les analyses d'images
+    indices_to_remove = []
+    for idx, msg in enumerate(conversation_history):
+        if msg.get("role") == "system" and msg.get("content", "").startswith("Analyse de l'image :"):
+            # Calculer le nombre de messages après ce message
+            messages_after = len(conversation_history) - idx - 1
+            if messages_after > max_messages_after:
+                indices_to_remove.append(idx)
+
+    # Supprimer les analyses d'images identifiées en commençant par la fin pour éviter les décalages d'indices
+    for idx in reversed(indices_to_remove):
+        removed_msg = conversation_history.pop(idx)
+        logger.info(f"Analyse d'image supprimée de l'historique : {removed_msg.get('content')[:50]}...")
+    
+    if indices_to_remove:
+        save_conversation_history()
 
 async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question, has_text):
     try:
@@ -647,30 +622,20 @@ async def add_to_conversation_history(new_message):
         save_conversation_history()
         logger.debug(f"Message ajouté à l'historique. Taille actuelle : {len(conversation_history)}")
 
+        # Gérer la suppression des analyses d'images après 6 messages
+        await remove_old_image_analyses()
+
         # Vérifier si la limite de 150 messages est atteinte
         if len(conversation_history) > 150:
-            logger.info("Limite de 150 messages atteinte. Démarrage de la synthèse des messages les plus anciens.")
-            
-            # Extraire les 50 messages les plus anciens pour la synthèse
-            messages_to_summarize = conversation_history[:50]
-            
-            # Générer la synthèse
-            summary = await summarize_conversation(messages_to_summarize)
-            
-            if summary:
-                # Créer un message de synthèse
-                summary_message = {
-                    "role": "system",
-                    "content": f"Synthèse des précédents messages : {summary}"
-                }
-                
-                # Remplacer les 50 premiers messages par la synthèse
-                conversation_history = [summary_message] + conversation_history[50:]
-                save_conversation_history()
-                logger.info("Synthèse ajoutée à l'historique et les 50 anciens messages ont été supprimés.")
-            else:
-                logger.error("Échec de la génération de la synthèse. L'historique n'a pas été modifié.")
+            logger.info("Limite de 150 messages atteinte.")
 
+            # Calculer combien de messages doivent être supprimés
+            excess_messages = len(conversation_history) - 150
+            if excess_messages > 0:
+                # Supprimer les messages les plus anciens
+                del conversation_history[:excess_messages]
+                save_conversation_history()
+                logger.info(f"{excess_messages} messages les plus anciens ont été supprimés pour maintenir l'historique à 150 messages.")
 
 # Démarrer le bot Discord
 client_discord.run(DISCORD_TOKEN)
