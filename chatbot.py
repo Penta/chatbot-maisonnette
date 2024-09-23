@@ -18,11 +18,12 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 DISCORD_CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
 PERSONALITY_PROMPT_FILE = os.getenv('PERSONALITY_PROMPT_FILE', 'personality_prompt.txt')
 CONVERSATION_HISTORY_FILE = os.getenv('CONVERSATION_HISTORY_FILE', 'conversation_history.json')
+BOT_NAME = os.getenv('BOT_NAME', 'ChatBot')
 
 # Initialiser le client OpenAI asynchrone ici
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-BOT_VERSION = "2.3.0"
+BOT_VERSION = "2.4.0"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -43,7 +44,7 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter(log_format))
 
-logger = logging.getLogger("chatbot")
+logger = logging.getLogger(BOT_NAME)
 logger.setLevel("INFO")
 
 logging.getLogger('').addHandler(console)
@@ -344,16 +345,14 @@ async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high
 
 async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question, has_text):
     try:
-        # Préparer le message avec le prompt de personnalité et l'historique
-        prompt_personality = {"role": "system", "content": PERSONALITY_PROMPT}
-
-        # Préparer le contexte de l'analyse
-        analysis_message = {
-            "role": "system",
-            "content": (
-                f"L'analyse de l'image fournie est la suivante :\n{analysis_text}\n\n"
-            )
-        }
+        # Préparer le message avec le prompt de personnalité et l'analyse
+        messages = [
+            {"role": "system", "content": PERSONALITY_PROMPT},
+            {
+                "role": "system",
+                "content": f"L'analyse de l'image fournie est la suivante :\n{analysis_text}\n\n"
+            }
+        ]
 
         if has_text:
             # Préparer le message utilisateur avec le texte
@@ -361,31 +360,26 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
                 "role": "user",
                 "content": (
                     f"{user_name} a écrit : '{user_question}'.\n"
-                    "Réponds en te basant uniquement sur l'analyse fournie.\
-                    Mais ne mentionne pas que tu viens de lire une analyse pré-existante de l'image.\
-                    Fais comme si c'est toi qui as analysé l'image."
+                    "Réponds en te basant sur l'analyse, avec ta personnalité. "
+                    "Ne mentionne pas explicitement que l'analyse est pré-existante, fais comme si tu l'avais faite toi-même."
                 )
             }
         else:
-            # Préparer une instruction pour commenter l'image
+            # Préparer une instruction pour commenter l'image sans texte
             user_message = {
                 "role": "user",
                 "content": (
                     f"{user_name} a partagé une image sans texte additionnel.\n"
-                    "Commente globalement l'image en te basant sur l'analyse fournie.\
-                    Réagis comme quelqu'un avec ta personnalité réagirait ! Ne fais pas juste un bête commentaire comme un robot.\
-                    Mais ne mentionne pas que tu viens de lire une analyse pré-existante de l'image.\
-                    Fais comme si c'est toi qui as analysé l'image."
+                    "Commente l'image en te basant sur l'analyse, avec ta personnalité. "
+                    "Ne mentionne pas que l'analyse a été fournie à l'avance, réagis comme si tu l'avais toi-même effectuée."
                 )
             }
 
-        # Assembler les messages avec le prompt de personnalité en premier
-        messages = [
-            {"role": "system", "content": PERSONALITY_PROMPT},
-            analysis_message
-        ] + conversation_history + [user_message]
+        # Inclure l'historique de conversation avant d'ajouter le message utilisateur
+        messages += conversation_history
+        messages.append(user_message)
 
-        # Appel à GPT-4o Mini pour réagir à la question et à l'analyse
+        # Appel à GPT-4o Mini pour répondre
         response = await openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
@@ -477,7 +471,7 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
 
 @client_discord.event
 async def on_ready():
-    logger.info(f'Bot connecté en tant que {client_discord.user}')
+    logger.info(f'{BOT_NAME} connecté en tant que {client_discord.user}')
 
     if not conversation_history:
         logger.info("Aucun historique trouvé. L'historique commence vide.")
@@ -487,8 +481,8 @@ async def on_ready():
     if channel:
         try:
             embed = discord.Embed(
-                title="Bot Démarré",
-                description=f"🎉 Le ChatBot est en ligne ! Version {BOT_VERSION}",
+                title=f"Bot Démarré",
+                description=f"🎉 {BOT_NAME} est en ligne ! Version {BOT_VERSION}",
                 color=0x00ff00  # Vert
             )
             await channel.send(embed=embed)
@@ -555,53 +549,72 @@ async def on_message(message):
         has_user_text = has_text(user_text)
         user_text_to_use = user_text if has_user_text else None
 
-        # Étape 1 : GPT-4o analyse l'image, potentiellement guidée par le texte de l'utilisateur
-        analysis = await call_gpt4o_for_image_analysis(image_data, user_text=user_text_to_use)
+        # **Étape 1 : Envoyer un message temporaire indiquant que l'image est en cours d'analyse**
+        temp_msg = await message.channel.send(f"*{BOT_NAME} observe l'image...*")
 
-        if analysis:
+        try:
+            # Étape 2 : GPT-4o analyse l'image, potentiellement guidée par le texte de l'utilisateur
+            analysis = await call_gpt4o_for_image_analysis(image_data, user_text=user_text_to_use)
 
-            # **Ajouter l'analyse à l'historique avant de réagir avec GPT-4o Mini**
-            analysis_message = {
-                "role": "system",
-                "content": f"Analyse de l'image : {analysis}"
-            }
-            await add_to_conversation_history(analysis_message)
+            if analysis:
 
-            # Étape 2 : GPT-4o Mini réagit à la question et à l'analyse
-            reply = await call_gpt4o_mini_with_analysis(analysis, message.author.name, user_text, has_user_text)
-            if reply:
-                await message.channel.send(reply)
+                # **Ajouter l'analyse à l'historique avant de réagir avec GPT-4o Mini**
+                analysis_message = {
+                    "role": "system",
+                    "content": f"Analyse de l'image : {analysis}"
+                }
+                await add_to_conversation_history(analysis_message)
 
-                # **Ajout des messages à l'historique**
-                # Créer un message utilisateur modifié indiquant qu'une image a été postée
-                if has_user_text:
-                    user_message_content = f"{user_text} (a posté une image.)"
+                # Étape 3 : GPT-4o Mini réagit à la question et à l'analyse
+                reply = await call_gpt4o_mini_with_analysis(analysis, message.author.name, user_text, has_user_text)
+                if reply:
+                    # **Étape 4 : Supprimer le message temporaire**
+                    await temp_msg.delete()
+
+                    # **Étape 5 : Envoyer la réponse finale**
+                    await message.channel.send(reply)
+
+                    # **Ajout des messages à l'historique**
+                    # Créer un message utilisateur modifié indiquant qu'une image a été postée
+                    if has_user_text:
+                        user_message_content = f"{user_text} (a posté une image.)"
+                    else:
+                        user_message_content = (
+                            "Une image a été postée, mais elle n'est pas disponible pour analyse directe. "
+                            "Veuillez vous baser uniquement sur l'analyse fournie."
+                        )
+
+                    user_message = {
+                        "role": "user",
+                        "content": user_message_content
+                    }
+
+                    # Ajouter le message utilisateur à l'historique
+                    await add_to_conversation_history(user_message)
+
+                    # Créer le message assistant avec la réponse de GPT-4o Mini
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": reply
+                    }
+
+                    # Ajouter le message assistant à l'historique
+                    await add_to_conversation_history(assistant_message)
                 else:
-                    user_message_content = (
-                        "Une image a été postée, mais elle n'est pas disponible pour analyse directe. "
-                        "Veuillez vous baser uniquement sur l'analyse fournie."
-                    )
-
-                user_message = {
-                    "role": "user",
-                    "content": user_message_content
-                }
-
-                # Ajouter le message utilisateur à l'historique
-                await add_to_conversation_history(user_message)
-
-                # Créer le message assistant avec la réponse de GPT-4o Mini
-                assistant_message = {
-                    "role": "assistant",
-                    "content": reply
-                }
-
-                # Ajouter le message assistant à l'historique
-                await add_to_conversation_history(assistant_message)
+                    # **Étape 4 : Supprimer le message temporaire en cas d'échec de génération de réponse**
+                    await temp_msg.delete()
+                    await message.channel.send("Désolé, je n'ai pas pu générer une réponse.")
             else:
-                await message.channel.send("Désolé, je n'ai pas pu générer une réponse.")
-        else:
-            await message.channel.send("Désolé, je n'ai pas pu analyser l'image.")
+                # **Étape 4 : Supprimer le message temporaire en cas d'échec d'analyse**
+                await temp_msg.delete()
+                await message.channel.send("Désolé, je n'ai pas pu analyser l'image.")
+
+        except Exception as e:
+            # **Étape 4 : Supprimer le message temporaire en cas d'erreur**
+            await temp_msg.delete()
+            await message.channel.send("Une erreur est survenue lors du traitement de l'image.")
+            logger.error(f"Error during image processing: {e}")
+
         # Après traitement de l'image, ne pas continuer
         return
 
