@@ -23,7 +23,7 @@ BOT_NAME = os.getenv('BOT_NAME', 'ChatBot')
 # Initialiser le client OpenAI asynchrone ici
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-BOT_VERSION = "2.4.2"
+BOT_VERSION = "2.4.3"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -58,6 +58,10 @@ intents.message_content = True  # Activer l'intent pour les contenus de message
 
 # Liste pour stocker l'historique des conversations
 conversation_history = []
+
+# Variable globale pour suivre la position de la dernière analyse
+last_analysis_index = None
+messages_since_last_analysis = 0
 
 def load_conversation_history():
     global conversation_history
@@ -202,57 +206,22 @@ def calculate_cost(usage, model='gpt-4o-mini'):
 
     return input_tokens, output_tokens, total_cost
 
-def is_relevant_message(message):
-    content = message["content"]
-
-    if isinstance(content, list):
-        content = ''.join(part.get('text', '') for part in content if 'text' in part)
-
-    if len(content.strip()) < 5:
-        return False
-
-    discord_emoji_pattern = r'<a?:\w+:\d+>'
-
-    def is_discord_emoji(part):
-        return bool(re.fullmatch(discord_emoji_pattern, part))
-
-    tokens = re.split(discord_emoji_pattern, content)
-    emojis_only = True
-    standard_emojis = [char for char in content if emoji.is_emoji(char)]
-    discord_emojis = re.findall(discord_emoji_pattern, content)
-
-    text_without_emojis = re.sub(discord_emoji_pattern, '', content)
-    for char in text_without_emojis:
-        if not char.isspace() and not emoji.is_emoji(char):
-            emojis_only = False
-            break
-
-    if len(standard_emojis) + len(discord_emojis) == 0:
-        emojis_only = False
-
-    if emojis_only and len(content.strip()) > 0:
-        return False
-
-    return True
-
 async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high'):
     try:
         # Préparer la requête pour GPT-4o
         if user_text:
             prompt = (
-                f"Tu es un styliste professionnel spécialisé dans l'analyse de la silhouette et des vêtements. "
-                f"Analyse cette image de manière extrêmement précise en tenant compte de la description suivante : \"{user_text}\". "
-                "Si des personnages sont présents, décris-les de A à Z, des pieds à la tête. "
-                "Mentionne leurs vêtements, accessoires, coiffure, couleur de peau, traits du visage, leur posture, et tout autre détail physique visible. "
-                "Inclut également une estimation générale de leurs mensurations, comme la taille, la corpulence, et autres attributs physiques visibles qui pourraient influencer la conception des vêtements."
+                f"Analyse cette image de manière extrêmement précise en tenant compte de la description suivante : \"{user_text}\"."
+                "Si des personnages sont présents, décris avec détails leurs vêtements, accessoires et physique."
+                "Décris leurs courbes, leur taille, leur poids, leurs mensurations."
+                "Décris comment ils intéragissent avec leur environnement et avec les autres personnages."
         )
         else:
             prompt = (
-                "Tu es un styliste professionnel spécialisé dans l'analyse de la silhouette et des vêtements. "
-                "Analyse cette image de manière extrêmement précise s'il te plaît. "
-                "Si des personnages sont présents, décris-les de A à Z, des pieds à la tête. "
-                "Mentionne leurs vêtements, accessoires, coiffure, couleur de peau, traits du visage, leur posture, et tout autre détail physique visible. "
-                "Inclut également une estimation générale de leurs mensurations, comme la taille, la corpulence, et autres attributs physiques visibles qui pourraient influencer la conception des vêtements."
+                "Analyse cette image de manière extrêmement précise s'il te plaît."
+                "Si des personnages sont présents, décris avec détails leurs vêtements, accessoires et physique."
+                "Décris leurs courbes, leur taille, leur poids, leurs mensurations."
+                "Décris comment ils intéragissent avec leur environnement et avec les autres personnages."
             )
 
         message_to_send = {
@@ -299,26 +268,31 @@ async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high
         logger.error(f"Erreur lors de l'analyse de l'image avec GPT-4o: {e}")
         return None
 
-async def remove_old_image_analyses():
-    global conversation_history
-    max_messages_after = 6  # Nombre maximum de messages après une analyse d'image
+async def remove_old_image_analyses(new_analysis=False):
+    global conversation_history, last_analysis_index, messages_since_last_analysis
 
-    # Parcourir l'historique en identifiant les analyses d'images
-    indices_to_remove = []
-    for idx, msg in enumerate(conversation_history):
-        if msg.get("role") == "system" and msg.get("content", "").startswith("Analyse de l'image :"):
-            # Calculer le nombre de messages après ce message
-            messages_after = len(conversation_history) - idx - 1
-            if messages_after > max_messages_after:
-                indices_to_remove.append(idx)
-
-    # Supprimer les analyses d'images identifiées en commençant par la fin pour éviter les décalages d'indices
-    for idx in reversed(indices_to_remove):
-        removed_msg = conversation_history.pop(idx)
-        logger.info(f"Analyse d'image supprimée de l'historique : {removed_msg.get('content')[:50]}...")
-    
-    if indices_to_remove:
+    if new_analysis:
+        logger.debug("Nouvelle analyse détectée. Suppression des anciennes analyses.")
+        # Lorsqu'une nouvelle analyse est ajoutée, supprimer toutes les anciennes
+        conversation_history = [
+            msg for msg in conversation_history
+            if not (msg.get("role") == "system" and msg.get("content", "").startswith("__IMAGE_ANALYSIS__:"))
+        ]
+        last_analysis_index = len(conversation_history)
+        messages_since_last_analysis = 0
         save_conversation_history()
+        logger.info("Toutes les anciennes analyses d'image ont été supprimées.")
+    else:
+        if last_analysis_index is not None:
+            messages_since_last_analysis += 1
+            if messages_since_last_analysis > 15:
+                # Supprimer l'analyse
+                if 0 <= last_analysis_index < len(conversation_history):
+                    removed_msg = conversation_history.pop(last_analysis_index)
+                    logger.info(f"Analyse d'image supprimée de l'historique : {removed_msg.get('content')[:50]}...")
+                last_analysis_index = None
+                messages_since_last_analysis = 0
+                save_conversation_history()
 
 async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question, has_text):
     try:
@@ -336,8 +310,9 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
             user_message = {
                 "role": "user",
                 "content": (
-                    f"{user_name} a écrit : '{user_question}'.\n"
-                    "Réponds en te basant sur l'analyse, avec ta personnalité. "
+                    "Tu es Rika, une femme de 24 ans et membre à part entière du serveur Discord sur lequel tu te trouves."
+                    f"{user_name} a posté un message contenant une image et a écrit avec : '{user_question}'.\n"
+                    "Réponds à l'utilisateur en te basant sur l'analyse, avec ta personnalité"
                     "Ne mentionne pas explicitement que l'analyse est pré-existante, fais comme si tu l'avais faite toi-même."
                 )
             }
@@ -346,6 +321,7 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
             user_message = {
                 "role": "user",
                 "content": (
+                    "Tu es Rika, une femme de 24 ans et membre à part entière du serveur Discord sur lequel tu te trouves."
                     f"{user_name} a partagé une image sans texte additionnel.\n"
                     "Commente l'image en te basant sur l'analyse, avec ta personnalité. "
                     "Ne mentionne pas que l'analyse a été fournie à l'avance, réagis comme si tu l'avais toi-même effectuée."
@@ -365,7 +341,18 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
 
         if response:
             reply = response.choices[0].message.content
-            logging.info(f"Réponse de GPT-4o Mini : {reply}")
+
+            # Calculer et enregistrer le coût de la réponse de GPT-4o Mini
+            if hasattr(response, 'usage') and response.usage:
+                usage = {
+                    'prompt_tokens': response.usage.prompt_tokens,
+                    'completion_tokens': response.usage.completion_tokens
+                }
+                input_tokens, output_tokens, total_cost = calculate_cost(usage, model='gpt-4o-mini')
+                logging.info(f"Coût de la réponse de GPT-4o Mini : ${total_cost:.4f} / Input: {input_tokens} / Output: {output_tokens}")
+            else:
+                logging.warning("Informations d'utilisation non disponibles pour le calcul du coût de GPT-4o Mini.")
+
             return reply
         else:
             return None
@@ -473,7 +460,7 @@ async def on_ready():
 
 @client_discord.event
 async def on_message(message):
-    global conversation_history
+    global conversation_history, last_analysis_index, messages_since_last_analysis
 
     # Vérifier si le message provient du canal autorisé
     if message.channel.id != chatgpt_channel_id:
@@ -538,9 +525,13 @@ async def on_message(message):
                 # **Ajouter l'analyse à l'historique avant de réagir avec GPT-4o Mini**
                 analysis_message = {
                     "role": "system",
-                    "content": f"Analyse de l'image : {analysis}"
+                    "content": f"__IMAGE_ANALYSIS__:{analysis}"
                 }
                 await add_to_conversation_history(analysis_message)
+
+                # Mettre à jour l'index de la dernière analyse
+                last_analysis_index = len(conversation_history) - 1
+                messages_since_last_analysis = 0
 
                 # Étape 3 : GPT-4o Mini réagit à la question et à l'analyse
                 reply = await call_gpt4o_mini_with_analysis(analysis, message.author.name, user_text, has_user_text)
@@ -610,34 +601,35 @@ async def on_message(message):
         await message.channel.send(reply)
 
 async def add_to_conversation_history(new_message):
-    global conversation_history
+    global conversation_history, last_analysis_index, messages_since_last_analysis
 
     # Ne pas ajouter le PERSONALITY_PROMPT à l'historique
     if new_message.get("role") == "system" and new_message.get("content") == PERSONALITY_PROMPT:
         logger.debug("PERSONALITY_PROMPT système non ajouté à l'historique.")
         return
 
-    # Filtrer les messages pertinents pour l'historique
-    if is_relevant_message(new_message):
-        # Ajouter le message à l'historique
-        conversation_history.append(new_message)
-        save_conversation_history()
-        logger.debug(f"Message ajouté à l'historique. Taille actuelle : {len(conversation_history)}")
+    if new_message.get("role") == "system" and new_message.get("content", "").startswith("__IMAGE_ANALYSIS__:"):
+        await remove_old_image_analyses(new_analysis=True)
 
-        # Gérer la suppression des analyses d'images après 6 messages
-        await remove_old_image_analyses()
+    conversation_history.append(new_message)
+    save_conversation_history()
+    logger.debug(f"Message ajouté à l'historique. Taille actuelle : {len(conversation_history)}")
 
-        # Vérifier si la limite de 150 messages est atteinte
-        if len(conversation_history) > 150:
-            logger.info("Limite de 150 messages atteinte.")
+    # Gérer la suppression des analyses d'images après 15 messages
+    if new_message.get("role") == "system" and new_message.get("content", "").startswith("__IMAGE_ANALYSIS__:"):
+        last_analysis_index = len(conversation_history) - 1
+        messages_since_last_analysis = 0
+    else:
+        await remove_old_image_analyses(new_analysis=False)
 
-            # Calculer combien de messages doivent être supprimés
-            excess_messages = len(conversation_history) - 150
-            if excess_messages > 0:
-                # Supprimer les messages les plus anciens
-                del conversation_history[:excess_messages]
-                save_conversation_history()
-                logger.info(f"{excess_messages} messages les plus anciens ont été supprimés pour maintenir l'historique à 150 messages.")
+    if len(conversation_history) > 150:
+        logger.info("Limite de 150 messages atteinte.")
+        excess_messages = len(conversation_history) - 150
+        if excess_messages > 0:
+            # Supprimer les messages les plus anciens
+            del conversation_history[:excess_messages]
+            save_conversation_history()
+            logger.info(f"{excess_messages} messages les plus anciens ont été supprimés pour maintenir l'historique à 150 messages.")
 
 # Démarrer le bot Discord
 client_discord.run(DISCORD_TOKEN)
