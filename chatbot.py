@@ -23,7 +23,7 @@ BOT_NAME = os.getenv('BOT_NAME', 'ChatBot')
 # Initialiser le client OpenAI asynchrone ici
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-BOT_VERSION = "2.4.1"
+BOT_VERSION = "2.4.2"
 
 # Vérifier que les tokens et le prompt de personnalité sont récupérés
 if DISCORD_TOKEN is None or OPENAI_API_KEY is None or DISCORD_CHANNEL_ID is None:
@@ -240,17 +240,19 @@ async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high
         # Préparer la requête pour GPT-4o
         if user_text:
             prompt = (
-                f"Analyse cette image de manière extrêmement précise en tenant compte de la description suivante : \"{user_text}\"."
-                "Si des personnages sont présents, décris avec détails leurs vêtements, accessoires et physique."
-                "Décris leurs courbes, leur taille, leur poids, leurs mensurations."
-                "Décris comment ils intéragissent avec leur environnement et avec les autres personnages."
+                f"Tu es un styliste professionnel spécialisé dans l'analyse de la silhouette et des vêtements. "
+                f"Analyse cette image de manière extrêmement précise en tenant compte de la description suivante : \"{user_text}\". "
+                "Si des personnages sont présents, décris-les de A à Z, des pieds à la tête. "
+                "Mentionne leurs vêtements, accessoires, coiffure, couleur de peau, traits du visage, leur posture, et tout autre détail physique visible. "
+                "Inclut également une estimation générale de leurs mensurations, comme la taille, la corpulence, et autres attributs physiques visibles qui pourraient influencer la conception des vêtements."
         )
         else:
             prompt = (
-                "Analyse cette image de manière extrêmement précise s'il te plaît."
-                "Si des personnages sont présents, décris avec détails leurs vêtements, accessoires et physique."
-                "Décris leurs courbes, leur taille, leur poids, leurs mensurations."
-                "Décris comment ils intéragissent avec leur environnement et avec les autres personnages."
+                "Tu es un styliste professionnel spécialisé dans l'analyse de la silhouette et des vêtements. "
+                "Analyse cette image de manière extrêmement précise s'il te plaît. "
+                "Si des personnages sont présents, décris-les de A à Z, des pieds à la tête. "
+                "Mentionne leurs vêtements, accessoires, coiffure, couleur de peau, traits du visage, leur posture, et tout autre détail physique visible. "
+                "Inclut également une estimation générale de leurs mensurations, comme la taille, la corpulence, et autres attributs physiques visibles qui pourraient influencer la conception des vêtements."
             )
 
         message_to_send = {
