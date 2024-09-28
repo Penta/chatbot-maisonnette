@@ -4,3 +4,4 @@ Pillow==10.4.0
 tiktoken==0.7.0
 openai==1.48.0
 httpx==0.24.0
+mysql-connector-python==9.0.0
