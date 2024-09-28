@@ -17,4 +17,4 @@ COPY . .
 RUN chown -R 0:0 /opt/chatbot && chmod -R g+rw /opt/chatbot
 
 # Spécifier la commande pour lancer l'application
-CMD ["python", "main.py"]
+CMD ["python", "chatbot.py"]
