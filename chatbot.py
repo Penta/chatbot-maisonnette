@@ -6,11 +6,14 @@ from io import BytesIO
 import asyncio
 
 import mysql.connector
+import pytz
 from mysql.connector import Error
 from PIL import Image
 import tiktoken
 import discord
 from discord.ext import commands
+from discord import app_commands
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, OpenAIError
 
@@ -26,7 +29,7 @@ DISCORD_CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
 PERSONALITY_PROMPT_FILE = os.getenv('PERSONALITY_PROMPT_FILE', 'personality_prompt.txt')
 IMAGE_ANALYSIS_PROMPT_FILE = os.getenv('IMAGE_ANALYSIS_PROMPT_FILE', 'image_analysis_prompt.txt')
 BOT_NAME = os.getenv('BOT_NAME', 'ChatBot')
-BOT_VERSION = "2.7.0"
+BOT_VERSION = "2.8.0"
 
 # Validation des variables d'environnement
 required_env_vars = {
@@ -70,6 +73,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)  # Réduire le niveau de lo
 # Initialiser les intents Discord
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 # Initialiser le client OpenAI asynchrone
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -162,6 +166,40 @@ class DatabaseManager:
             self.connection.close()
             logger.info("Connexion à la base de données fermée.")
 
+    def add_reminder(self, user_id, channel_id, remind_at, content):
+        try:
+            with self.connection.cursor() as cursor:
+                sql = """
+                INSERT INTO reminders (user_id, channel_id, remind_at, content)
+                VALUES (%s, %s, %s, %s)
+                """
+                cursor.execute(sql, (user_id, channel_id, remind_at, content))
+            self.connection.commit()
+            logger.info(f"Rappel ajouté pour l'utilisateur {user_id} à {remind_at}")
+        except Error as e:
+            logger.error(f"Erreur lors de l'ajout du rappel: {e}")
+
+    def get_due_reminders(self, current_time):
+        try:
+            with self.connection.cursor(dictionary=True) as cursor:
+                sql = "SELECT * FROM reminders WHERE remind_at <= %s"
+                cursor.execute(sql, (current_time,))
+                reminders = cursor.fetchall()
+            return reminders
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération des rappels: {e}")
+            return []
+
+    def delete_reminder(self, reminder_id):
+        try:
+            with self.connection.cursor() as cursor:
+                sql = "DELETE FROM reminders WHERE id = %s"
+                cursor.execute(sql, (reminder_id,))
+            self.connection.commit()
+            logger.info(f"Rappel ID {reminder_id} supprimé")
+        except Error as e:
+            logger.error(f"Erreur lors de la suppression du rappel ID {reminder_id}: {e}")
+
 # ===============================
 # Gestion de l'Historique des Messages
 # ===============================
@@ -173,6 +211,26 @@ messages_since_last_analysis = 0
 # ====================
 # Fonctions Utilitaires
 # ====================
+
+def split_message(message, max_length=2000):
+    """Divise un message en plusieurs segments de longueur maximale spécifiée."""
+    if len(message) <= max_length:
+        return [message]
+    
+    parts = []
+    current_part = ""
+    
+    for line in message.split('\n'):
+        if len(current_part) + len(line) + 1 > max_length:
+            parts.append(current_part)
+            current_part = line + '\n'
+        else:
+            current_part += line + '\n'
+    
+    if current_part:
+        parts.append(current_part)
+    
+    return parts
 
 def has_text(text):
     """Détermine si le texte fourni est non vide après suppression des espaces."""
@@ -368,7 +426,7 @@ async def call_gpt4o_mini_with_analysis(analysis_text, user_name, user_question,
     reply = await call_openai_model(
         model="gpt-4o-mini",
         messages=messages,
-        max_tokens=450,
+        max_tokens=4096,
         temperature=1.0
     )
     
@@ -403,7 +461,7 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
     reply = await call_openai_model(
         model="gpt-4o-mini",
         messages=messages,
-        max_tokens=450,
+        max_tokens=4096,
         temperature=1.0
     )
     
@@ -469,22 +527,158 @@ async def add_to_conversation_history(db_manager, new_message):
 # Gestion des Événements Discord
 # =====================================
 
-class MyDiscordClient(discord.Client):
-    def __init__(self, db_manager, **options):
-        super().__init__(**options)
+class ReminderCommands(commands.Cog):
+    """Cog pour les commandes de rappel."""
+
+    def __init__(self, bot: commands.Bot, db_manager: DatabaseManager):
+        self.bot = bot
+        self.db_manager = db_manager
+
+    @app_commands.command(name="rappel", description="Créer un rappel")
+    @app_commands.describe(date="Date du rappel (DD/MM/YYYY)")
+    @app_commands.describe(time="Heure du rappel (HH:MM, 24h)")
+    @app_commands.describe(content="Contenu du rappel")
+    async def rappel(self, interaction: discord.Interaction, date: str, time: str, content: str):
+        """Commande pour créer un rappel."""
+        user = interaction.user
+        channel = interaction.channel
+
+        # Valider et parser la date et l'heure
+        try:
+            remind_datetime_str = f"{date} {time}"
+            remind_datetime = datetime.strptime(remind_datetime_str, "%d/%m/%Y %H:%M")
+            # Vous pouvez ajuster le fuseau horaire selon vos besoins
+            tz = pytz.timezone('Europe/Paris')  # Exemple de fuseau horaire
+            remind_datetime = tz.localize(remind_datetime)
+            now = datetime.now(tz)
+            if remind_datetime <= now:
+                await interaction.response.send_message("❌ La date et l'heure doivent être dans le futur.", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Format de date ou d'heure invalide. Utilisez DD/MM/YYYY pour la date et HH:MM pour l'heure.", ephemeral=True)
+            return
+
+        # Ajouter le rappel à la base de données
+        self.db_manager.add_reminder(
+            user_id=str(user.id),
+            channel_id=str(channel.id),
+            remind_at=remind_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+            content=content
+        )
+
+        # Créer un embed pour la confirmation
+        embed = discord.Embed(
+            title="Rappel Créé ✅",
+            description=(
+                f"**Date et Heure** : {remind_datetime.strftime('%d/%m/%Y %H:%M')}\n"
+                f"**Contenu** : {content}"
+            ),
+            color=0x00ff00,  # Vert
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text=f"Créé par {user}", icon_url=user.display_avatar.url if user.avatar else user.default_avatar.url)
+
+        # Envoyer l'embed de confirmation
+        await interaction.response.send_message(embed=embed)
+
+    @rappel.error
+    async def rappel_error(self, interaction: discord.Interaction, error):
+        """Gère les erreurs de la commande rappel."""
+        logger.error(f"Erreur lors de l'exécution de la commande rappel: {error}")
+        await interaction.response.send_message("❌ Une erreur est survenue lors de la création du rappel.")
+
+class MyDiscordBot(commands.Bot):
+    def __init__(self, db_manager, **kwargs):
+        super().__init__(**kwargs)
         self.db_manager = db_manager
         self.message_queue = asyncio.Queue()
+        self.reminder_task = None
 
     async def setup_hook(self):
         """Hook d'initialisation asynchrone pour configurer des tâches supplémentaires."""
         self.processing_task = asyncio.create_task(self.process_messages())
+        self.reminder_task = asyncio.create_task(self.process_reminders())
+        # Charger les commandes slash
+        await self.add_cog(AdminCommands(self, self.db_manager))
+        await self.add_cog(ReminderCommands(self, self.db_manager))
+        await self.tree.sync()  # Synchroniser les commandes slash
 
     async def close(self):
         if openai_client:
             await openai_client.close()
         self.db_manager.close_connection()
         self.processing_task.cancel()
+        if self.reminder_task:
+            self.reminder_task.cancel()
         await super().close()
+
+    async def process_reminders(self):
+        """Tâche en arrière-plan pour vérifier et envoyer les rappels."""
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                now = datetime.now(pytz.timezone('Europe/Paris'))  # Utiliser le même fuseau horaire
+                reminders = self.db_manager.get_due_reminders(now.strftime('%Y-%m-%d %H:%M:%S'))
+                for reminder in reminders:
+                    try:
+                        user = await self.fetch_user(int(reminder['user_id']))
+                    except discord.NotFound:
+                        logger.error(f"Utilisateur avec l'ID {reminder['user_id']} non trouvé.")
+                        continue
+                    except discord.HTTPException as e:
+                        logger.error(f"Erreur lors de la récupération de l'utilisateur {reminder['user_id']}: {e}")
+                        continue
+
+                    try:
+                        channel = await self.fetch_channel(int(reminder['channel_id']))
+                    except discord.NotFound:
+                        logger.error(f"Canal avec l'ID {reminder['channel_id']} non trouvé.")
+                        continue
+                    except discord.HTTPException as e:
+                        logger.error(f"Erreur lors de la récupération du canal {reminder['channel_id']}: {e}")
+                        continue
+
+                    if channel and user:
+                        personalized_content = await self.get_personalized_reminder(reminder['content'], user)
+                        try:
+                            reminder_message = f"{user.mention} 🕒 Rappel : {personalized_content}"
+                            await channel.send(reminder_message)
+                            logger.info(f"Rappel envoyé à {user} dans le canal {channel}.")
+
+                            self.db_manager.save_message('assistant', reminder_message)
+
+                            conversation_history.append({
+                                "role": "assistant",
+                                "content": reminder_message
+                            })
+
+                        except discord.Forbidden:
+                            logger.error(f"Permissions insuffisantes pour envoyer des messages dans le canal {channel}.")
+                        except discord.HTTPException as e:
+                            logger.error(f"Erreur lors de l'envoi du message dans le canal {channel}: {e}")
+                    else:
+                        logger.warning(f"Canal ou utilisateur introuvable pour le rappel ID {reminder['id']}.")
+
+                    # Supprimer le rappel après envoi
+                    self.db_manager.delete_reminder(reminder['id'])
+                await asyncio.sleep(60)  # Vérifier toutes les minutes
+            except Exception as e:
+                logger.error(f"Erreur dans la tâche de rappels: {e}")
+                await asyncio.sleep(60)
+
+    async def get_personalized_reminder(self, content, user):
+        """Utilise l'API OpenAI pour personnaliser le contenu du rappel."""
+        messages = [
+            {"role": "system", "content": PERSONALITY_PROMPT},
+            {"role": "user", "content": f"Personnalise le rappel suivant pour {user.name} : {content}"}
+        ]
+        reply = await call_openai_model(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=4096,
+            temperature=1.0
+        )
+        return reply if reply else content
 
     async def on_ready(self):
         """Événement déclenché lorsque le bot est prêt."""
@@ -540,17 +734,6 @@ class MyDiscordClient(discord.Client):
         global conversation_history, last_analysis_index, messages_since_last_analysis
 
         user_text = message.content.strip()
-
-        # Commande de réinitialisation de l'historique
-        if user_text.lower() == "!reset_history":
-            if not message.author.guild_permissions.administrator:
-                await message.channel.send("❌ Vous n'avez pas la permission d'utiliser cette commande.")
-                return
-
-            conversation_history = []
-            self.db_manager.reset_history()
-            await message.channel.send("✅ L'historique des conversations a été réinitialisé.")
-            return
 
         # Traiter les pièces jointes
         image_data = None
@@ -635,7 +818,10 @@ class MyDiscordClient(discord.Client):
                 # Appeler l'API OpenAI pour le texte
                 reply = await call_openai_api(user_text, message.author.name)
                 if reply:
-                    await message.channel.send(reply)
+                    # Diviser le message en plusieurs parties si nécessaire
+                    message_parts = split_message(reply)
+                    for part in message_parts:
+                        await message.channel.send(part)
 
                     # Construire et ajouter les messages à l'historique
                     user_message = {
@@ -657,6 +843,35 @@ class MyDiscordClient(discord.Client):
                 logger.error(f"Erreur lors du traitement du texte: {e}")
 
 # ============================
+# Commandes Slash via Cogs
+# ============================
+
+class AdminCommands(commands.Cog):
+    """Cog pour les commandes administratives."""
+
+    def __init__(self, bot: commands.Bot, db_manager):
+        self.bot = bot
+        self.db_manager = db_manager
+
+    @app_commands.command(name="reset_history", description="Réinitialise l'historique des conversations.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def reset_history(self, interaction: discord.Interaction):
+        """Réinitialise l'historique des conversations."""
+        global conversation_history
+        conversation_history = []
+        self.db_manager.reset_history()
+        await interaction.response.send_message("✅ L'historique des conversations a été réinitialisé.")
+
+    @reset_history.error
+    async def reset_history_error(self, interaction: discord.Interaction, error):
+        """Gère les erreurs de la commande reset_history."""
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message("❌ Vous n'avez pas la permission d'utiliser cette commande.")
+        else:
+            logger.error(f"Erreur lors de l'exécution de la commande reset_history: {error}")
+            await interaction.response.send_message("Une erreur est survenue lors de l'exécution de la commande.")
+
+# ============================
 # Démarrage du Bot Discord
 # ============================
 
@@ -668,9 +883,12 @@ def main():
 
     db_manager.load_conversation_history()
 
-    client_discord = MyDiscordClient(db_manager=db_manager, intents=intents)
+    # Initialiser le bot avec le préfixe "!" et les intents définis
+    bot = MyDiscordBot(command_prefix="!", db_manager=db_manager, intents=intents)
+
+    # Démarrer le bot
     try:
-        client_discord.run(DISCORD_TOKEN)
+        bot.run(DISCORD_TOKEN)
     except Exception as e:
         logger.error(f"Erreur lors du démarrage du bot Discord: {e}")
     finally:
