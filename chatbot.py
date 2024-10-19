@@ -4,6 +4,7 @@ import logging
 import base64
 from io import BytesIO
 import asyncio
+import random
 
 import mysql.connector
 import pytz
@@ -13,9 +14,11 @@ import tiktoken
 import discord
 from discord.ext import commands
 from discord import app_commands
-from datetime import datetime, timezone
+
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, OpenAIError
+from discord.utils import get
 
 # =================================
 # Configuration et Initialisation
@@ -29,19 +32,35 @@ DISCORD_CHANNEL_ID = os.getenv('DISCORD_CHANNEL_ID')
 PERSONALITY_PROMPT_FILE = os.getenv('PERSONALITY_PROMPT_FILE', 'personality_prompt.txt')
 IMAGE_ANALYSIS_PROMPT_FILE = os.getenv('IMAGE_ANALYSIS_PROMPT_FILE', 'image_analysis_prompt.txt')
 BOT_NAME = os.getenv('BOT_NAME', 'ChatBot')
-BOT_VERSION = "2.8.0"
+BOT_VERSION = "3.0.0"
+GUILD_ID = os.getenv('GUILD_ID')
+SPECIFIC_ROLE_NAME = os.getenv('SPECIFIC_ROLE_NAME')
 
 # Validation des variables d'environnement
 required_env_vars = {
     'DISCORD_TOKEN': DISCORD_TOKEN,
     'OPENAI_API_KEY': OPENAI_API_KEY,
     'DISCORD_CHANNEL_ID': DISCORD_CHANNEL_ID,
-    'IMAGE_ANALYSIS_PROMPT_FILE': IMAGE_ANALYSIS_PROMPT_FILE
+    'IMAGE_ANALYSIS_PROMPT_FILE': IMAGE_ANALYSIS_PROMPT_FILE,
+    'GUILD_ID': GUILD_ID,
+    'SPECIFIC_ROLE_NAME': SPECIFIC_ROLE_NAME
 }
 
 missing_vars = [var for var, val in required_env_vars.items() if val is None]
 if missing_vars:
     raise ValueError(f"Les variables d'environnement suivantes ne sont pas définies: {', '.join(missing_vars)}")
+
+# Convertir l'ID du canal Discord en entier
+try:
+    chatgpt_channel_id = int(DISCORD_CHANNEL_ID)
+except ValueError:
+    raise ValueError("L'ID du canal Discord est invalide. Assurez-vous qu'il s'agit d'un entier.")
+
+# Convertir l'ID de la guild en entier
+try:
+    GUILD_ID = int(GUILD_ID)
+except ValueError:
+    raise ValueError("L'ID de la guild Discord est invalide. Assurez-vous qu'il s'agit d'un entier.")
 
 # Vérification de l'existence des fichiers de prompt
 for file_var, file_path in [('PERSONALITY_PROMPT_FILE', PERSONALITY_PROMPT_FILE),
@@ -74,15 +93,19 @@ logging.getLogger('httpx').setLevel(logging.WARNING)  # Réduire le niveau de lo
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.presences = True
 
 # Initialiser le client OpenAI asynchrone
 openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Convertir l'ID du canal Discord en entier
-try:
-    chatgpt_channel_id = int(DISCORD_CHANNEL_ID)
-except ValueError:
-    raise ValueError("L'ID du canal Discord est invalide. Assurez-vous qu'il s'agit d'un entier.")
+# ============================
+# Commande Décorateur Admin
+# ============================
+
+def admin_command(func):
+    """Décorateur pour marquer une commande comme réservée aux administrateurs."""
+    func.is_admin = True
+    return func
 
 # =====================================
 # Gestion de la Base de Données MariaDB
@@ -199,6 +222,35 @@ class DatabaseManager:
             logger.info(f"Rappel ID {reminder_id} supprimé")
         except Error as e:
             logger.error(f"Erreur lors de la suppression du rappel ID {reminder_id}: {e}")
+
+    def get_user_reminders(self, user_id):
+        """Récupère tous les rappels futurs pour un utilisateur spécifique."""
+        try:
+            with self.connection.cursor(dictionary=True) as cursor:
+                sql = """
+                SELECT * FROM reminders 
+                WHERE user_id = %s AND remind_at > NOW() 
+                ORDER BY remind_at ASC
+                """
+                cursor.execute(sql, (user_id,))
+                reminders = cursor.fetchall()
+                logger.info(f"{len(reminders)} rappels récupérés pour l'utilisateur {user_id}.")
+                return reminders
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération des rappels de l'utilisateur {user_id}: {e}")
+            return []
+
+    def get_reminder_by_id(self, reminder_id):
+        """Récupère un rappel spécifique par son ID."""
+        try:
+            with self.connection.cursor(dictionary=True) as cursor:
+                sql = "SELECT * FROM reminders WHERE id = %s"
+                cursor.execute(sql, (reminder_id,))
+                reminder = cursor.fetchone()
+                return reminder
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération du rappel ID {reminder_id}: {e}")
+            return None
 
 # ===============================
 # Gestion de l'Historique des Messages
@@ -385,7 +437,22 @@ async def call_gpt4o_for_image_analysis(image_data, user_text=None, detail='high
         ]
     }
     
-    messages = [message_to_send]
+    # Obtenir la date et l'heure actuelles
+    tz = pytz.timezone('Europe/Paris')
+    current_datetime = datetime.now(tz).strftime('%d/%m/%Y %H:%M:%S %Z')
+    
+    # Créer un message système avec la date et l'heure
+    date_message = {
+        "role": "system",
+        "content": f"Date et heure actuelles : {current_datetime}"
+    }
+
+    # Construire la liste des messages avec le message de date ajouté
+    messages = [
+        {"role": "system", "content": PERSONALITY_PROMPT},
+        date_message  # Ajout du message de date et heure
+    ] + conversation_history + [message_to_send]
+
     analysis = await call_openai_model(
         model="gpt-4o",
         messages=messages,
@@ -454,8 +521,20 @@ async def call_openai_api(user_text, user_name, image_data=None, detail='high'):
             }
         })
 
+    # Obtenir la date et l'heure actuelles dans le fuseau horaire 'Europe/Paris'
+    tz = pytz.timezone('Europe/Paris')
+    current_datetime = datetime.now(tz).strftime('%d/%m/%Y %H:%M:%S %Z')
+
+    # Créer un message système avec la date et l'heure
+    date_message = {
+        "role": "system",
+        "content": f"Date et heure actuelles : {current_datetime}"
+    }
+
+    # Construire la liste des messages avec le message de date ajouté
     messages = [
-        {"role": "system", "content": PERSONALITY_PROMPT}
+        {"role": "system", "content": PERSONALITY_PROMPT},
+        date_message  # Ajout du message de date et heure
     ] + conversation_history + [message_to_send]
 
     reply = await call_openai_model(
@@ -516,9 +595,9 @@ async def add_to_conversation_history(db_manager, new_message):
     else:
         await remove_old_image_analyses(db_manager, new_analysis=False)
 
-    # Limiter l'historique à 150 messages
-    if len(conversation_history) > 150:
-        excess = len(conversation_history) - 150
+    # Limiter l'historique à 50 messages
+    if len(conversation_history) > 50:
+        excess = len(conversation_history) - 50
         conversation_history = conversation_history[excess:]
         # Supprimer les messages les plus anciens de la base de données
         db_manager.delete_old_messages(excess)
@@ -527,80 +606,26 @@ async def add_to_conversation_history(db_manager, new_message):
 # Gestion des Événements Discord
 # =====================================
 
-class ReminderCommands(commands.Cog):
-    """Cog pour les commandes de rappel."""
-
-    def __init__(self, bot: commands.Bot, db_manager: DatabaseManager):
-        self.bot = bot
-        self.db_manager = db_manager
-
-    @app_commands.command(name="rappel", description="Créer un rappel")
-    @app_commands.describe(date="Date du rappel (DD/MM/YYYY)")
-    @app_commands.describe(time="Heure du rappel (HH:MM, 24h)")
-    @app_commands.describe(content="Contenu du rappel")
-    async def rappel(self, interaction: discord.Interaction, date: str, time: str, content: str):
-        """Commande pour créer un rappel."""
-        user = interaction.user
-        channel = interaction.channel
-
-        # Valider et parser la date et l'heure
-        try:
-            remind_datetime_str = f"{date} {time}"
-            remind_datetime = datetime.strptime(remind_datetime_str, "%d/%m/%Y %H:%M")
-            # Vous pouvez ajuster le fuseau horaire selon vos besoins
-            tz = pytz.timezone('Europe/Paris')  # Exemple de fuseau horaire
-            remind_datetime = tz.localize(remind_datetime)
-            now = datetime.now(tz)
-            if remind_datetime <= now:
-                await interaction.response.send_message("❌ La date et l'heure doivent être dans le futur.", ephemeral=True)
-                return
-        except ValueError:
-            await interaction.response.send_message("❌ Format de date ou d'heure invalide. Utilisez DD/MM/YYYY pour la date et HH:MM pour l'heure.", ephemeral=True)
-            return
-
-        # Ajouter le rappel à la base de données
-        self.db_manager.add_reminder(
-            user_id=str(user.id),
-            channel_id=str(channel.id),
-            remind_at=remind_datetime.strftime('%Y-%m-%d %H:%M:%S'),
-            content=content
-        )
-
-        # Créer un embed pour la confirmation
-        embed = discord.Embed(
-            title="Rappel Créé ✅",
-            description=(
-                f"**Date et Heure** : {remind_datetime.strftime('%d/%m/%Y %H:%M')}\n"
-                f"**Contenu** : {content}"
-            ),
-            color=0x00ff00,  # Vert
-            timestamp=datetime.now(timezone.utc)
-        )
-        embed.set_footer(text=f"Créé par {user}", icon_url=user.display_avatar.url if user.avatar else user.default_avatar.url)
-
-        # Envoyer l'embed de confirmation
-        await interaction.response.send_message(embed=embed)
-
-    @rappel.error
-    async def rappel_error(self, interaction: discord.Interaction, error):
-        """Gère les erreurs de la commande rappel."""
-        logger.error(f"Erreur lors de l'exécution de la commande rappel: {error}")
-        await interaction.response.send_message("❌ Une erreur est survenue lors de la création du rappel.")
-
 class MyDiscordBot(commands.Bot):
     def __init__(self, db_manager, **kwargs):
         super().__init__(**kwargs)
         self.db_manager = db_manager
         self.message_queue = asyncio.Queue()
         self.reminder_task = None
+        self.random_message_delay = 240
+        self.inactivity_task = None
+        self.last_activity = datetime.now(pytz.timezone('Europe/Paris'))
+        self.guild_id = GUILD_ID
 
     async def setup_hook(self):
         """Hook d'initialisation asynchrone pour configurer des tâches supplémentaires."""
         self.processing_task = asyncio.create_task(self.process_messages())
         self.reminder_task = asyncio.create_task(self.process_reminders())
+        self.inactivity_task = asyncio.create_task(self.monitor_inactivity())
         # Charger les commandes slash
         await self.add_cog(AdminCommands(self, self.db_manager))
         await self.add_cog(ReminderCommands(self, self.db_manager))
+        await self.add_cog(HelpCommands(self))
         await self.tree.sync()  # Synchroniser les commandes slash
 
     async def close(self):
@@ -610,7 +635,170 @@ class MyDiscordBot(commands.Bot):
         self.processing_task.cancel()
         if self.reminder_task:
             self.reminder_task.cancel()
+        if self.inactivity_task:
+            self.inactivity_task.cancel()
         await super().close()
+
+    async def get_personalized_reminder(self, content, user):
+        """Utilise l'API OpenAI pour personnaliser le contenu du rappel."""
+        messages = [
+            {"role": "system", "content": PERSONALITY_PROMPT},
+            {"role": "user", "content": f"Personnalise le rappel suivant pour {user.name} : {content}"}
+        ]
+        reply = await call_openai_model(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=4096,
+            temperature=1.0
+        )
+        return reply if reply else content
+
+    async def on_ready(self):
+        """Événement déclenché lorsque le bot est prêt."""
+        logger.info(f'{BOT_NAME} connecté en tant que {self.user}')
+
+        if not conversation_history:
+            logger.info("Aucun historique trouvé. L'historique commence vide.")
+
+        # Envoyer un message de version dans le canal Discord
+        channel = self.get_channel(chatgpt_channel_id)
+        if channel:
+            try:
+                embed = discord.Embed(
+                    title="Bot Démarré",
+                    description=f"🎉 {BOT_NAME} est en ligne ! Version {BOT_VERSION}",
+                    color=0x00ff00  # Vert
+                )
+                await channel.send(embed=embed)
+                logger.info(f"Message de connexion envoyé dans le canal ID {chatgpt_channel_id}")
+            except discord.Forbidden:
+                logger.error(f"Permissions insuffisantes pour envoyer des messages dans le canal ID {chatgpt_channel_id}.")
+            except discord.HTTPException as e:
+                logger.error(f"Erreur lors de l'envoi du message de connexion : {e}")
+        else:
+            logger.error(f"Canal avec ID {chatgpt_channel_id} non trouvé.")
+
+    async def on_message(self, message):
+        """Événement déclenché lorsqu'un message est envoyé dans un canal suivi."""
+
+        # Ignorer les messages provenant d'autres canaux ou du bot lui-même
+        if message.channel.id != chatgpt_channel_id or message.author == self.user:
+            return
+
+        # Mettre à jour le dernier temps d'activité
+        self.last_activity = datetime.now(pytz.timezone('Europe/Paris'))
+
+        await self.message_queue.put(message)
+
+    async def monitor_inactivity(self):
+        """Tâche en arrière-plan pour surveiller l'inactivité et envoyer des messages aléatoires."""
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                # Calculer le temps écoulé depuis la dernière activité
+                now = datetime.now(pytz.timezone('Europe/Paris'))
+                elapsed = (now - self.last_activity).total_seconds() / 60  # en minutes
+
+                if elapsed >= self.random_message_delay:
+                    # Vérifier si on est en dehors des heures silencieuses (minuit à 7h)
+                    if not (now.hour >= 0 and now.hour < 7):
+                        await self.perform_random_action()
+                    # Réinitialiser le dernier temps d'activité
+                    self.last_activity = now
+
+                await asyncio.sleep(60)  # Vérifier toutes les minutes
+            except Exception as e:
+                logger.error(f"Erreur dans la tâche de surveillance d'inactivité: {e}")
+                await asyncio.sleep(60)
+
+    async def perform_random_action(self):
+        """Effectue l'action aléatoire de réagir à l'activité d'un membre."""
+        guild = self.get_guild(self.guild_id)  # Assurez-vous que self.guild_id est défini
+        if not guild:
+            logger.error("Guild non trouvée.")
+            return
+
+        # Obtenir les membres avec le rôle spécifique
+        specific_role = get(guild.roles, name=SPECIFIC_ROLE_NAME)
+        if not specific_role:
+            logger.error(f"Rôle '{SPECIFIC_ROLE_NAME}' non trouvé dans la guild.")
+            return
+
+        active_members = [member for member in guild.members if specific_role in member.roles and member.activity]
+
+        if active_members:
+            # Sélectionner un membre aléatoire
+            selected_member = random.choice(active_members)
+            activity = selected_member.activity
+
+            # Récupérer les informations d'activité
+
+            # Vérifier si l'activité est de type Spotify
+            if isinstance(activity, discord.Spotify):
+                activity_details = (
+                    f"Spotify - {activity.title} by {', '.join(activity.artists)}"
+                    f" from the album {activity.album}"
+                )
+            else:
+                # Pour d'autres types d'activités
+                activity_details = f"{activity.type.name} - {activity.name}" if activity else "Aucune activité spécifique."
+
+            # Préparer le message à envoyer à OpenAI
+            messages = [
+                {"role": "system", "content": PERSONALITY_PROMPT},
+                {"role": "user", "content": f"L'utilisateur {selected_member.mention} est actuellement actif: {activity_details}. Réagis à ce que l'utilisateur est en train de faire en t'adressant à lui et en le citant."}
+            ]
+
+            reply = await call_openai_model(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=4096,
+                temperature=1.0
+            )
+
+            if reply:
+                channel = self.get_channel(chatgpt_channel_id)
+                if channel:
+                    await channel.send(reply)
+                    self.db_manager.save_message('assistant', reply)
+                    conversation_history.append({
+                        "role": "assistant",
+                        "content": reply
+                    })
+                    logger.info(f"Message aléatoire posté par le bot.")
+            else:
+                logger.warning("OpenAI n'a pas généré de réponse pour l'activité du membre.")
+
+        else:
+            # Aucun membre actif, envoyer un message de boredom
+            messages = [
+                {"role": "system", "content": PERSONALITY_PROMPT},
+                {"role": "user", "content": "Personne ne fait quoi que ce soit et on s'ennuie ici. Génère un message approprié avec ta personnalité."}
+            ]
+
+            reply = await call_openai_model(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=4096,
+                temperature=1.0
+            )
+
+            if reply:
+                channel = self.get_channel(chatgpt_channel_id)
+                if channel:
+                    await channel.send(reply)
+                    self.db_manager.save_message('assistant', reply)
+                    conversation_history.append({
+                        "role": "assistant",
+                        "content": reply
+                    })
+                    logger.info(f"Message d'ennui posté par le bot.")
+            else:
+                logger.warning("OpenAI n'a pas généré de réponse pour l'état d'ennui.")
+
+        # Actualiser le délai aléatoire
+        self.random_message_delay = random.randint(180, 360)
+        logger.info(f"`random_message_delay` mis à jour à {self.random_message_delay} minutes.")
 
     async def process_reminders(self):
         """Tâche en arrière-plan pour vérifier et envoyer les rappels."""
@@ -665,54 +853,6 @@ class MyDiscordBot(commands.Bot):
             except Exception as e:
                 logger.error(f"Erreur dans la tâche de rappels: {e}")
                 await asyncio.sleep(60)
-
-    async def get_personalized_reminder(self, content, user):
-        """Utilise l'API OpenAI pour personnaliser le contenu du rappel."""
-        messages = [
-            {"role": "system", "content": PERSONALITY_PROMPT},
-            {"role": "user", "content": f"Personnalise le rappel suivant pour {user.name} : {content}"}
-        ]
-        reply = await call_openai_model(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=4096,
-            temperature=1.0
-        )
-        return reply if reply else content
-
-    async def on_ready(self):
-        """Événement déclenché lorsque le bot est prêt."""
-        logger.info(f'{BOT_NAME} connecté en tant que {self.user}')
-
-        if not conversation_history:
-            logger.info("Aucun historique trouvé. L'historique commence vide.")
-
-        # Envoyer un message de version dans le canal Discord
-        channel = self.get_channel(chatgpt_channel_id)
-        if channel:
-            try:
-                embed = discord.Embed(
-                    title="Bot Démarré",
-                    description=f"🎉 {BOT_NAME} est en ligne ! Version {BOT_VERSION}",
-                    color=0x00ff00  # Vert
-                )
-                await channel.send(embed=embed)
-                logger.info(f"Message de connexion envoyé dans le canal ID {chatgpt_channel_id}")
-            except discord.Forbidden:
-                logger.error(f"Permissions insuffisantes pour envoyer des messages dans le canal ID {chatgpt_channel_id}.")
-            except discord.HTTPException as e:
-                logger.error(f"Erreur lors de l'envoi du message de connexion : {e}")
-        else:
-            logger.error(f"Canal avec ID {chatgpt_channel_id} non trouvé.")
-
-    async def on_message(self, message):
-        """Événement déclenché lorsqu'un message est envoyé dans un canal suivi."""
-
-        # Ignorer les messages provenant d'autres canaux ou du bot lui-même
-        if message.channel.id != chatgpt_channel_id or message.author == self.user:
-            return
-
-        await self.message_queue.put(message)
 
     async def process_messages(self):
         """Tâche en arrière-plan pour traiter les messages séquentiellement."""
@@ -855,6 +995,7 @@ class AdminCommands(commands.Cog):
 
     @app_commands.command(name="reset_history", description="Réinitialise l'historique des conversations.")
     @app_commands.checks.has_permissions(administrator=True)
+    @admin_command
     async def reset_history(self, interaction: discord.Interaction):
         """Réinitialise l'historique des conversations."""
         global conversation_history
@@ -870,6 +1011,195 @@ class AdminCommands(commands.Cog):
         else:
             logger.error(f"Erreur lors de l'exécution de la commande reset_history: {error}")
             await interaction.response.send_message("Une erreur est survenue lors de l'exécution de la commande.")
+
+class ReminderCommands(commands.Cog):
+    """Cog pour les commandes de rappel."""
+
+    def __init__(self, bot: commands.Bot, db_manager: DatabaseManager):
+        self.bot = bot
+        self.db_manager = db_manager
+
+    @app_commands.command(name="rappel", description="Créer un rappel")
+    @app_commands.describe(date="Date du rappel (DD/MM/YYYY)")
+    @app_commands.describe(time="Heure du rappel (HH:MM, 24h)")
+    @app_commands.describe(content="Contenu du rappel")
+    async def rappel(self, interaction: discord.Interaction, date: str, time: str, content: str):
+        """Commande pour créer un rappel."""
+        user = interaction.user
+        channel = interaction.channel
+
+        # Valider et parser la date et l'heure
+        try:
+            remind_datetime_str = f"{date} {time}"
+            remind_datetime = datetime.strptime(remind_datetime_str, "%d/%m/%Y %H:%M")
+            # Vous pouvez ajuster le fuseau horaire selon vos besoins
+            tz = pytz.timezone('Europe/Paris')  # Exemple de fuseau horaire
+            remind_datetime = tz.localize(remind_datetime)
+            now = datetime.now(tz)
+            if remind_datetime <= now:
+                await interaction.response.send_message("❌ La date et l'heure doivent être dans le futur.", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Format de date ou d'heure invalide. Utilisez DD/MM/YYYY pour la date et HH:MM pour l'heure.", ephemeral=True)
+            return
+
+        # Ajouter le rappel à la base de données
+        self.db_manager.add_reminder(
+            user_id=str(user.id),
+            channel_id=str(channel.id),
+            remind_at=remind_datetime.strftime('%Y-%m-%d %H:%M:%S'),
+            content=content
+        )
+
+        # Créer un embed pour la confirmation
+        embed = discord.Embed(
+            title="Rappel Créé ✅",
+            description=(
+                f"**Date et Heure** : {remind_datetime.strftime('%d/%m/%Y %H:%M')}\n"
+                f"**Contenu** : {content}"
+            ),
+            color=0x00ff00,  # Vert
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text=f"Créé par {user}", icon_url=user.display_avatar.url if user.avatar else user.default_avatar.url)
+
+        # Envoyer l'embed de confirmation
+        await interaction.response.send_message(embed=embed)
+
+    @rappel.error
+    async def rappel_error(self, interaction: discord.Interaction, error):
+        """Gère les erreurs de la commande rappel."""
+        logger.error(f"Erreur lors de l'exécution de la commande rappel: {error}")
+        await interaction.response.send_message("❌ Une erreur est survenue lors de la création du rappel.")
+
+    @app_commands.command(name="mes_rappels", description="Voir tous vos rappels enregistrés à venir.")
+    async def mes_rappels(self, interaction: discord.Interaction):
+        """Commande pour voir tous les rappels de l'utilisateur."""
+        user = interaction.user
+        reminders = self.db_manager.get_user_reminders(str(user.id))
+
+        if not reminders:
+            await interaction.response.send_message(
+                "🕒 Vous n'avez aucun rappel enregistré à venir.",
+                ephemeral=True
+            )
+            return
+
+        # Créer l'embed
+        embed = discord.Embed(
+            title="📋 Vos Rappels à Venir",
+            description=f"Voici la liste de vos rappels enregistrés :",
+            color=0x00ff00,  # Vert
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text=f"Demandé par {user}", icon_url=user.display_avatar.url if user.avatar else user.default_avatar.url)
+
+        # Ajouter chaque rappel comme un champ dans l'embed
+        for reminder in reminders:
+            remind_at = reminder['remind_at']
+            remind_at_formatted = remind_at.strftime('%d/%m/%Y %H:%M')
+            embed.add_field(
+                name=f"ID {reminder['id']} - {remind_at_formatted}",
+                value=reminder['content'],
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="supprimer_rappel", description="Supprime un de vos rappels à venir en utilisant son ID.")
+    @app_commands.describe(id="L'ID du rappel à supprimer")
+    async def supprimer_rappel(self, interaction: discord.Interaction, id: int):
+        """Commande pour supprimer un rappel spécifique."""
+        user = interaction.user
+        reminder_id = id
+
+        # Récupérer le rappel par ID
+        reminder = self.db_manager.get_reminder_by_id(reminder_id)
+
+        if not reminder:
+            await interaction.response.send_message(
+                f"❌ Aucun rappel trouvé avec l'ID `{reminder_id}`.",
+                ephemeral=True
+            )
+            return
+
+        # Vérifier si le rappel appartient à l'utilisateur
+        if reminder['user_id'] != str(user.id):
+            await interaction.response.send_message(
+                "❌ Vous ne pouvez supprimer que vos propres rappels.",
+                ephemeral=True
+            )
+            return
+
+        # Supprimer le rappel
+        self.db_manager.delete_reminder(reminder_id)
+
+        # Confirmer la suppression à l'utilisateur
+        embed = discord.Embed(
+            title="Rappel Supprimé ✅",
+            description=f"Le rappel avec l'ID `{reminder_id}` et le contenu \"{reminder['content']}\" a été supprimé avec succès.",
+            color=0xff0000,  # Rouge
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text=f"Supprimé par {user}", icon_url=user.display_avatar.url if user.avatar else user.default_avatar.url)
+
+        await interaction.response.send_message(embed=embed)
+
+    @supprimer_rappel.error
+    async def supprimer_rappel_error(self, interaction: discord.Interaction, error):
+        """Gère les erreurs de la commande supprimer_rappel."""
+        logger.error(f"Erreur lors de l'exécution de la commande supprimer_rappel: {error}")
+        await interaction.response.send_message("❌ Une erreur est survenue lors de la suppression du rappel.", ephemeral=True)
+
+class HelpCommands(commands.Cog):
+    """Cog pour la commande /help."""
+
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @app_commands.command(name="help", description="Liste toutes les commandes disponibles.")
+    async def help(self, interaction: discord.Interaction):
+        """Commande /help qui liste toutes les commandes disponibles dans un embed."""
+        general_commands = []
+        admin_commands = []
+
+        # Parcourir toutes les commandes de l'arbre de commandes du bot
+        for command in self.bot.tree.get_commands():
+            # Ignorer la commande /help elle-même pour éviter l'auto-inclusion
+            if command.name == "help":
+                continue
+
+            # Déterminer si la commande est réservée aux administrateurs en vérifiant l'attribut personnalisé
+            is_admin = getattr(command.callback, 'is_admin', False)
+
+            # Ajouter la commande à la liste appropriée
+            if is_admin:
+                admin_commands.append((command.name, command.description))
+            else:
+                general_commands.append((command.name, command.description))
+
+        # Créer l'embed
+        embed = discord.Embed(
+            title="📚 Liste des Commandes",
+            description="Voici la liste des commandes disponibles :",
+            color=0x00ff00
+        )
+
+        if general_commands:
+            general_desc = "\n".join([f"`/{name}` - {desc}" for name, desc in general_commands])
+            embed.add_field(name="Commandes Générales", value=general_desc, inline=False)
+
+        if admin_commands:
+            admin_desc = "\n".join([f"`/{name}` - {desc} *(Admin)*" for name, desc in admin_commands])
+            embed.add_field(name="Commandes Administratives", value=admin_desc, inline=False)
+
+        embed.set_footer(text=f"Demandé par {interaction.user}", icon_url=interaction.user.display_avatar.url if interaction.user.avatar else interaction.user.default_avatar.url)
+
+        # Envoyer l'embed en réponse
+        await interaction.response.send_message(embed=embed)
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(HelpCommands(bot))
 
 # ============================
 # Démarrage du Bot Discord
