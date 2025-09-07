@@ -1,5 +1,5 @@
 # Utiliser une image de base Python
-FROM python:3.12
+FROM python:3.13
 
 # Définir le répertoire de travail dans le conteneur
 WORKDIR /opt/chatbot
