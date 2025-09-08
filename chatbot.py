@@ -6,12 +6,30 @@ import os
 import random
 from dotenv import load_dotenv
 from datetime import datetime
+import logging
+from logging.handlers import RotatingFileHandler
+
+# Configuration du logger
+logger = logging.getLogger('discord_bot')
+logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+# Créer un gestionnaire de fichier avec rotation
+file_handler = RotatingFileHandler('bot.log', maxBytes=5*1024*1024, backupCount=2)  # 5 Mo par fichier, garder 2 sauvegardes
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# Optionnel : ajouter un gestionnaire de console pour afficher les logs dans la console
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 # Charger les variables d'environnement
 load_dotenv()
 
 # Version du bot
-VERSION = "4.0.1"  # Modifiable selon la version actuelle
+VERSION = "4.1.0"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement
 MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
@@ -38,7 +56,7 @@ def load_history():
                             data[channel_id]["messages"] = data[channel_id]["messages"][-MAX_HISTORY_LENGTH:]
                 return data
             except json.JSONDecodeError:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur de lecture du fichier d'historique. Création d'un nouveau fichier.")
+                logger.error("Erreur de lecture du fichier d'historique. Création d'un nouveau fichier.")
                 return {}
     return {}
 
@@ -52,7 +70,7 @@ def get_personality_prompt():
         with open('personality_prompt.txt', 'r', encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Le fichier personality_prompt.txt n'a pas été trouvé. Utilisation d'un prompt par défaut.")
+        logger.error("Le fichier personality_prompt.txt n'a pas été trouvé. Utilisation d'un prompt par défaut.")
         return """Tu es un assistant utile et poli qui peut analyser des images.
         Quand on te montre une image, décris-la et donne ton avis si on te le demande.
         Réponds toujours en français avec un ton naturel et amical.
@@ -71,7 +89,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] Le bot est connecté en tant que {bot.user}')
+    logger.info(f'Le bot est connecté en tant que {bot.user}')
     global conversation_history
     conversation_history = load_history()
     # Récupérer le canal spécifié
@@ -168,12 +186,12 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
                 save_history(conversation_history)
                 return assistant_response
             else:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Réponse API inattendue: {response_data}")
+                logger.error(f"Réponse API inattendue: {response_data}")
                 return "Désolé, je n'ai pas reçu de réponse valide de l'API."
         else:
             return f"Erreur API: {response.status_code}"
     except requests.exceptions.RequestException as e:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur lors de l'appel API: {e}")
+        logger.error(f"Erreur lors de l'appel API: {e}")
         return "Désolé, une erreur réseau est survenue lors de la communication avec l'API."
 
 @bot.command(name='reset')
@@ -216,15 +234,15 @@ async def on_message(message):
                 random_stickers = random.sample(stickers, len(stickers))
                 for sticker in random_stickers:
                     try:
-                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Envoi du sticker: {sticker.name} (ID: {sticker.id})")
+                        logger.info(f"Envoi du sticker: {sticker.name} (ID: {sticker.id})")
                         await message.channel.send(stickers=[sticker])
                         break  # Si ça marche, on sort de la boucle
                     except discord.errors.Forbidden as e:
-                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur lors de l'envoi du sticker: {sticker.name} (ID: {sticker.id}). Erreur: {e}")
+                        logger.error(f"Erreur lors de l'envoi du sticker: {sticker.name} (ID: {sticker.id}). Erreur: {e}")
                         continue
                 else:
                     # Si aucun sticker n'a pu être envoyé
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Aucun sticker utilisable trouvé sur ce serveur.")
+                    logger.error("Aucun sticker utilisable trouvé sur ce serveur.")
                     await message.channel.send("Aucun sticker utilisable trouvé sur ce serveur.")
             else:
                 await message.channel.send("Aucun sticker personnalisé trouvé sur ce serveur.")
@@ -303,7 +321,7 @@ async def on_message(message):
             )
             await message.channel.send(response)
         except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur lors de l'appel à l'API: {e}")
+            logger.error(f"Erreur lors de l'appel à l'API: {e}")
             await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
     # Assurer que les autres gestionnaires d'événements reçoivent également le message
     await bot.process_commands(message)
