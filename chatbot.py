@@ -3,14 +3,15 @@ from discord.ext import commands
 import requests
 import json
 import os
-import random  # Ajouté pour choisir un sticker aléatoire
+import random
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Charger les variables d'environnement
 load_dotenv()
 
 # Version du bot
-VERSION = "4.0.0"  # Modifiable selon la version actuelle
+VERSION = "4.0.1"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement
 MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
@@ -37,7 +38,7 @@ def load_history():
                             data[channel_id]["messages"] = data[channel_id]["messages"][-MAX_HISTORY_LENGTH:]
                 return data
             except json.JSONDecodeError:
-                print("Erreur de lecture du fichier d'historique. Création d'un nouveau fichier.")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur de lecture du fichier d'historique. Création d'un nouveau fichier.")
                 return {}
     return {}
 
@@ -51,7 +52,7 @@ def get_personality_prompt():
         with open('personality_prompt.txt', 'r', encoding='utf-8') as file:
             return file.read().strip()
     except FileNotFoundError:
-        print("Le fichier personality_prompt.txt n'a pas été trouvé. Utilisation d'un prompt par défaut.")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Le fichier personality_prompt.txt n'a pas été trouvé. Utilisation d'un prompt par défaut.")
         return """Tu es un assistant utile et poli qui peut analyser des images.
         Quand on te montre une image, décris-la et donne ton avis si on te le demande.
         Réponds toujours en français avec un ton naturel et amical.
@@ -70,7 +71,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f'Le bot est connecté en tant que {bot.user}')
+    print(f'[{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}] Le bot est connecté en tant que {bot.user}')
     global conversation_history
     conversation_history = load_history()
     # Récupérer le canal spécifié
@@ -167,12 +168,12 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
                 save_history(conversation_history)
                 return assistant_response
             else:
-                print(f"Réponse API inattendue: {response_data}")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Réponse API inattendue: {response_data}")
                 return "Désolé, je n'ai pas reçu de réponse valide de l'API."
         else:
             return f"Erreur API: {response.status_code}"
     except requests.exceptions.RequestException as e:
-        print(f"Erreur lors de l'appel API: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur lors de l'appel API: {e}")
         return "Désolé, une erreur réseau est survenue lors de la communication avec l'API."
 
 @bot.command(name='reset')
@@ -203,7 +204,6 @@ async def on_message(message):
     # Ignorer les messages du bot lui-même
     if message.author == bot.user:
         return
-
     # Vérifier si le message contient des stickers
     if message.stickers:
         # Obtenir le serveur (guild) du message
@@ -212,31 +212,37 @@ async def on_message(message):
             # Obtenir la liste des stickers personnalisés du serveur
             stickers = guild.stickers
             if stickers:
-                # Choisir un sticker aléatoire (ou spécifique)
-                sticker = random.choice(stickers)
-                # Envoyer le sticker en réponse
-                await message.channel.send(stickers=[sticker])
+                # Mélanger la liste des stickers pour essayer dans un ordre aléatoire
+                random_stickers = random.sample(stickers, len(stickers))
+                for sticker in random_stickers:
+                    try:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Envoi du sticker: {sticker.name} (ID: {sticker.id})")
+                        await message.channel.send(stickers=[sticker])
+                        break  # Si ça marche, on sort de la boucle
+                    except discord.errors.Forbidden as e:
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur lors de l'envoi du sticker: {sticker.name} (ID: {sticker.id}). Erreur: {e}")
+                        continue
+                else:
+                    # Si aucun sticker n'a pu être envoyé
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Aucun sticker utilisable trouvé sur ce serveur.")
+                    await message.channel.send("Aucun sticker utilisable trouvé sur ce serveur.")
             else:
                 await message.channel.send("Aucun sticker personnalisé trouvé sur ce serveur.")
         else:
             await message.channel.send("Ce message ne provient pas d'un serveur.")
         return  # Retourner pour éviter que le reste du code ne s'exécute
-
     # Vérifier si le message provient du channel spécifique
     if message.channel.id != CHANNEL_ID:
         return
-
     # Si le message commence par le préfixe du bot, traiter comme une commande
     if message.content.startswith('!'):
         await bot.process_commands(message)
         return
-
     # Résolution des mentions dans le message
     resolved_content = message.content
     for user in message.mentions:
         # Remplacer chaque mention par le nom d'utilisateur
         resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
-
     # Vérifier le nombre d'images dans le message
     image_count = 0
     if message.attachments:
@@ -247,7 +253,6 @@ async def on_message(message):
         if image_count > 3:
             await message.channel.send("Erreur : Vous ne pouvez pas envoyer plus de trois images dans un seul message. Veuillez diviser votre envoi en plusieurs messages.")
             return
-
     # Vérifier les pièces jointes pour la taille des images
     if message.attachments:
         # D'abord, vérifier toutes les images pour leur taille
@@ -262,7 +267,6 @@ async def on_message(message):
             image_list = ", ".join(too_large_images)
             await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de 2 Mo : {image_list}. Veuillez envoyer des images plus petites.")
             return
-
     # Récupérer ou initialiser l'historique pour ce channel
     channel_id = str(message.channel.id)
     global conversation_history
@@ -277,7 +281,6 @@ async def on_message(message):
     # Assurer que la clé messages existe
     if "messages" not in conversation_history[channel_id]:
         conversation_history[channel_id]["messages"] = []
-
     # Traitement des images dans le message
     image_url = None
     if message.attachments:
@@ -285,10 +288,8 @@ async def on_message(message):
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 image_url = attachment.url
                 break
-
     # Utiliser le contenu résolu (avec les mentions remplacées)
     prompt = resolved_content
-
     # Indiquer que le bot est en train de taper
     async with message.channel.typing():
         try:
@@ -302,9 +303,8 @@ async def on_message(message):
             )
             await message.channel.send(response)
         except Exception as e:
-            print(f"Erreur lors de l'appel à l'API: {e}")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Erreur lors de l'appel à l'API: {e}")
             await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
-
     # Assurer que les autres gestionnaires d'événements reçoivent également le message
     await bot.process_commands(message)
 
