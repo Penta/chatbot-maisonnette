@@ -277,7 +277,7 @@ async def on_message(message):
         too_large_images = []
         for attachment in message.attachments:
             if attachment.content_type and attachment.content_type.startswith('image/'):
-                max_size = 2 * 1024 * 1024  # 2 Mo en octets
+                max_size = 5 * 1024 * 1024  # 2 Mo en octets
                 if attachment.size > max_size:
                     too_large_images.append(attachment.filename)
         # Si des images trop grandes sont trouvées, envoyer un message d'erreur et arrêter
