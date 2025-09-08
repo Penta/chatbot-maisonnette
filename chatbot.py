@@ -29,7 +29,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.1.0"  # Modifiable selon la version actuelle
+VERSION = "4.1.1"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement
 MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
@@ -283,7 +283,7 @@ async def on_message(message):
         # Si des images trop grandes sont trouvées, envoyer un message d'erreur et arrêter
         if too_large_images:
             image_list = ", ".join(too_large_images)
-            await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de 2 Mo : {image_list}. Veuillez envoyer des images plus petites.")
+            await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de 5 Mo : {image_list}. Veuillez envoyer des images plus petites.")
             return
     # Récupérer ou initialiser l'historique pour ce channel
     channel_id = str(message.channel.id)
