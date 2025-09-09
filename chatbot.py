@@ -4,15 +4,14 @@ import requests
 import json
 import os
 import random
+import re
 from dotenv import load_dotenv
-from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 
 # Configuration du logger
 logger = logging.getLogger('discord_bot')
 logger.setLevel(logging.INFO)
-
 formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # Créer un gestionnaire de fichier avec rotation
@@ -29,19 +28,52 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.1.1"  # Modifiable selon la version actuelle
+VERSION = "4.2.0"  # Modifiable selon la version actuelle
 
-# Récupérer les variables d'environnement
-MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
+# Récupérer les variables d'environnement avec validation
+def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
+    value = os.getenv(var_name)
+    if value is None:
+        if is_critical:
+            logger.error(f"Variable d'environnement critique manquante: {var_name}")
+            if default is not None:
+                logger.warning(f"Utilisation de la valeur par défaut pour {var_name}")
+                return default
+            else:
+                raise ValueError(f"La variable d'environnement {var_name} est requise mais non définie.")
+        else:
+            logger.warning(f"Variable d'environnement non critique manquante: {var_name}. Utilisation de la valeur par défaut: {default}")
+            return default
+    if var_type == int:
+        try:
+            return int(value)
+        except ValueError:
+            logger.error(f"La variable d'environnement {var_name} doit être un entier. Valeur actuelle: {value}")
+            if default is not None:
+                return default
+            else:
+                raise ValueError(f"La variable d'environnement {var_name} doit être un entier.")
+    return value
+
+try:
+    # Variables d'environnement critiques
+    MISTRAL_API_KEY = get_env_variable('MISTRAL_API_KEY')
+    DISCORD_TOKEN = get_env_variable('DISCORD_TOKEN')
+    CHANNEL_ID = get_env_variable('CHANNEL_ID', var_type=int)
+
+    # Variables d'environnement non critiques avec valeurs par défaut
+    MAX_HISTORY_LENGTH = get_env_variable('MAX_HISTORY_LENGTH', is_critical=False, default=10, var_type=int)
+    HISTORY_FILE = get_env_variable('HISTORY_FILE', is_critical=False, default="conversation_history.json")
+
+    logger.info("Toutes les variables d'environnement critiques ont été chargées avec succès.")
+except ValueError as e:
+    logger.error(f"Erreur lors du chargement des variables d'environnement: {e}")
+    # Si une variable critique est manquante, le bot ne peut pas fonctionner correctement.
+    # Il est donc préférable de quitter le programme avec un code d'erreur.
+    exit(1)
 
 # Endpoint API Mistral
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-
-# Fichier pour stocker l'historique
-HISTORY_FILE = "conversation_history.json"
-MAX_HISTORY_LENGTH = 10  # Limité à 10 messages
 
 def load_history():
     """Charge l'historique depuis un fichier JSON."""
@@ -222,6 +254,11 @@ async def on_message(message):
     # Ignorer les messages du bot lui-même
     if message.author == bot.user:
         return
+        
+    # Vérifier si le message provient du channel spécifique
+    if message.channel.id != CHANNEL_ID:
+        return
+        
     # Vérifier si le message contient des stickers
     if message.stickers:
         # Obtenir le serveur (guild) du message
@@ -248,43 +285,60 @@ async def on_message(message):
                 await message.channel.send("Aucun sticker personnalisé trouvé sur ce serveur.")
         else:
             await message.channel.send("Ce message ne provient pas d'un serveur.")
-        return  # Retourner pour éviter que le reste du code ne s'exécute
-    # Vérifier si le message provient du channel spécifique
-    if message.channel.id != CHANNEL_ID:
+        return 
+    
+    # Vérifier si le message contient uniquement un emoji personnalisé
+    emoji_pattern = re.compile(r'^<a?:\w+:\d+>$|^[\u2600-\u27BF\u1F300-\u1F6FF\u1F900-\u1F9FF]+$', re.UNICODE)
+    content = message.content.strip()
+    if emoji_pattern.match(content):
+        guild = message.guild
+        if guild and guild.emojis:
+            # Choisir un emoji aléatoire parmi ceux du serveur
+            random_emoji = random.choice(guild.emojis)
+            try:
+                await message.channel.send(str(random_emoji))
+                return  # Retourner pour éviter que le reste du code ne s'exécute
+            except discord.errors.Forbidden as e:
+                logger.error(f"Erreur lors de l'envoi de l'emoji: {random_emoji.name} (ID: {random_emoji.id}). Erreur: {e}")
+                await message.channel.send("Je n'ai pas pu envoyer d'emoji en réponse.")
+        else:
+            await message.channel.send("Aucun emoji personnalisé trouvé sur ce serveur.")
         return
+        
     # Si le message commence par le préfixe du bot, traiter comme une commande
     if message.content.startswith('!'):
         await bot.process_commands(message)
         return
+        
     # Résolution des mentions dans le message
     resolved_content = message.content
     for user in message.mentions:
         # Remplacer chaque mention par le nom d'utilisateur
         resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
-    # Vérifier le nombre d'images dans le message
-    image_count = 0
+        
+    # Vérifier les pièces jointes pour les images
     if message.attachments:
+        image_count = 0
+        too_large_images = []
+        max_size = 5 * 1024 * 1024  # 5 Mo en octets
+
         for attachment in message.attachments:
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 image_count += 1
-        # Vérifier si le nombre d'images dépasse la limite
-        if image_count > 3:
-            await message.channel.send("Erreur : Vous ne pouvez pas envoyer plus de trois images dans un seul message. Veuillez diviser votre envoi en plusieurs messages.")
-            return
-    # Vérifier les pièces jointes pour la taille des images
-    if message.attachments:
-        # D'abord, vérifier toutes les images pour leur taille
-        too_large_images = []
-        for attachment in message.attachments:
-            if attachment.content_type and attachment.content_type.startswith('image/'):
-                max_size = 5 * 1024 * 1024  # 2 Mo en octets
                 if attachment.size > max_size:
                     too_large_images.append(attachment.filename)
-        # Si des images trop grandes sont trouvées, envoyer un message d'erreur et arrêter
+
+        # Vérifier le nombre d'images
+        if image_count > 1:
+            await message.channel.send("Erreur : Vous ne pouvez pas envoyer plus de trois images dans un seul message. Veuillez diviser votre envoi en plusieurs messages.")
+            return
+
+        # Vérifier la taille des images
         if too_large_images:
             image_list = ", ".join(too_large_images)
             await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de 5 Mo : {image_list}. Veuillez envoyer des images plus petites.")
             return
+
     # Récupérer ou initialiser l'historique pour ce channel
     channel_id = str(message.channel.id)
     global conversation_history
