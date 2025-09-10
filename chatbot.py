@@ -28,7 +28,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.2.0"  # Modifiable selon la version actuelle
+VERSION = "4.3.0"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement avec validation
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
@@ -124,26 +124,21 @@ async def on_ready():
     logger.info(f'Le bot est connecté en tant que {bot.user}')
     global conversation_history
     conversation_history = load_history()
-    # Récupérer le canal spécifié
     channel = bot.get_channel(CHANNEL_ID)
     if channel is not None:
-        # Trouver la guilde (serveur) à laquelle appartient le canal
         guild = channel.guild
         if guild is not None:
-            # Récupérer le membre du bot sur cette guilde
             bot_member = guild.me
-            # Récupérer le pseudo du bot sur cette guilde
             bot_nickname = bot_member.display_name
         else:
-            bot_nickname = bot.user.name  # Utiliser le nom global si la guilde n'est pas trouvée
-        # Créer un embed avec le pseudo du bot
+            bot_nickname = bot.user.name
         embed = discord.Embed(
             title="Bot en ligne",
             description=f"{bot_nickname} est désormais en ligne. Version {VERSION}.",
             color=discord.Color.green()
         )
-        # Envoyer l'embed dans le canal
         await channel.send(embed=embed)
+    await bot.tree.sync()  # Synchroniser les commandes slash
 
 def call_mistral_api(prompt, history, image_url=None, user_id=None, username=None):
     headers = {
@@ -226,9 +221,9 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
         logger.error(f"Erreur lors de l'appel API: {e}")
         return "Désolé, une erreur réseau est survenue lors de la communication avec l'API."
 
-@bot.command(name='reset')
-async def reset_history(ctx):
-    channel_id = str(ctx.channel.id)
+@bot.tree.command(name="reset", description="Réinitialise l'historique de conversation")
+async def reset_history_slash(interaction: discord.Interaction):
+    channel_id = str(interaction.channel.id)
     if channel_id in conversation_history:
         # Conserver le même ID de conversation mais vider les messages
         if "messages" in conversation_history[channel_id]:
@@ -239,7 +234,7 @@ async def reset_history(ctx):
                 "messages": []
             }
         save_history(conversation_history)
-        await ctx.send("L'historique de conversation a été réinitialisé.")
+        await interaction.response.send_message("L'historique de conversation a été réinitialisé.")
     else:
         conversation_id = str(len(conversation_history) + 1)
         conversation_history[channel_id] = {
@@ -247,7 +242,7 @@ async def reset_history(ctx):
             "messages": []
         }
         save_history(conversation_history)
-        await ctx.send("Aucun historique de conversation trouvé pour ce channel. Créé un nouvel historique.")
+        await interaction.response.send_message("Aucun historique de conversation trouvé pour ce channel. Créé un nouvel historique.")
 
 @bot.event
 async def on_message(message):
@@ -288,7 +283,7 @@ async def on_message(message):
         return 
     
     # Vérifier si le message contient uniquement un emoji personnalisé
-    emoji_pattern = re.compile(r'^<a?:\w+:\d+>$|^[\u2600-\u27BF\u1F300-\u1F6FF\u1F900-\u1F9FF]+$', re.UNICODE)
+    emoji_pattern = re.compile(r'^<a?:\w+:\d+>$')
     content = message.content.strip()
     if emoji_pattern.match(content):
         guild = message.guild
@@ -303,11 +298,6 @@ async def on_message(message):
                 await message.channel.send("Je n'ai pas pu envoyer d'emoji en réponse.")
         else:
             await message.channel.send("Aucun emoji personnalisé trouvé sur ce serveur.")
-        return
-        
-    # Si le message commence par le préfixe du bot, traiter comme une commande
-    if message.content.startswith('!'):
-        await bot.process_commands(message)
         return
         
     # Résolution des mentions dans le message
@@ -342,7 +332,6 @@ async def on_message(message):
     # Récupérer ou initialiser l'historique pour ce channel
     channel_id = str(message.channel.id)
     global conversation_history
-    # Charger l'historique actuel
     conversation_history = load_history()
     if channel_id not in conversation_history:
         conversation_id = str(len(conversation_history) + 1)
@@ -350,9 +339,9 @@ async def on_message(message):
             "conversation_id": conversation_id,
             "messages": []
         }
-    # Assurer que la clé messages existe
     if "messages" not in conversation_history[channel_id]:
         conversation_history[channel_id]["messages"] = []
+        
     # Traitement des images dans le message
     image_url = None
     if message.attachments:
@@ -360,6 +349,7 @@ async def on_message(message):
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 image_url = attachment.url
                 break
+                
     # Utiliser le contenu résolu (avec les mentions remplacées)
     prompt = resolved_content
     # Indiquer que le bot est en train de taper
