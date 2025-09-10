@@ -28,7 +28,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.3.0"  # Modifiable selon la version actuelle
+VERSION = "4.3.1"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement avec validation
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
@@ -249,11 +249,11 @@ async def on_message(message):
     # Ignorer les messages du bot lui-même
     if message.author == bot.user:
         return
-        
+
     # Vérifier si le message provient du channel spécifique
     if message.channel.id != CHANNEL_ID:
         return
-        
+
     # Vérifier si le message contient des stickers
     if message.stickers:
         # Obtenir le serveur (guild) du message
@@ -280,8 +280,8 @@ async def on_message(message):
                 await message.channel.send("Aucun sticker personnalisé trouvé sur ce serveur.")
         else:
             await message.channel.send("Ce message ne provient pas d'un serveur.")
-        return 
-    
+        return
+
     # Vérifier si le message contient uniquement un emoji personnalisé
     emoji_pattern = re.compile(r'^<a?:\w+:\d+>$')
     content = message.content.strip()
@@ -299,28 +299,46 @@ async def on_message(message):
         else:
             await message.channel.send("Aucun emoji personnalisé trouvé sur ce serveur.")
         return
-        
+
     # Résolution des mentions dans le message
     resolved_content = message.content
     for user in message.mentions:
         # Remplacer chaque mention par le nom d'utilisateur
         resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
-        
-    # Vérifier les pièces jointes pour les images
+
+    # Vérifier les pièces jointes pour les images et autres fichiers
     if message.attachments:
         image_count = 0
+        non_image_files = []
         too_large_images = []
         max_size = 5 * 1024 * 1024  # 5 Mo en octets
-
         for attachment in message.attachments:
+            is_image = False
+            # Vérifier le content_type si disponible
             if attachment.content_type and attachment.content_type.startswith('image/'):
+                is_image = True
+            else:
+                # Si content_type n'est pas disponible ou pas une image, vérifier l'extension
+                image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.svg']
+                if any(attachment.filename.lower().endswith(ext) for ext in image_extensions):
+                    is_image = True
+
+            if is_image:
                 image_count += 1
                 if attachment.size > max_size:
                     too_large_images.append(attachment.filename)
+            else:
+                non_image_files.append(attachment.filename)
+
+        # Vérifier la présence de fichiers non-image
+        if non_image_files:
+            file_list = ", ".join(non_image_files)
+            await message.channel.send(f"Erreur : Les fichiers suivants ne sont pas des images et ne sont pas pris en charge : {file_list}. Veuillez envoyer uniquement des images.")
+            return
 
         # Vérifier le nombre d'images
         if image_count > 1:
-            await message.channel.send("Erreur : Vous ne pouvez pas envoyer plus de trois images dans un seul message. Veuillez diviser votre envoi en plusieurs messages.")
+            await message.channel.send("Erreur : Vous ne pouvez pas envoyer plus d'une image en un seul message.")
             return
 
         # Vérifier la taille des images
@@ -341,7 +359,7 @@ async def on_message(message):
         }
     if "messages" not in conversation_history[channel_id]:
         conversation_history[channel_id]["messages"] = []
-        
+
     # Traitement des images dans le message
     image_url = None
     if message.attachments:
@@ -349,7 +367,7 @@ async def on_message(message):
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 image_url = attachment.url
                 break
-                
+
     # Utiliser le contenu résolu (avec les mentions remplacées)
     prompt = resolved_content
     # Indiquer que le bot est en train de taper
