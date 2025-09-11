@@ -28,7 +28,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.3.1"  # Modifiable selon la version actuelle
+VERSION = "4.4.0"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement avec validation
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
@@ -192,7 +192,7 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
                 "content": msg["content"]
             })
     data = {
-        "model": "pixtral-large-latest",
+        "model": "mistral-medium-2508",
         "messages": messages,
         "max_tokens": 1000
     }
