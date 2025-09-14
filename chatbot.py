@@ -257,14 +257,16 @@ async def on_message(message):
             # Traiter comme avant (ignorer pour l'instant, car nous voulons que la nouvelle fonctionnalité s'applique partout sauf dans CHANNEL_ID)
             pass
         else:
-            # Récupérer les dix derniers messages dans ce canal (sans compter le message actuel)
+            # Récupérer les vingt derniers messages dans ce canal (sans compter le message actuel)
             context_messages = []
-            async for msg in message.channel.history(limit=10, before=message):
+            async for msg in message.channel.history(limit=20, before=message):
                 # Remplacer les mentions par les noms d'utilisateur pour éviter les références circulaires
                 resolved_content = msg.content
                 for user in msg.mentions:
                     resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
-                context_messages.append(resolved_content)
+                # Ajouter le nom de l'auteur avant le contenu du message
+                author_name = msg.author.display_name
+                context_messages.append(f"{author_name}: {resolved_content}")
             # Inverser l'ordre pour avoir les messages du plus ancien au plus récent
             context_messages.reverse()
             # Construire le contexte
