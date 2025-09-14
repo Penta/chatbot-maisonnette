@@ -28,7 +28,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.4.0"  # Modifiable selon la version actuelle
+VERSION = "4.5.0"  # Modifiable selon la version actuelle
 
 # Récupérer les variables d'environnement avec validation
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
@@ -250,30 +250,81 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # Vérifier si le bot est mentionné dans le message
+    if bot.user.mentioned_in(message):
+        # Vérifier si le message provient du channel spécifique
+        if message.channel.id == CHANNEL_ID:
+            # Traiter comme avant (ignorer pour l'instant, car nous voulons que la nouvelle fonctionnalité s'applique partout sauf dans CHANNEL_ID)
+            pass
+        else:
+            # Récupérer les dix derniers messages dans ce canal (sans compter le message actuel)
+            context_messages = []
+            async for msg in message.channel.history(limit=10, before=message):
+                # Remplacer les mentions par les noms d'utilisateur pour éviter les références circulaires
+                resolved_content = msg.content
+                for user in msg.mentions:
+                    resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
+                context_messages.append(resolved_content)
+            # Inverser l'ordre pour avoir les messages du plus ancien au plus récent
+            context_messages.reverse()
+            # Construire le contexte
+            context = "\n".join(context_messages)
+            # Préparer le prompt avec le contexte
+            # Remplacer les mentions dans le message actuel
+            resolved_content = message.content
+            for user in message.mentions:
+                resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
+            # Supprimer la mention du bot du message pour éviter les répétitions
+            bot_mention = f"<@{bot.user.id}>"
+            if bot_mention in resolved_content:
+                resolved_content = resolved_content.replace(bot_mention, "").strip()
+            prompt = f"Contexte de la conversation récente:\n{context}\n\nNouveau message: {resolved_content}"
+            # Utiliser le prompt pour appeler l'API Mistral
+            channel_id = str(message.channel.id)
+            # Créer un historique temporaire pour cette conversation
+            temp_history = {
+                "messages": [
+                    {"role": "system", "content": get_personality_prompt()},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+            # Appeler l'API Mistral
+            async with message.channel.typing():
+                try:
+                    response = call_mistral_api(
+                        prompt,
+                        temp_history,  # Utiliser l'historique temporaire
+                        None,  # Pas d'image ici
+                        user_id=str(message.author.id),
+                        username=message.author.display_name
+                    )
+                    await message.channel.send(response)
+                except Exception as e:
+                    logger.error(f"Erreur lors de l'appel à l'API: {e}")
+                    await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
+            return
+
     # Vérifier si le message provient du channel spécifique
     if message.channel.id != CHANNEL_ID:
         return
 
-    # Vérifier si le message contient des stickers
+    # Le reste de la fonction on_message pour le traitement normal dans le canal spécifique
+    # Gestion des stickers (code existant)
     if message.stickers:
-        # Obtenir le serveur (guild) du message
         guild = message.guild
         if guild:
-            # Obtenir la liste des stickers personnalisés du serveur
             stickers = guild.stickers
             if stickers:
-                # Mélanger la liste des stickers pour essayer dans un ordre aléatoire
                 random_stickers = random.sample(stickers, len(stickers))
                 for sticker in random_stickers:
                     try:
                         logger.info(f"Envoi du sticker: {sticker.name} (ID: {sticker.id})")
                         await message.channel.send(stickers=[sticker])
-                        break  # Si ça marche, on sort de la boucle
+                        break
                     except discord.errors.Forbidden as e:
                         logger.error(f"Erreur lors de l'envoi du sticker: {sticker.name} (ID: {sticker.id}). Erreur: {e}")
                         continue
                 else:
-                    # Si aucun sticker n'a pu être envoyé
                     logger.error("Aucun sticker utilisable trouvé sur ce serveur.")
                     await message.channel.send("Aucun sticker utilisable trouvé sur ce serveur.")
             else:
@@ -282,17 +333,16 @@ async def on_message(message):
             await message.channel.send("Ce message ne provient pas d'un serveur.")
         return
 
-    # Vérifier si le message contient uniquement un emoji personnalisé
+    # Gestion des emojis personnalisés (code existant)
     emoji_pattern = re.compile(r'^<a?:\w+:\d+>$')
     content = message.content.strip()
     if emoji_pattern.match(content):
         guild = message.guild
         if guild and guild.emojis:
-            # Choisir un emoji aléatoire parmi ceux du serveur
             random_emoji = random.choice(guild.emojis)
             try:
                 await message.channel.send(str(random_emoji))
-                return  # Retourner pour éviter que le reste du code ne s'exécute
+                return
             except discord.errors.Forbidden as e:
                 logger.error(f"Erreur lors de l'envoi de l'emoji: {random_emoji.name} (ID: {random_emoji.id}). Erreur: {e}")
                 await message.channel.send("Je n'ai pas pu envoyer d'emoji en réponse.")
@@ -300,13 +350,7 @@ async def on_message(message):
             await message.channel.send("Aucun emoji personnalisé trouvé sur ce serveur.")
         return
 
-    # Résolution des mentions dans le message
-    resolved_content = message.content
-    for user in message.mentions:
-        # Remplacer chaque mention par le nom d'utilisateur
-        resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
-
-    # Vérifier les pièces jointes pour les images et autres fichiers
+    # Traitement des images et autres fonctionnalités (code existant)
     if message.attachments:
         image_count = 0
         non_image_files = []
@@ -314,34 +358,25 @@ async def on_message(message):
         max_size = 5 * 1024 * 1024  # 5 Mo en octets
         for attachment in message.attachments:
             is_image = False
-            # Vérifier le content_type si disponible
             if attachment.content_type and attachment.content_type.startswith('image/'):
                 is_image = True
             else:
-                # Si content_type n'est pas disponible ou pas une image, vérifier l'extension
                 image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.svg']
                 if any(attachment.filename.lower().endswith(ext) for ext in image_extensions):
                     is_image = True
-
             if is_image:
                 image_count += 1
                 if attachment.size > max_size:
                     too_large_images.append(attachment.filename)
             else:
                 non_image_files.append(attachment.filename)
-
-        # Vérifier la présence de fichiers non-image
         if non_image_files:
             file_list = ", ".join(non_image_files)
             await message.channel.send(f"Erreur : Les fichiers suivants ne sont pas des images et ne sont pas pris en charge : {file_list}. Veuillez envoyer uniquement des images.")
             return
-
-        # Vérifier le nombre d'images
         if image_count > 1:
             await message.channel.send("Erreur : Vous ne pouvez pas envoyer plus d'une image en un seul message.")
             return
-
-        # Vérifier la taille des images
         if too_large_images:
             image_list = ", ".join(too_large_images)
             await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de 5 Mo : {image_list}. Veuillez envoyer des images plus petites.")
@@ -360,7 +395,7 @@ async def on_message(message):
     if "messages" not in conversation_history[channel_id]:
         conversation_history[channel_id]["messages"] = []
 
-    # Traitement des images dans le message
+    # Traitement des images dans le message (code existant)
     image_url = None
     if message.attachments:
         for attachment in message.attachments:
@@ -369,11 +404,14 @@ async def on_message(message):
                 break
 
     # Utiliser le contenu résolu (avec les mentions remplacées)
+    resolved_content = message.content
+    for user in message.mentions:
+        resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
     prompt = resolved_content
-    # Indiquer que le bot est en train de taper
+
+    # Appeler l'API Mistral (code existant)
     async with message.channel.typing():
         try:
-            # Appeler l'API Mistral avec l'historique de conversation, l'image si présente, et les infos de l'utilisateur
             response = call_mistral_api(
                 prompt,
                 conversation_history[channel_id],
@@ -385,6 +423,7 @@ async def on_message(message):
         except Exception as e:
             logger.error(f"Erreur lors de l'appel à l'API: {e}")
             await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
+
     # Assurer que les autres gestionnaires d'événements reçoivent également le message
     await bot.process_commands(message)
 
