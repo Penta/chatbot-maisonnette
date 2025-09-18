@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.6.0"
+VERSION = "4.6.1"
 
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
     value = os.getenv(var_name)
@@ -56,13 +56,19 @@ try:
     DISCORD_TOKEN = get_env_variable('DISCORD_TOKEN')
     CHANNEL_ID = get_env_variable('CHANNEL_ID', var_type=int)
     MAX_HISTORY_LENGTH = get_env_variable('MAX_HISTORY_LENGTH', is_critical=False, default=10, var_type=int)
+    CONTEXT_MESSAGE_LIMIT = get_env_variable('CONTEXT_MESSAGE_LIMIT', is_critical=False, default=20, var_type=int)
+    MAX_IMAGE_SIZE = get_env_variable('MAX_IMAGE_SIZE', is_critical=False, default=5*1024*1024, var_type=int)
     HISTORY_FILE = get_env_variable('HISTORY_FILE', is_critical=False, default="conversation_history.json")
+    MISTRAL_MODEL = get_env_variable('MISTRAL_MODEL', is_critical=False, default="mistral-medium-latest")
     logger.info("Toutes les variables d'environnement critiques ont été chargées avec succès.")
 except ValueError as e:
     logger.error(f"Erreur lors du chargement des variables d'environnement: {e}")
     exit(1)
 
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+
+def split_message(message, max_length=2000):
+    return [message[i:i+max_length] for i in range(0, len(message), max_length)]
 
 class ConversationHistory:
     def __init__(self, file_path, max_length):
@@ -132,7 +138,6 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
     }
     personality_prompt = get_personality_prompt()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     if image_url:
         user_content = [
             {"type": "text", "text": f"{username}: {prompt} (Date et heure : {current_time})" if username else f"{prompt} (Date et heure : {current_time})"},
@@ -148,24 +153,20 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
     else:
         user_content = f"{username}: {prompt} (Date et heure : {current_time})" if username else f"{prompt} (Date et heure : {current_time})"
         user_message = {"role": "user", "content": user_content}
-
     history["messages"].append(user_message)
     if len(history["messages"]) > MAX_HISTORY_LENGTH:
         history["messages"] = history["messages"][-MAX_HISTORY_LENGTH:]
-
     messages = [{"role": "system", "content": personality_prompt}]
     for msg in history["messages"]:
         messages.append({
             "role": msg["role"],
             "content": msg["content"] if isinstance(msg["content"], list) else msg["content"]
         })
-
     data = {
-        "model": "mistral-medium-latest",
+        "model": MISTRAL_MODEL,
         "messages": messages,
-        "max_tokens": 1000
+        "max_tokens": 128000
     }
-
     try:
         response = requests.post(MISTRAL_API_URL, headers=headers, data=json.dumps(data))
         response.raise_for_status()
@@ -276,7 +277,7 @@ async def handle_images(message):
         image_count = 0
         non_image_files = []
         too_large_images = []
-        max_size = 5 * 1024 * 1024  # 5 Mo en octets
+        max_size = MAX_IMAGE_SIZE
         for attachment in message.attachments:
             is_image = False
             if attachment.content_type and attachment.content_type.startswith('image/'):
@@ -300,13 +301,14 @@ async def handle_images(message):
             return False
         if too_large_images:
             image_list = ", ".join(too_large_images)
-            await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de 5 Mo : {image_list}. Veuillez envoyer des images plus petites.")
+            max_size_mb = max_size / (1024 * 1024)
+            await message.channel.send(f"Erreur : Les images suivantes dépassent la limite de {max_size_mb} Mo : {image_list}. Veuillez envoyer des images plus petites.")
             return False
     return True
 
 async def handle_bot_mention(message):
     context_messages = []
-    async for msg in message.channel.history(limit=20, before=message):
+    async for msg in message.channel.history(limit=CONTEXT_MESSAGE_LIMIT, before=message):
         resolved_content = msg.content
         for user in msg.mentions:
             resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
@@ -337,7 +339,12 @@ async def handle_bot_mention(message):
                 user_id=str(message.author.id),
                 username=message.author.display_name
             )
-            await message.channel.send(response)
+            if len(response) > 2000:
+                chunks = split_message(response)
+                for chunk in chunks:
+                    await message.channel.send(chunk)
+            else:
+                await message.channel.send(response)
         except Exception as e:
             logger.error(f"Erreur lors de l'appel à l'API: {e}")
             await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
@@ -381,7 +388,12 @@ async def on_message(message):
                 user_id=str(message.author.id),
                 username=message.author.display_name
             )
-            await message.channel.send(response)
+            if len(response) > 2000:
+                chunks = split_message(response)
+                for chunk in chunks:
+                    await message.channel.send(chunk)
+            else:
+                await message.channel.send(response)
         except Exception as e:
             logger.error(f"Erreur lors de l'appel à l'API: {e}")
             await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
