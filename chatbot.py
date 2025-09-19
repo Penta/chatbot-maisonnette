@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.6.1"
+VERSION = "4.6.2"
 
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
     value = os.getenv(var_name)
@@ -137,10 +137,10 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
         "Authorization": f"Bearer {MISTRAL_API_KEY}"
     }
     personality_prompt = get_personality_prompt()
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = datetime.now().strftime("%d-%m-%y %H:%M")
     if image_url:
         user_content = [
-            {"type": "text", "text": f"{username}: {prompt} (Date et heure : {current_time})" if username else f"{prompt} (Date et heure : {current_time})"},
+            {"type": "text", "text": f"{current_time}, {username} a écrit : {prompt}" if username else f"{current_time}, a écrit : {prompt}"},
             {
                 "type": "image_url",
                 "image_url": {
@@ -151,7 +151,7 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
         ]
         user_message = {"role": "user", "content": user_content}
     else:
-        user_content = f"{username}: {prompt} (Date et heure : {current_time})" if username else f"{prompt} (Date et heure : {current_time})"
+        user_content = [{"type": "text", "text": f"{current_time}, {username} a écrit : {prompt}" if username else f"{current_time}, a écrit : {prompt}"}]
         user_message = {"role": "user", "content": user_content}
     history["messages"].append(user_message)
     if len(history["messages"]) > MAX_HISTORY_LENGTH:
