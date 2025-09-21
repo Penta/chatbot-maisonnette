@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.6.2"
+VERSION = "4.6.3"
 
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
     value = os.getenv(var_name)
@@ -49,6 +49,15 @@ def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
                 return default
             else:
                 raise ValueError(f"La variable d'environnement {var_name} doit être un entier.")
+    elif var_type == float:
+        try:
+            return float(value)
+        except ValueError:
+            logger.error(f"La variable d'environnement {var_name} doit être un nombre décimal. Valeur actuelle: {value}")
+            if default is not None:
+                return default
+            else:
+                raise ValueError(f"La variable d'environnement {var_name} doit être un nombre décimal.")
     return value
 
 try:
@@ -60,6 +69,7 @@ try:
     MAX_IMAGE_SIZE = get_env_variable('MAX_IMAGE_SIZE', is_critical=False, default=5*1024*1024, var_type=int)
     HISTORY_FILE = get_env_variable('HISTORY_FILE', is_critical=False, default="conversation_history.json")
     MISTRAL_MODEL = get_env_variable('MISTRAL_MODEL', is_critical=False, default="mistral-medium-latest")
+    TEMPERATURE = get_env_variable('TEMPERATURE', is_critical=False, default=0.7, var_type=float)
     logger.info("Toutes les variables d'environnement critiques ont été chargées avec succès.")
 except ValueError as e:
     logger.error(f"Erreur lors du chargement des variables d'environnement: {e}")
@@ -165,7 +175,8 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
     data = {
         "model": MISTRAL_MODEL,
         "messages": messages,
-        "max_tokens": 128000
+        "max_tokens": 128000,
+        "temperature": TEMPERATURE
     }
     try:
         response = requests.post(MISTRAL_API_URL, headers=headers, data=json.dumps(data))
