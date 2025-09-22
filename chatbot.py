@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.6.3"
+VERSION = "4.6.4"
 
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
     value = os.getenv(var_name)
@@ -166,12 +166,16 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
     history["messages"].append(user_message)
     if len(history["messages"]) > MAX_HISTORY_LENGTH:
         history["messages"] = history["messages"][-MAX_HISTORY_LENGTH:]
-    messages = [{"role": "system", "content": personality_prompt}]
+
+    # Construire la liste des messages avec l'historique d'abord, puis le prompt de personnalité
+    messages = []
     for msg in history["messages"]:
         messages.append({
             "role": msg["role"],
             "content": msg["content"] if isinstance(msg["content"], list) else msg["content"]
         })
+    messages.append({"role": "system", "content": personality_prompt})
+
     data = {
         "model": MISTRAL_MODEL,
         "messages": messages,
