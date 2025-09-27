@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.6.4"
+VERSION = "4.6.5"
 
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
     value = os.getenv(var_name)
@@ -368,20 +368,27 @@ async def handle_bot_mention(message):
 async def on_message(message):
     if message.author == bot.user:
         return
-    if bot.user.mentioned_in(message):
-        if message.channel.id == CHANNEL_ID:
-            pass
-        else:
-            await handle_bot_mention(message)
-            return
+
+    # Obtenez le pseudo du bot sur le serveur où le message a été envoyé
+    if message.guild:
+        bot_nickname = message.guild.me.display_name
+    else:
+        bot_nickname = bot.user.name
+
+    if re.search(r'\b' + re.escape(bot_nickname) + r'\b', message.content, re.IGNORECASE):
+        await handle_bot_mention(message)
+        return
+
     if message.channel.id != CHANNEL_ID:
         return
+
     if await handle_stickers(message):
         return
     if await handle_emojis(message):
         return
     if not await handle_images(message):
         return
+
     channel_id = str(message.channel.id)
     history = history_manager.get_history(channel_id)
     image_url = None
@@ -394,7 +401,7 @@ async def on_message(message):
     for user in message.mentions:
         resolved_content = resolved_content.replace(f"<@{user.id}>", f"@{user.display_name}")
     prompt = resolved_content
-    async with message.channel.typing():
+    async with message.channel.send(typing=True):
         try:
             response = call_mistral_api(
                 prompt,
@@ -412,6 +419,7 @@ async def on_message(message):
         except Exception as e:
             logger.error(f"Erreur lors de l'appel à l'API: {e}")
             await message.channel.send("Désolé, une erreur est survenue lors du traitement de votre demande.")
+
     await bot.process_commands(message)
 
 bot.run(DISCORD_TOKEN)
