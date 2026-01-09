@@ -25,7 +25,7 @@ logger.addHandler(console_handler)
 load_dotenv()
 
 # Version du bot
-VERSION = "4.6.3"
+VERSION = "4.6.8"
 
 def get_env_variable(var_name, is_critical=True, default=None, var_type=str):
     value = os.getenv(var_name)
@@ -163,15 +163,14 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
     else:
         user_content = [{"type": "text", "text": f"{current_time}, {username} a écrit : {prompt}" if username else f"{current_time}, a écrit : {prompt}"}]
         user_message = {"role": "user", "content": user_content}
-    history["messages"].append(user_message)
-    if len(history["messages"]) > MAX_HISTORY_LENGTH:
-        history["messages"] = history["messages"][-MAX_HISTORY_LENGTH:]
+    # Crée une copie de l'historique pour construire le contexte sans modifier l'original
     messages = [{"role": "system", "content": personality_prompt}]
     for msg in history["messages"]:
         messages.append({
             "role": msg["role"],
             "content": msg["content"] if isinstance(msg["content"], list) else msg["content"]
         })
+    messages.append(user_message)  # Ajoute le nouveau message au contexte pour l'API
     data = {
         "model": MISTRAL_MODEL,
         "messages": messages,
@@ -185,6 +184,8 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
             response_data = response.json()
             if 'choices' in response_data and len(response_data['choices']) > 0:
                 assistant_response = response_data['choices'][0]['message']['content']
+                # Mets à jour l'historique uniquement en cas de succès
+                history["messages"].append(user_message)
                 history["messages"].append({"role": "assistant", "content": assistant_response})
                 if 'usage' in response_data:
                     prompt_tokens = response_data['usage']['prompt_tokens']
@@ -206,7 +207,11 @@ def call_mistral_api(prompt, history, image_url=None, user_id=None, username=Non
             return f"Erreur API: {response.status_code}"
     except requests.exceptions.RequestException as e:
         logger.error(f"Erreur lors de l'appel API: {e}")
-        return "Désolé, une erreur réseau est survenue lors de la communication avec l'API."
+        # Ne modifie pas l'historique en cas d'erreur
+        if image_url:
+            return "Désolé, je n'ai pas pu lire l'image. Veuillez réessayer avec une autre image."
+        else:
+            return "Désolé, une erreur réseau est survenue lors de la communication avec l'API."
 
 intents = discord.Intents.default()
 intents.messages = True
