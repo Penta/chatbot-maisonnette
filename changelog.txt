@@ -1,0 +1,49 @@
+CHANGELOG — Chatbot Discord
+===========================
+
+
+Version 5.1.0 — 27/10/2026
+--------------------------
+
+Nouveautés
+- Réponses aux messages : quand on utilise « Répondre » sur un message, même
+  ancien, le bot lit le message cité et en tient compte dans sa réponse.
+  - Si le message cité vient du bot, il sait qu'il s'agit de sa propre réponse.
+  - Le texte cité est limité à 500 caractères.
+  - Si le message cité contient une image, elle est aussi envoyée à Claude,
+    sauf si la réponse contient déjà sa propre image (celle-ci est prioritaire).
+  - Fonctionne dans le salon dédié et en mode mention.
+- En mode mention, le bot peut maintenant voir une image, celle du message cité.
+
+Améliorations
+- Le téléchargement et la préparation des images passent par une seule
+  fonction, partagée entre le salon dédié et les messages cités.
+- Une image citée illisible ou trop lourde est simplement ignorée (avertissement
+  dans bot.log) au lieu de bloquer la réponse.
+- La commande /reset est réservée aux modérateurs (permission « Gérer les
+  messages ») et aux administrateurs du serveur.
+  - Elle est masquée pour les autres membres et n'est plus disponible en
+    messages privés.
+  - Si un administrateur l'ouvre à tous dans les paramètres du serveur, le bot
+    refuse quand même la commande (réponse visible uniquement par l'auteur) et
+    note la tentative dans bot.log.
+
+Divers
+- discord.py 2.5 minimum est désormais requis (requirements.txt).
+- README : ajout de la fonctionnalité « Réponses ».
+- README : précision sur les droits nécessaires pour /reset.
+
+
+Version 5.0.0 — 27/10/2026
+--------------------------
+
+Nouveautés
+- Passage de Mistral à Claude (Anthropic) pour générer les réponses.
+- Réécriture complète du Bot.
+
+Migration depuis la version 4 (Mistral)
+- L'ancien conversation_history.json est converti automatiquement au premier
+  lancement (les images sont remplacées par un marqueur texte).
+- Dans le .env : MISTRAL_API_KEY devient ANTHROPIC_API_KEY, et MISTRAL_MODEL
+  devient CLAUDE_MODEL.
+- L'intent Discord « Presence » n'est plus nécessaire.
