@@ -5,3 +5,7 @@ __pycache__/
 venv/
 bot.log*
 conversation_history.json*
+.claude/
+.vscode/
+# Personnalité perso (peut contenir des infos privées)
+*.local.txt

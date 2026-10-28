@@ -16,6 +16,7 @@ from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
 from .history import IMAGE_MARKER, ConversationHistory
 from .images import ImageError, prepare_image
+from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
 from .text_utils import split_message
 
 logger = logging.getLogger("chatbot.discord")
@@ -28,6 +29,20 @@ QUOTE_MAX_LENGTH = 500
 
 def looks_like_image(attachment: discord.Attachment) -> bool:
     return (attachment.content_type or "").startswith("image/") or attachment.filename.lower().endswith(IMAGE_EXTENSIONS)
+
+
+def looks_like_text(attachment: discord.Attachment) -> bool:
+    return attachment.filename.lower().endswith(TEXT_EXTENSIONS)
+
+
+def text_file_prompt(name: str, content: str) -> str:
+    """Contenu d'un fichier .txt tel qu'il est transmis à Claude."""
+    return f"\n\n[Contenu du fichier joint « {name} » :]\n{content}\n[Fin du fichier « {name} »]"
+
+
+def text_file_marker(name: str) -> str:
+    """Remplace un fichier .txt dans la mémoire (son contenu n'est pas conservé)."""
+    return f"[fichier texte joint « {name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
 
 
 class ChatBot(commands.Bot):
@@ -102,9 +117,10 @@ class ChatBot(commands.Bot):
         if await self.reply_to_emoji(message):
             return
 
-        image = await self.read_image(message)
-        if image is False:
+        attachments = await self.read_attachments(message)
+        if attachments is False:
             return  # pièce jointe refusée, l'utilisateur a été prévenu
+        image, text_file = attachments
 
         # L'image du message cité n'est utilisée que si le message n'en contient pas lui-même.
         reply, reply_image = await self.read_reply(message, want_image=image is None)
@@ -114,6 +130,9 @@ class ChatBot(commands.Bot):
         reply_part = f" ({reply})" if reply else ""
         user_text = f"{self.timestamp(message)}, {message.author.display_name} a écrit{reply_part} : {text}"
         stored_text = user_text + (f" {IMAGE_MARKER}" if image else "")
+        if text_file:
+            user_text += text_file_prompt(*text_file)
+            stored_text += f" {text_file_marker(text_file[0])}"
 
         # Un seul appel à la fois par salon : l'historique reste cohérent.
         async with self.history.lock(message.channel.id):
@@ -159,6 +178,15 @@ class ChatBot(commands.Bot):
         reply_part = f" ({reply})" if reply else ""
         parts.append(f"{self.timestamp(message)}, {message.author.display_name} te mentionne{reply_part} et écrit : {text}")
         prompt = "\n\n".join(parts)
+
+        # Seuls les fichiers .txt de la mention sont lus (les autres pièces jointes sont ignorées).
+        text_files = [a for a in message.attachments if looks_like_text(a)]
+        if text_files:
+            try:
+                prompt += text_file_prompt(*await self.download_text_file(text_files[0]))
+            except TextFileError as exc:
+                await self.safe_reply(message, exc.user_message)
+                return
 
         async with message.channel.typing():
             try:
@@ -206,30 +234,52 @@ class ChatBot(commands.Bot):
             logger.warning("Impossible d'envoyer l'emoji : %s", exc)
         return True
 
-    # ---------------------------------------------------------------- images
+    # ------------------------------------------------------- pièces jointes
 
-    async def read_image(self, message: discord.Message) -> ImageData | None | bool:
-        """Vérifie les pièces jointes et télécharge l'image.
+    async def read_attachments(
+        self, message: discord.Message
+    ) -> tuple[ImageData | None, tuple[str, str] | None] | bool:
+        """Vérifie les pièces jointes, puis télécharge l'image et le fichier .txt.
 
-        Renvoie l'image, None s'il n'y en a pas, ou False si l'envoi est refusé
-        (l'utilisateur est alors prévenu).
+        Renvoie (image, (nom, contenu) du fichier texte), chacun pouvant valoir None,
+        ou False si l'envoi est refusé (l'utilisateur est alors prévenu).
         """
         if not message.attachments:
-            return None
+            return None, None
 
-        others = [a.filename for a in message.attachments if not looks_like_image(a)]
+        images = [a for a in message.attachments if looks_like_image(a)]
+        texts = [a for a in message.attachments if looks_like_text(a)]
+        others = [a.filename for a in message.attachments if a not in images and a not in texts]
         if others:
-            await self.safe_reply(message, f"Je ne peux lire que des images. Fichier(s) non pris en charge : {', '.join(others)}.")
+            await self.safe_reply(message, f"Je ne peux lire que des images et des fichiers .txt. Fichier(s) non pris en charge : {', '.join(others)}.")
             return False
-        if len(message.attachments) > 1:
+        if len(images) > 1:
             await self.safe_reply(message, "Une seule image par message, s'il te plaît.")
+            return False
+        if len(texts) > 1:
+            await self.safe_reply(message, "Un seul fichier .txt par message, s'il te plaît.")
             return False
 
         try:
-            return await self.download_image(message.attachments[0])
-        except ImageError as exc:
+            image = await self.download_image(images[0]) if images else None
+            text_file = await self.download_text_file(texts[0]) if texts else None
+        except (ImageError, TextFileError) as exc:
             await self.safe_reply(message, exc.user_message)
             return False
+        return image, text_file
+
+    async def download_text_file(self, attachment: discord.Attachment) -> tuple[str, str]:
+        """Télécharge un fichier .txt et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
+        if attachment.size > TEXT_FILE_MAX_BYTES:
+            raise TextFileError(f"Ce fichier texte est trop long (maximum {TEXT_FILE_MAX_BYTES // 1000} Ko).")
+
+        try:
+            data = await attachment.read()
+        except discord.HTTPException as exc:
+            logger.error("Téléchargement du fichier texte impossible : %s", exc)
+            raise TextFileError("Je n'ai pas réussi à télécharger ton fichier, réessaie.")
+
+        return attachment.filename, decode_text_file(data)
 
     async def download_image(self, attachment: discord.Attachment) -> ImageData:
         """Télécharge et prépare une image (lève ImageError en cas de problème)."""
@@ -298,21 +348,11 @@ class ChatBot(commands.Bot):
         return message.created_at.astimezone(self.settings.timezone).strftime("%d/%m/%Y %H:%M")
 
     async def send_answer(self, message: discord.Message, answer: str) -> None:
-        chunks = split_message(answer)
-        for i, chunk in enumerate(chunks):
+        # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre ».
+        for chunk in split_message(answer):
             try:
-                if i == 0:
-                    await message.reply(chunk, mention_author=False)
-                else:
-                    await message.channel.send(chunk)
+                await message.channel.send(chunk)
             except discord.HTTPException as exc:
-                # Le message d'origine a pu être supprimé entre-temps : on envoie sans répondre.
-                if i == 0:
-                    try:
-                        await message.channel.send(chunk)
-                        continue
-                    except discord.HTTPException:
-                        pass
                 logger.error("Envoi de la réponse impossible : %s", exc)
                 return
 

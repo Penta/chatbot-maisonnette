@@ -2,6 +2,31 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.2.0 — 28/10/2026
+--------------------------
+
+Nouveautés
+- Fichiers texte : le bot lit un fichier .txt joint au message et en tient
+  compte dans sa réponse.
+  - Un fichier .txt par message (en plus d'une éventuelle image), 100 Ko maximum.
+  - Fonctionne dans le salon dédié et en mode mention.
+  - Encodage UTF-8 ou Windows (Bloc-notes) reconnu automatiquement.
+  - Dans la mémoire, seul le nom du fichier est conservé, pas son contenu
+    (comme pour les images), pour ne pas faire grimper le coût des messages
+    suivants.
+
+- Personnalité perso : les fichiers *.local.txt sont exclus de GitHub
+  (.gitignore). On peut y mettre une personnalité contenant des infos privées
+  (ex. PERSONALITY_FILE=personality_prompt.local.txt dans le .env) ;
+  personality_prompt.txt reste la personnalité par défaut publiée sur GitHub.
+
+Améliorations
+- Le bot n'utilise plus la fonction « Répondre » de Discord pour ses réponses :
+  il écrit simplement à la suite dans le salon, comme un humain.
+  - Les messages d'erreur (fichier non pris en charge, image en trop, etc.)
+    restent en « Répondre », pour qu'on sache à qui ils s'adressent.
+
+
 Version 5.1.0 — 27/10/2026
 --------------------------
 
