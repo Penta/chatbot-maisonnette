@@ -133,8 +133,12 @@ class ClaudeClient:
             content.append({"type": "text", "text": text})
         return content
 
-    async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]]) -> Answer:
-        """Envoie l'historique + le ou les nouveaux messages (texte, image), et renvoie la réponse de Claude."""
+    async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]],
+                  cache_history: bool = True) -> Answer:
+        """Envoie l'historique + le ou les nouveaux messages (texte, image), et renvoie la réponse de Claude.
+
+        cache_history=False évite d'écrire les messages en cache quand l'appel suivant ne les
+        reprendra pas (mentions : contexte différent à chaque fois)."""
         messages = list(history) + [{"role": "user", "content": self.build_user_content(parts)}]
         has_image = any(image is not None for _, image in parts)
 
@@ -146,13 +150,15 @@ class ClaudeClient:
         # relus depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque message).
         # Le marqueur sur "system" couvre ce bloc fixe ; celui de premier niveau couvre en plus
         # l'historique, qui change à chaque message mais reprend le début de la requête précédente.
+        # Une écriture en cache coûte 25 % de plus : inutile si elle ne sera jamais relue.
         params: dict = {
             "model": self.settings.model,
             "max_tokens": self.settings.max_tokens,
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": messages,
-            "cache_control": {"type": "ephemeral"},
         }
+        if cache_history:
+            params["cache_control"] = {"type": "ephemeral"}
         # Par défaut, les modèles récents réfléchissent avant de répondre, et cette réflexion
         # consomme le budget MAX_TOKENS. Avec THINKING=off, on la coupe de la façon propre au
         # modèle (voir models.py) ; sur Opus 5.5, impossible : seul EFFORT la réduit.

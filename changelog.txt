@@ -31,6 +31,9 @@ Corrections
 - /reset vidait mal la mémoire s'il était lancé pendant une réponse : l'échange
   en cours y était réécrit juste après. Le reset attend désormais la fin de la
   réponse avant de tout effacer.
+- Mentions moins chères : le contexte lu pour répondre à une mention n'est
+  plus écrit dans le cache de prompt (surcoût de 25 %), puisqu'il change à
+  chaque mention et n'y était jamais relu.
 
 
 Version 5.3.0 — 29/10/2026

@@ -233,7 +233,7 @@ class ChatBot(commands.Bot):
 
         async with message.channel.typing():
             try:
-                answer = await self.claude.ask([], [(prompt, image)])
+                answer = await self.claude.ask([], [(prompt, image)], cache_history=False)
             except ClaudeError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return
