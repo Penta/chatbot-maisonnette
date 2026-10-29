@@ -36,6 +36,13 @@ MEMORY_NOTE = (
     "explique simplement que tu ne gardes pas les images en mémoire et propose qu'on te la renvoie."
 )
 
+# Ajouté lui aussi automatiquement : les messages reçus pendant une réponse sont regroupés.
+GROUP_NOTE = (
+    "\n\nUn même message peut regrouper plusieurs messages Discord, un par ligne, envoyés "
+    "pendant que tu répondais au précédent : réponds à l'ensemble en une seule réponse, "
+    "naturellement, sans signaler qu'ils ont été regroupés."
+)
+
 # Ajouté quand WEB_SEARCH=on.
 WEB_NOTE = (
     "\n\nTu as accès à Internet (recherche web et lecture de pages). "
@@ -108,26 +115,30 @@ class ClaudeClient:
     # ------------------------------------------------------------------ appel
 
     @staticmethod
-    def build_user_content(text: str, image: ImageData | None = None) -> str | list[dict]:
-        if image is None:
-            return text
-        return [
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": image.media_type,
-                    "data": base64.standard_b64encode(image.data).decode("ascii"),
-                },
-            },
-            {"type": "text", "text": text},
-        ]
+    def build_user_content(parts: list[tuple[str, ImageData | None]]) -> str | list[dict]:
+        """Un ou plusieurs messages à la suite, chacun précédé de son image éventuelle."""
+        if all(image is None for _, image in parts):
+            return "\n".join(text for text, _ in parts)
+        content: list[dict] = []
+        for text, image in parts:
+            if image is not None:
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image.media_type,
+                        "data": base64.standard_b64encode(image.data).decode("ascii"),
+                    },
+                })
+            content.append({"type": "text", "text": text})
+        return content
 
-    async def ask(self, history: list[dict], user_text: str, image: ImageData | None = None) -> Answer:
-        """Envoie l'historique + le nouveau message, et renvoie la réponse de Claude."""
-        messages = list(history) + [{"role": "user", "content": self.build_user_content(user_text, image)}]
+    async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]]) -> Answer:
+        """Envoie l'historique + le ou les nouveaux messages (texte, image), et renvoie la réponse de Claude."""
+        messages = list(history) + [{"role": "user", "content": self.build_user_content(parts)}]
+        has_image = any(image is not None for _, image in parts)
 
-        system = self.personality() + MEMORY_NOTE
+        system = self.personality() + MEMORY_NOTE + GROUP_NOTE
         if self.settings.web_search:
             system += WEB_NOTE
 
@@ -158,12 +169,12 @@ class ClaudeClient:
                 {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses},
             ]
 
-        responses = [await self._call(params, image)]
+        responses = [await self._call(params, has_image)]
         # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
         # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
         while responses[-1].stop_reason == "pause_turn" and len(responses) <= MAX_CONTINUATIONS:
             messages = messages + [{"role": "assistant", "content": responses[-1].content}]
-            responses.append(await self._call({**params, "messages": messages}, image))
+            responses.append(await self._call({**params, "messages": messages}, has_image))
 
         text = self._final_text(responses)
         web_used = self._log_usage(responses)
@@ -180,7 +191,7 @@ class ClaudeClient:
             raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
         return Answer(text, web_used)
 
-    async def _call(self, params: dict, image: ImageData | None):
+    async def _call(self, params: dict, has_image: bool):
         try:
             return await self._client.messages.create(**params)
         except anthropic.RateLimitError:
@@ -194,7 +205,7 @@ class ClaudeClient:
             raise ClaudeError("Je n'arrive pas à joindre mon cerveau pour l'instant, réessaie plus tard.")
         except anthropic.BadRequestError as exc:
             logger.error("Requête refusée par l'API : %s", exc)
-            if image is not None:
+            if has_image:
                 raise ClaudeError("Je n'ai pas réussi à lire cette image, essaie avec une autre.")
             raise ClaudeError("Ta demande a été refusée par l'API, essaie de la reformuler.")
         except anthropic.AuthenticationError:

@@ -20,11 +20,17 @@ Nouveautés
 - Discussion entre bots : le bot répond aux autres bots quand ils le
   mentionnent ou répondent à l'un de ses messages ; le reste de ce qu'ils
   postent est toujours ignoré.
+- Messages regroupés : dans le salon dédié, les messages envoyés pendant que
+  le bot répond ne reçoivent plus chacun leur réponse ; ils lui sont transmis
+  ensemble (avec leurs images) et il y répond en une seule fois.
 
 Corrections
 - Les messages système (arrivée d'un membre, message épinglé, boost, fil
   créé…) et les messages sans rien à lire (sondages…) ne déclenchent plus de
   réponse payante de Claude.
+- /reset vidait mal la mémoire s'il était lancé pendant une réponse : l'échange
+  en cours y était réécrit juste après. Le reset attend désormais la fin de la
+  réponse avant de tout effacer.
 
 
 Version 5.3.0 — 29/10/2026

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import random
 import re
+from dataclasses import dataclass
 
 import discord
 from discord import app_commands
@@ -49,6 +50,15 @@ def text_file_marker(name: str) -> str:
     return f"[fichier texte joint « {name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
 
 
+@dataclass
+class PendingMessage:
+    """Message du salon dédié, prêt à être envoyé à Claude."""
+    message: discord.Message
+    user_text: str    # texte envoyé à Claude
+    stored_text: str  # texte conservé en mémoire
+    image: ImageData | None
+
+
 class ChatBot(commands.Bot):
     def __init__(self, settings: Settings):
         intents = discord.Intents.default()
@@ -63,6 +73,7 @@ class ChatBot(commands.Bot):
         self.settings = settings
         self.claude = ClaudeClient(settings)
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
+        self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._announced = False
 
     # ------------------------------------------------------------ cycle de vie
@@ -151,22 +162,35 @@ class ChatBot(commands.Bot):
             user_text += text_file_prompt(*text_file)
             stored_text += f" {text_file_marker(text_file[0])}"
 
-        # Un seul appel à la fois par salon : l'historique reste cohérent.
+        # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
+        # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel.
+        pending = self._pending.setdefault(message.channel.id, [])
+        pending.append(PendingMessage(message, user_text, stored_text, image))
         async with self.history.lock(message.channel.id):
+            if not pending:
+                return  # déjà parti avec un message précédent
+            batch = sorted(pending, key=lambda p: p.message.id)
+            pending.clear()
+            last = batch[-1].message
+            if len(batch) > 1:
+                logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), message.channel)
             async with message.channel.typing():
                 try:
-                    answer = await self.claude.ask(self.history.get(message.channel.id), user_text, image or None)
+                    answer = await self.claude.ask(
+                        self.history.get(message.channel.id), [(p.user_text, p.image) for p in batch]
+                    )
                 except ClaudeError as exc:
-                    await self.safe_reply(message, exc.user_message)
+                    await self.safe_reply(last, exc.user_message)
                     return
                 except Exception:
                     logger.exception("Erreur inattendue pendant le traitement d'un message")
-                    await self.safe_reply(message, "Désolé, une erreur inattendue est survenue.")
+                    await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
                     return
+            stored_text = "\n".join(p.stored_text for p in batch)
             if answer.web_used:
                 stored_text += f" {WEB_MARKER}"
             await self.history.add_exchange(message.channel.id, stored_text, answer.text)
-        await self.send_answer(message, answer.text)
+        await self.send_answer(last, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
         """Hors du salon dédié : répond à une mention en lisant les messages récents."""
@@ -209,7 +233,7 @@ class ChatBot(commands.Bot):
 
         async with message.channel.typing():
             try:
-                answer = await self.claude.ask([], prompt, image)
+                answer = await self.claude.ask([], [(prompt, image)])
             except ClaudeError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return
