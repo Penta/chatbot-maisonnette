@@ -23,7 +23,8 @@ def setup_logging(log_file) -> None:
     root.addHandler(console_handler)
 
     # discord.py et le SDK Anthropic sont bavards : on ne garde que leurs avertissements.
-    for noisy in ("discord", "httpx", "anthropic"):
+    # Le SDK 2.x passe par httpx2 ; httpx reste pour les versions plus anciennes.
+    for noisy in ("discord", "httpx", "httpx2", "anthropic"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

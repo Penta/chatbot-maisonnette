@@ -13,6 +13,8 @@ Corrections
   (faux appel d'outil <invoke name="think">… ou raisonnement entre balises
   <reasoning>…), elle est retirée du message envoyé et de la mémoire. Si la
   réponse ne contenait que ça, le bot redemande une réponse.
+- Logs : chaque requête HTTP vers l'API d'Anthropic n'est plus journalisée
+  (le SDK 2.x passe par httpx2, qui n'était pas rendu silencieux).
 
 
 Version 5.4.0 — 29/10/2026
