@@ -22,9 +22,13 @@ from .text_utils import split_message
 logger = logging.getLogger("chatbot.discord")
 
 CUSTOM_EMOJI_ONLY = re.compile(r"^<a?:\w+:\d+>$")
+USER_MENTION = re.compile(r"<@!?(\d+)>")
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
-# Longueur maximale du texte d'un message cité transmis à Claude.
+# Longueur maximale du texte d'un message cité ou transféré transmis à Claude.
 QUOTE_MAX_LENGTH = 500
+# Messages écrits par quelqu'un ; les autres types sont des messages système
+# (arrivée d'un membre, message épinglé, boost, fil créé…).
+USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 
 
 def looks_like_image(attachment: discord.Attachment) -> bool:
@@ -98,8 +102,14 @@ class ChatBot(commands.Bot):
     # ------------------------------------------------------------- messages
 
     async def on_message(self, message: discord.Message) -> None:
-        # Ignore les bots (dont lui-même) et les webhooks : évite les boucles infinies.
-        if message.author.bot or message.webhook_id is not None:
+        # Ignore ses propres messages et les webhooks : évite les boucles infinies.
+        if message.author == self.user or message.webhook_id is not None:
+            return
+        if message.type not in USER_MESSAGE_TYPES:
+            return  # message système
+        # Les autres bots ne sont écoutés que lorsqu'ils s'adressent au bot : mention,
+        # ou réponse à l'un de ses messages. Deux bots peuvent ainsi discuter ensemble.
+        if message.author.bot and self.user not in message.mentions and not await self.replies_to_me(message):
             return
 
         in_main_channel = message.channel.id == self.settings.channel_id
@@ -117,18 +127,25 @@ class ChatBot(commands.Bot):
         if await self.reply_to_emoji(message):
             return
 
+        forward, forward_image = await self.read_forward(message)
+        if not (message.content.strip() or message.attachments or forward):
+            return  # sondage, transfert d'un message vide… : rien à lire
+
         attachments = await self.read_attachments(message)
         if attachments is False:
             return  # pièce jointe refusée, l'utilisateur a été prévenu
         image, text_file = attachments
 
         # L'image du message cité n'est utilisée que si le message n'en contient pas lui-même.
-        reply, reply_image = await self.read_reply(message, want_image=image is None)
-        image = image or reply_image
+        reply, reply_image = await self.read_reply(message, want_image=image is None and forward_image is None)
+        image = image or forward_image or reply_image
 
-        text = message.clean_content.strip() or "(message sans texte)"
-        reply_part = f" ({reply})" if reply else ""
-        user_text = f"{self.timestamp(message)}, {message.author.display_name} a écrit{reply_part} : {text}"
+        if forward:
+            user_text = f"{self.timestamp(message)}, {message.author.display_name} a transféré un message {forward}"
+        else:
+            text = message.clean_content.strip() or "(message sans texte)"
+            reply_part = f" ({reply})" if reply else ""
+            user_text = f"{self.timestamp(message)}, {message.author.display_name} a écrit{reply_part} : {text}"
         stored_text = user_text + (f" {IMAGE_MARKER}" if image else "")
         if text_file:
             user_text += text_file_prompt(*text_file)
@@ -298,17 +315,14 @@ class ChatBot(commands.Bot):
         # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot).
         return await asyncio.to_thread(prepare_image, data)
 
-    # ------------------------------------------------------- message cité
+    # ------------------------------------------- message cité ou transféré
 
-    async def read_reply(self, message: discord.Message, want_image: bool) -> tuple[str | None, ImageData | None]:
-        """Lit le message auquel l'utilisateur répond (bouton « Répondre » de Discord).
-
-        Renvoie sa description pour Claude, ainsi que son image si want_image est vrai,
-        ou (None, None) si le message ne répond à rien ou si le message cité est inaccessible.
-        """
+    async def fetch_cited(self, message: discord.Message) -> discord.Message | None:
+        """Renvoie le message auquel ce message répond (bouton « Répondre » de Discord),
+        ou None s'il ne répond à rien ou si le message cité est inaccessible."""
         ref = message.reference
         if ref is None or ref.message_id is None or ref.type != discord.MessageReferenceType.reply:
-            return None, None
+            return None
 
         cited = ref.resolved
         if cited is None:  # Discord ne l'a pas fourni (vieux message) : on le télécharge
@@ -316,37 +330,84 @@ class ChatBot(commands.Bot):
                 cited = await message.channel.fetch_message(ref.message_id)
             except discord.HTTPException as exc:
                 logger.info("Message cité inaccessible : %s", exc)
-                return None, None
-        if not isinstance(cited, discord.Message):
-            return None, None  # message cité supprimé
+                return None
+            ref.resolved = cited  # évite de le télécharger une seconde fois
+        return cited if isinstance(cited, discord.Message) else None  # None : message cité supprimé
 
-        content = cited.clean_content.strip()
+    async def replies_to_me(self, message: discord.Message) -> bool:
+        cited = await self.fetch_cited(message)
+        return cited is not None and cited.author == self.user
+
+    async def read_reply(self, message: discord.Message, want_image: bool) -> tuple[str | None, ImageData | None]:
+        """Lit le message auquel l'utilisateur répond.
+
+        Renvoie sa description pour Claude, ainsi que son image si want_image est vrai,
+        ou (None, None) si le message ne répond à rien ou si le message cité est inaccessible.
+        """
+        cited = await self.fetch_cited(message)
+        if cited is None:
+            return None, None
+
+        image = await self.first_image(cited.attachments, "cité") if want_image else None
+        description = self.describe_quoted(cited.clean_content, image, cited.attachments, cited.stickers)
+
+        who = "à ton message" if cited.author == self.user else f"au message de {cited.author.display_name}"
+        return f"en réponse {who} du {self.timestamp(cited)} : {description or '(message vide)'}", image
+
+    async def read_forward(self, message: discord.Message) -> tuple[str | None, ImageData | None]:
+        """Lit le message transféré (bouton « Transférer » de Discord).
+
+        Renvoie sa description pour Claude et son image, ou (None, None) si le message
+        n'est pas un transfert ou si le message transféré ne contient rien de lisible.
+        """
+        if not message.message_snapshots:
+            return None, None
+        snapshot = message.message_snapshots[0]
+
+        image = await self.first_image(snapshot.attachments, "transféré")
+        # Contrairement à un message normal, le contenu transféré garde ses mentions brutes (<@123>).
+        content = self.clean_mentions(snapshot.content)
+        description = self.describe_quoted(content, image, snapshot.attachments, snapshot.stickers)
+        if not description:
+            return None, None
+        return f"du {self.timestamp(snapshot)} : {description}", image
+
+    async def first_image(self, attachments: list[discord.Attachment], kind: str) -> ImageData | None:
+        """Télécharge la première image d'un message cité ou transféré (None si aucune ou illisible)."""
+        images = [a for a in attachments if looks_like_image(a)]
+        if not images:
+            return None
+        try:
+            return await self.download_image(images[0])
+        except ImageError as exc:
+            logger.warning("Image du message %s ignorée : %s", kind, exc.user_message)
+            return None
+
+    @staticmethod
+    def describe_quoted(content: str, image: ImageData | None, attachments: list, stickers: list) -> str:
+        """Description d'un message cité ou transféré (vide s'il n'y a rien de lisible)."""
+        content = content.strip()
         if len(content) > QUOTE_MAX_LENGTH:
             content = content[:QUOTE_MAX_LENGTH].rstrip() + "…"
-
-        image = None
-        images = [a for a in cited.attachments if looks_like_image(a)]
-        if want_image and images:
-            try:
-                image = await self.download_image(images[0])
-            except ImageError as exc:
-                logger.warning("Image du message cité ignorée : %s", exc.user_message)
-
         parts = [f"« {content} »"] if content else []
         if image is not None:
             parts.append("[son image est jointe à ce message]")
-        elif cited.attachments:
+        elif attachments:
             parts.append("[pièce jointe]")
-        if cited.stickers:
+        if stickers:
             parts.append("[sticker]")
-        description = " ".join(parts) or "(message vide)"
+        return " ".join(parts)
 
-        who = "à ton message" if cited.author == self.user else f"au message de {cited.author.display_name}"
-        return f"en réponse {who} du {self.timestamp(cited)} : {description}", image
+    def clean_mentions(self, text: str) -> str:
+        """Remplace les mentions brutes (<@123>) par des pseudos, comme le fait clean_content."""
+        def name(match: re.Match) -> str:
+            user = self.get_user(int(match.group(1)))
+            return f"@{user.display_name}" if user else "@quelqu'un"
+        return USER_MENTION.sub(name, text)
 
     # ------------------------------------------------------------- envoi
 
-    def timestamp(self, message: discord.Message) -> str:
+    def timestamp(self, message: discord.Message | discord.MessageSnapshot) -> str:
         return message.created_at.astimezone(self.settings.timezone).strftime("%d/%m/%Y %H:%M")
 
     async def send_answer(self, message: discord.Message, answer: str) -> None:

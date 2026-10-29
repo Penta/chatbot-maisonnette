@@ -2,6 +2,31 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.4.0 — 29/10/2026
+--------------------------
+
+Nouveautés
+- Changement de modèle facile : il suffit de modifier CLAUDE_MODEL dans le
+  .env (claude-sonnet-5-5, claude-haiku-5-5 ou claude-opus-5-5) et de
+  redémarrer le bot.
+  - THINKING=off coupe la réflexion de la façon propre à chaque modèle
+    (auparavant, tout autre modèle que Sonnet 5.5 était refusé par l'API).
+  - Sur Opus 5.5, la réflexion ne peut pas être coupée : régler EFFORT=low.
+  - Les tarifs utilisés pour le coût estimé dans les logs suivent le modèle
+    choisi ; PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK ne sont plus à
+    renseigner que pour un autre modèle (à vider dans le .env existant).
+- Messages transférés : dans le salon dédié, le bot lit le message transféré
+  (son texte et son image).
+- Discussion entre bots : le bot répond aux autres bots quand ils le
+  mentionnent ou répondent à l'un de ses messages ; le reste de ce qu'ils
+  postent est toujours ignoré.
+
+Corrections
+- Les messages système (arrivée d'un membre, message épinglé, boost, fil
+  créé…) et les messages sans rien à lire (sondages…) ne déclenchent plus de
+  réponse payante de Claude.
+
+
 Version 5.3.0 — 29/10/2026
 --------------------------
 

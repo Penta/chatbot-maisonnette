@@ -10,6 +10,7 @@ from pathlib import Path
 import anthropic
 
 from .config import Settings
+from .models import thinking_off
 
 logger = logging.getLogger("chatbot.claude")
 
@@ -141,10 +142,13 @@ class ClaudeClient:
             "messages": messages,
             "cache_control": {"type": "ephemeral"},
         }
-        # Par défaut, Sonnet 5.5 réfléchit avant de répondre, et cette réflexion consomme
-        # le budget MAX_TOKENS. "between_tools" désactive la réflexion préalable
-        # (il ne reste qu'une courte réflexion entre deux recherches web, si elles sont activées).
-        params["thinking"] = {"type": "adaptive"} if self.settings.thinking else {"type": "between_tools"}
+        # Par défaut, les modèles récents réfléchissent avant de répondre, et cette réflexion
+        # consomme le budget MAX_TOKENS. Avec THINKING=off, on la coupe de la façon propre au
+        # modèle (voir models.py) ; sur Opus 5.5, impossible : seul EFFORT la réduit.
+        if self.settings.thinking:
+            params["thinking"] = {"type": "adaptive"}
+        elif (off := thinking_off(self.settings.model)) is not None:
+            params["thinking"] = off
         if self.settings.effort:
             params["extra_body"] = {"output_config": {"effort": self.settings.effort}}
         if self.settings.web_search:
@@ -224,14 +228,19 @@ class ClaudeClient:
             if r.usage.server_tool_use:
                 searches += r.usage.server_tool_use.web_search_requests or 0
                 fetches += r.usage.server_tool_use.web_fetch_requests or 0
-        # Écriture en cache : 125 % du prix d'entrée ; lecture depuis le cache : 10 %.
-        cost = ((input_tokens + cache_write * 1.25 + cache_read * 0.1) * self.settings.price_input_per_mtok
-                + output_tokens * self.settings.price_output_per_mtok) / 1_000_000
-        cost += searches * self.settings.price_web_search_per_1000 / 1000
+        price_input, price_output = self.settings.price_input_per_mtok, self.settings.price_output_per_mtok
+        if price_input is None or price_output is None:
+            cost = "inconnu (renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK dans le .env)"
+        else:
+            # Écriture en cache : 125 % du prix d'entrée ; lecture depuis le cache : 10 %.
+            amount = ((input_tokens + cache_write * 1.25 + cache_read * 0.1) * price_input
+                      + output_tokens * price_output) / 1_000_000
+            amount += searches * self.settings.price_web_search_per_1000 / 1000
+            cost = f"{amount:.5f} $"
         web = f", recherches web : {searches}, pages lues : {fetches}" if searches or fetches else ""
         logger.info(
             "Appel Claude (%s) — entrée : %s tokens (+ cache : %s lus, %s écrits), sortie : %s tokens%s, "
-            "coût estimé : %.5f $",
+            "coût estimé : %s",
             responses[-1].model, input_tokens, cache_read, cache_write, output_tokens, web, cost,
         )
         return bool(searches or fetches)

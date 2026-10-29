@@ -9,6 +9,8 @@ Bot Discord qui discute avec les membres du serveur grâce à Claude (Anthropic)
 - **Images** : commente une image envoyée dans le salon dédié (JPEG, PNG, GIF, WebP, une par message).
 - **Fichiers texte** : lit un fichier `.txt` joint au message (un par message, 100 Ko maximum), dans le salon dédié et en mode mention. Seul le nom du fichier est gardé en mémoire, pas son contenu.
 - **Réponses** : quand on utilise « Répondre » sur un message, même ancien, le bot lit le message cité (et son image, si on n'en joint pas une autre).
+- **Transferts** : dans le salon dédié, le bot lit un message transféré (son texte et son image).
+- **Autres bots** : le bot ignore les autres bots, sauf quand ils le mentionnent ou répondent à l'un de ses messages (bouton « Répondre ») : deux bots peuvent ainsi discuter ensemble. Les messages système (arrivées, épinglages, boosts…) sont ignorés.
 - **Stickers et emojis** : répond à un sticker par un sticker du serveur, et à un emoji personnalisé seul par un emoji du serveur.
 - **`/reset`** : efface la mémoire du salon (réservé aux modérateurs et administrateurs).
 - **Personnalité** modifiable dans `personality_prompt.txt`, prise en compte sans redémarrer. Pour une personnalité perso, crée `personality_prompt.local.txt` et indique-le dans `PERSONALITY_FILE` du `.env` : les fichiers `*.local.txt` ne sont jamais envoyés sur GitHub.

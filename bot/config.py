@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
+from .models import PRICES, thinking_off
 
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
@@ -78,8 +79,8 @@ class Settings:
 
     # Divers
     timezone: ZoneInfo
-    price_input_per_mtok: float
-    price_output_per_mtok: float
+    price_input_per_mtok: float | None   # None = modèle absent de la table des tarifs
+    price_output_per_mtok: float | None
     price_web_search_per_1000: float
     log_file: Path
 
@@ -100,13 +101,18 @@ def load_settings() -> Settings:
         raise ConfigError(f"THINKING doit valoir « on » ou « off » (valeur actuelle : {thinking_raw!r}).")
     thinking = thinking_raw == "on"
 
+    model = _get_str("CLAUDE_MODEL", default="claude-sonnet-5-5")
     effort = _get_str("EFFORT")
     if effort is not None:
         effort = effort.lower()
         if effort not in EFFORT_LEVELS:
             raise ConfigError(f"EFFORT doit valoir {', '.join(EFFORT_LEVELS)} (valeur actuelle : {effort!r}).")
-        if not thinking and effort in ("xhigh", "max"):
-            raise ConfigError(f"EFFORT={effort} nécessite THINKING=on.")
+        # Couper la réflexion n'est accepté qu'avec un effort high ou moins.
+        if not thinking and effort in ("xhigh", "max") and thinking_off(model) is not None:
+            raise ConfigError(f"EFFORT={effort} nécessite THINKING=on avec le modèle {model}.")
+
+    # Tarifs du .env s'ils sont renseignés, sinon ceux du modèle choisi.
+    default_input, default_output = PRICES.get(model, (None, None))
 
     web_search_raw = (_get_str("WEB_SEARCH", default="off") or "off").lower()
     if web_search_raw not in ("on", "off"):
@@ -116,7 +122,7 @@ def load_settings() -> Settings:
         discord_token=_get_str("DISCORD_TOKEN", required=True),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY", required=True),
         channel_id=_get_int("CHANNEL_ID", required=True),
-        model=_get_str("CLAUDE_MODEL", default="claude-sonnet-5-5"),
+        model=model,
         max_tokens=_get_int("MAX_TOKENS", default=1500, minimum=1),
         thinking=thinking,
         effort=effort,
@@ -130,8 +136,8 @@ def load_settings() -> Settings:
         # Taille maximale acceptée depuis Discord ; les grosses images sont réduites avant l'envoi à Claude.
         max_image_size=_get_int("MAX_IMAGE_SIZE", default=25_000_000, minimum=1),
         timezone=timezone,
-        price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", default=2.0),
-        price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", default=10.0),
+        price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", default=default_input),
+        price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", default=default_output),
         price_web_search_per_1000=_get_float("PRICE_WEB_SEARCH_PER_1000", default=10.0),
         log_file=Path(_get_str("LOG_FILE", default="bot.log")),
     )
