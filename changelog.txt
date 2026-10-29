@@ -2,6 +2,31 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.3.0 — 29/10/2026
+--------------------------
+
+Nouveautés
+- Accès à Internet (désactivé par défaut) : avec WEB_SEARCH=on dans le .env,
+  le bot peut faire des recherches web et lire les liens partagés dans la
+  conversation (outils web_search et web_fetch d'Anthropic).
+  - Il ne cherche que si la question porte sur l'actualité ou une info qu'il
+    ne connaît pas, et nomme sa source dans sa réponse (sans lien).
+  - WEB_MAX_USES limite le nombre de recherches (et de pages lues) par message.
+  - Seule la réponse finale est envoyée sur Discord, sans les commentaires
+    écrits pendant les recherches.
+  - Dans la mémoire, une mention indique au bot qu'il a réellement cherché,
+    pour qu'il ne croie pas avoir inventé sa réponse au message suivant.
+  - Avec la recherche activée, prévoir API_TIMEOUT=90.
+
+Améliorations
+- Cache de prompt : la personnalité, les outils et l'historique sont relus
+  depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque
+  message). Avec la recherche web activée, un message simple passe d'environ
+  0,015 $ à 0,002 $.
+- Le coût estimé dans les logs tient compte du cache (tokens lus et écrits)
+  et des recherches web (PRICE_WEB_SEARCH_PER_1000).
+
+
 Version 5.2.0 — 28/10/2026
 --------------------------
 

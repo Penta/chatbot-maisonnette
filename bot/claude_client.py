@@ -35,6 +35,22 @@ MEMORY_NOTE = (
     "explique simplement que tu ne gardes pas les images en mémoire et propose qu'on te la renvoie."
 )
 
+# Ajouté quand WEB_SEARCH=on.
+WEB_NOTE = (
+    "\n\nTu as accès à Internet (recherche web et lecture de pages). "
+    "Ne t'en sers que si la question porte sur l'actualité, des informations récentes ou précises "
+    "que tu ne connais pas, ou un lien partagé dans la conversation ; sinon réponds directement. "
+    "Garde des réponses courtes ; quand c'est utile, nomme simplement ta source dans ta phrase "
+    "(par exemple « selon Famitsu »), sans recopier d'adresse. "
+    "Ne commente pas tes recherches (pas de « je vais vérifier », « je regarde le résultat »…) : donne directement la réponse. "
+    "Dans les messages précédents, la mention « [recherche web : …] » signifie que tu as bien cherché sur Internet "
+    "pour y répondre : ta réponse d'alors s'appuyait sur de vrais résultats, même si tu ne les vois plus. "
+    "Ne prétends donc jamais avoir inventé une réponse marquée ainsi."
+)
+
+# Nombre maximal de relances quand l'API met la réponse en pause pendant les recherches.
+MAX_CONTINUATIONS = 3
+
 
 class ClaudeError(Exception):
     """Erreur lors de l'appel à Claude, avec un message affichable sur Discord."""
@@ -48,6 +64,12 @@ class ClaudeError(Exception):
 class ImageData:
     media_type: str
     data: bytes
+
+
+@dataclass
+class Answer:
+    text: str
+    web_used: bool  # Claude a fait au moins une recherche web ou lu une page
 
 
 class ClaudeClient:
@@ -100,25 +122,63 @@ class ClaudeClient:
             {"type": "text", "text": text},
         ]
 
-    async def ask(self, history: list[dict], user_text: str, image: ImageData | None = None) -> str:
+    async def ask(self, history: list[dict], user_text: str, image: ImageData | None = None) -> Answer:
         """Envoie l'historique + le nouveau message, et renvoie la réponse de Claude."""
         messages = list(history) + [{"role": "user", "content": self.build_user_content(user_text, image)}]
 
+        system = self.personality() + MEMORY_NOTE
+        if self.settings.web_search:
+            system += WEB_NOTE
+
+        # Cache de prompt : les outils et la personnalité, identiques d'un message à l'autre, sont
+        # relus depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque message).
+        # Le marqueur sur "system" couvre ce bloc fixe ; celui de premier niveau couvre en plus
+        # l'historique, qui change à chaque message mais reprend le début de la requête précédente.
         params: dict = {
             "model": self.settings.model,
             "max_tokens": self.settings.max_tokens,
-            "system": self.personality() + MEMORY_NOTE,
+            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": messages,
+            "cache_control": {"type": "ephemeral"},
         }
         # Par défaut, Sonnet 5.5 réfléchit avant de répondre, et cette réflexion consomme
         # le budget MAX_TOKENS. "between_tools" désactive la réflexion préalable
-        # (le bot n'utilisant pas d'outils, il n'y a alors aucune réflexion).
+        # (il ne reste qu'une courte réflexion entre deux recherches web, si elles sont activées).
         params["thinking"] = {"type": "adaptive"} if self.settings.thinking else {"type": "between_tools"}
         if self.settings.effort:
             params["extra_body"] = {"output_config": {"effort": self.settings.effort}}
+        if self.settings.web_search:
+            # Outils exécutés par Anthropic : pas de boucle d'outils à gérer de notre côté.
+            params["tools"] = [
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": self.settings.web_max_uses},
+                {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses},
+            ]
 
+        responses = [await self._call(params, image)]
+        # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
+        # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
+        while responses[-1].stop_reason == "pause_turn" and len(responses) <= MAX_CONTINUATIONS:
+            messages = messages + [{"role": "assistant", "content": responses[-1].content}]
+            responses.append(await self._call({**params, "messages": messages}, image))
+
+        text = self._final_text(responses)
+        web_used = self._log_usage(responses)
+
+        stop_reason = responses[-1].stop_reason
+        if stop_reason == "max_tokens":
+            logger.warning("Réponse coupée par MAX_TOKENS (%s) : augmente MAX_TOKENS dans le .env "
+                           "si cela arrive souvent.", self.settings.max_tokens)
+            text += " […]"
+        elif stop_reason == "pause_turn":
+            logger.warning("Recherche web toujours en cours après %s relances : réponse partielle.", MAX_CONTINUATIONS)
+        if not text:
+            logger.warning("Réponse vide de Claude (stop_reason=%s).", stop_reason)
+            raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
+        return Answer(text, web_used)
+
+    async def _call(self, params: dict, image: ImageData | None):
         try:
-            response = await self._client.messages.create(**params)
+            return await self._client.messages.create(**params)
         except anthropic.RateLimitError:
             logger.warning("Limite de requêtes Anthropic atteinte.")
             raise ClaudeError("Je reçois trop de messages en ce moment, réessaie dans une minute.")
@@ -140,23 +200,38 @@ class ClaudeClient:
             logger.error("Erreur de l'API (%s) : %s", exc.status_code, exc)
             raise ClaudeError("Une erreur est survenue de mon côté, réessaie dans un instant.")
 
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
-        self._log_usage(response)
+    @staticmethod
+    def _final_text(responses) -> str:
+        """Texte de la réponse finale, sans les commentaires écrits entre deux recherches."""
+        parts: list[str] = []
+        for response in responses:
+            for block in response.content:
+                if block.type == "text":
+                    parts.append(block.text)
+                elif block.type not in ("thinking", "redacted_thinking"):
+                    # Appel ou résultat d'outil : le texte écrit avant n'était qu'un commentaire.
+                    parts = []
+        return "".join(parts).strip()
 
-        if response.stop_reason == "max_tokens":
-            logger.warning("Réponse coupée par MAX_TOKENS (%s) : augmente MAX_TOKENS dans le .env "
-                           "si cela arrive souvent.", self.settings.max_tokens)
-            text += " […]"
-        if not text:
-            logger.warning("Réponse vide de Claude (stop_reason=%s).", response.stop_reason)
-            raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
-        return text
-
-    def _log_usage(self, response) -> None:
-        usage = response.usage
-        cost = (usage.input_tokens * self.settings.price_input_per_mtok
-                + usage.output_tokens * self.settings.price_output_per_mtok) / 1_000_000
+    def _log_usage(self, responses) -> bool:
+        """Journalise la consommation et indique si Claude a utilisé Internet."""
+        input_tokens = sum(r.usage.input_tokens for r in responses)
+        cache_write = sum(r.usage.cache_creation_input_tokens or 0 for r in responses)
+        cache_read = sum(r.usage.cache_read_input_tokens or 0 for r in responses)
+        output_tokens = sum(r.usage.output_tokens for r in responses)
+        searches = fetches = 0
+        for r in responses:
+            if r.usage.server_tool_use:
+                searches += r.usage.server_tool_use.web_search_requests or 0
+                fetches += r.usage.server_tool_use.web_fetch_requests or 0
+        # Écriture en cache : 125 % du prix d'entrée ; lecture depuis le cache : 10 %.
+        cost = ((input_tokens + cache_write * 1.25 + cache_read * 0.1) * self.settings.price_input_per_mtok
+                + output_tokens * self.settings.price_output_per_mtok) / 1_000_000
+        cost += searches * self.settings.price_web_search_per_1000 / 1000
+        web = f", recherches web : {searches}, pages lues : {fetches}" if searches or fetches else ""
         logger.info(
-            "Appel Claude (%s) — entrée : %s tokens, sortie : %s tokens, coût estimé : %.5f $",
-            response.model, usage.input_tokens, usage.output_tokens, cost,
+            "Appel Claude (%s) — entrée : %s tokens (+ cache : %s lus, %s écrits), sortie : %s tokens%s, "
+            "coût estimé : %.5f $",
+            responses[-1].model, input_tokens, cache_read, cache_write, output_tokens, web, cost,
         )
+        return bool(searches or fetches)

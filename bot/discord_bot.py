@@ -14,7 +14,7 @@ from discord.ext import commands
 from . import VERSION
 from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
-from .history import IMAGE_MARKER, ConversationHistory
+from .history import IMAGE_MARKER, WEB_MARKER, ConversationHistory
 from .images import ImageError, prepare_image
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
 from .text_utils import split_message
@@ -146,8 +146,10 @@ class ChatBot(commands.Bot):
                     logger.exception("Erreur inattendue pendant le traitement d'un message")
                     await self.safe_reply(message, "Désolé, une erreur inattendue est survenue.")
                     return
-            await self.history.add_exchange(message.channel.id, stored_text, answer)
-        await self.send_answer(message, answer)
+            if answer.web_used:
+                stored_text += f" {WEB_MARKER}"
+            await self.history.add_exchange(message.channel.id, stored_text, answer.text)
+        await self.send_answer(message, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
         """Hors du salon dédié : répond à une mention en lisant les messages récents."""
@@ -198,7 +200,7 @@ class ChatBot(commands.Bot):
                 logger.exception("Erreur inattendue pendant le traitement d'une mention")
                 await self.safe_reply(message, "Désolé, une erreur inattendue est survenue.")
                 return
-        await self.send_answer(message, answer)
+        await self.send_answer(message, answer.text)
 
     # ------------------------------------------------------------- réactions
 

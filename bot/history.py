@@ -15,6 +15,9 @@ FILE_VERSION = 2
 # Remplace une image dans la mémoire (les images elles-mêmes ne sont pas conservées).
 IMAGE_MARKER = "[image jointe : tu l'as vue et analysée à ce moment-là, mais elle n'est plus conservée en mémoire]"
 _OLD_IMAGE_MARKER = "[image jointe]"
+# Ajouté au message de l'utilisateur quand Claude a fait une recherche web pour y répondre
+# (les recherches et leurs résultats ne sont pas conservés).
+WEB_MARKER = "[recherche web : tu as réellement cherché sur Internet pour répondre à ce message, mais les résultats ne sont plus conservés en mémoire]"
 
 
 class ConversationHistory:

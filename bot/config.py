@@ -63,6 +63,10 @@ class Settings:
     effort: str | None      # None = valeur par défaut du modèle
     api_timeout: float
 
+    # Accès à Internet (outils web_search et web_fetch exécutés par Anthropic)
+    web_search: bool
+    web_max_uses: int       # nombre maximal de recherches (et de pages lues) par message
+
     # Mémoire et contexte
     max_history_length: int
     context_message_limit: int
@@ -76,6 +80,7 @@ class Settings:
     timezone: ZoneInfo
     price_input_per_mtok: float
     price_output_per_mtok: float
+    price_web_search_per_1000: float
     log_file: Path
 
 
@@ -103,6 +108,10 @@ def load_settings() -> Settings:
         if not thinking and effort in ("xhigh", "max"):
             raise ConfigError(f"EFFORT={effort} nécessite THINKING=on.")
 
+    web_search_raw = (_get_str("WEB_SEARCH", default="off") or "off").lower()
+    if web_search_raw not in ("on", "off"):
+        raise ConfigError(f"WEB_SEARCH doit valoir « on » ou « off » (valeur actuelle : {web_search_raw!r}).")
+
     return Settings(
         discord_token=_get_str("DISCORD_TOKEN", required=True),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY", required=True),
@@ -112,6 +121,8 @@ def load_settings() -> Settings:
         thinking=thinking,
         effort=effort,
         api_timeout=_get_float("API_TIMEOUT", default=60.0),
+        web_search=web_search_raw == "on",
+        web_max_uses=_get_int("WEB_MAX_USES", default=3, minimum=1),
         max_history_length=_get_int("MAX_HISTORY_LENGTH", default=10, minimum=2),
         context_message_limit=_get_int("CONTEXT_MESSAGE_LIMIT", default=20, minimum=0),
         history_file=Path(_get_str("HISTORY_FILE", default="conversation_history.json")),
@@ -121,5 +132,6 @@ def load_settings() -> Settings:
         timezone=timezone,
         price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", default=2.0),
         price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", default=10.0),
+        price_web_search_per_1000=_get_float("PRICE_WEB_SEARCH_PER_1000", default=10.0),
         log_file=Path(_get_str("LOG_FILE", default="bot.log")),
     )
