@@ -209,7 +209,16 @@ class ChatBot(commands.Bot):
                 logger.warning("Pas la permission de lire l'historique de #%s.", message.channel)
         lines.reverse()
 
-        reply, image = await self.read_reply(message, want_image=True)
+        # Seules la première image et le premier fichier .txt de la mention sont lus (les autres
+        # pièces jointes sont ignorées). L'image du message cité ne sert que s'il n'y en a pas.
+        images = [a for a in message.attachments if looks_like_image(a)]
+        try:
+            image = await self.download_image(images[0]) if images else None
+        except ImageError as exc:
+            await self.safe_reply(message, exc.user_message)
+            return
+        reply, reply_image = await self.read_reply(message, want_image=image is None)
+        image = image or reply_image
 
         bot_name = f"@{message.guild.me.display_name}" if message.guild else f"@{self.user.name}"
         text = message.clean_content.replace(bot_name, "").strip() or "(simple mention, sans texte)"
@@ -222,7 +231,6 @@ class ChatBot(commands.Bot):
         parts.append(f"{self.timestamp(message)}, {message.author.display_name} te mentionne{reply_part} et écrit : {text}")
         prompt = "\n\n".join(parts)
 
-        # Seuls les fichiers .txt de la mention sont lus (les autres pièces jointes sont ignorées).
         text_files = [a for a in message.attachments if looks_like_text(a)]
         if text_files:
             try:

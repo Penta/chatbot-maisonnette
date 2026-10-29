@@ -34,6 +34,9 @@ Corrections
 - Mentions moins chères : le contexte lu pour répondre à une mention n'est
   plus écrit dans le cache de prompt (surcoût de 25 %), puisqu'il change à
   chaque mention et n'y était jamais relu.
+- Mentions : l'image jointe à la mention elle-même est maintenant lue (seule
+  celle du message cité l'était). Si les deux en ont une, c'est celle de la
+  mention qui est envoyée à Claude.
 
 
 Version 5.3.0 — 29/10/2026
