@@ -83,6 +83,10 @@ class ChatBot(commands.Bot):
         self.tree.add_command(reset_command)
         synced = await self.tree.sync()
         logger.info("%d commande(s) slash synchronisée(s).", len(synced))
+        s = self.settings
+        logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s",
+                    s.model, "on" if s.thinking else "off", s.effort or "par défaut",
+                    "on" if s.web_search else "off")
 
     async def on_ready(self) -> None:
         logger.info("Connecté en tant que %s (version %s)", self.user, VERSION)

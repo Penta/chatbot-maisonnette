@@ -44,6 +44,10 @@ GROUP_NOTE = (
     "naturellement, sans signaler qu'ils ont été regroupés."
 )
 
+# Ajouté lui aussi automatiquement. Formulation générique recommandée par Anthropic : nommer les
+# balises de réflexion, ou interdire de réfléchir, rend au contraire leur apparition plus probable.
+OUTPUT_NOTE = "\n\nN'inclus pas de balises XML internes ou système dans ta réponse."
+
 # Ajouté quand WEB_SEARCH=on.
 WEB_NOTE = (
     "\n\nTu as accès à Internet (recherche web et lecture de pages). "
@@ -51,7 +55,10 @@ WEB_NOTE = (
     "que tu ne connais pas, ou un lien partagé dans la conversation ; sinon réponds directement. "
     "Garde des réponses courtes ; quand c'est utile, nomme simplement ta source dans ta phrase "
     "(par exemple « selon Famitsu »), sans recopier d'adresse. "
-    "Ne commente pas tes recherches (pas de « je vais vérifier », « je regarde le résultat »…) : donne directement la réponse. "
+    # Le texte écrit avant un appel d'outil n'est jamais affiché (voir _final_text). L'interdire
+    # pousse au contraire le modèle à écrire ses appels d'outils sous forme de texte.
+    "Quand tu utilises un outil, tu peux d'abord dire une courte phrase. "
+    "Si aucun outil ne permet de faire ce qu'on te demande, dis-le au lieu de deviner. "
     "Dans les messages précédents, la mention « [recherche web : …] » signifie que tu as bien cherché sur Internet "
     "pour y répondre : ta réponse d'alors s'appuyait sur de vrais résultats, même si tu ne les vois plus. "
     "Ne prétends donc jamais avoir inventé une réponse marquée ainsi."
@@ -156,7 +163,7 @@ class ClaudeClient:
         messages = list(history) + [{"role": "user", "content": self.build_user_content(parts)}]
         has_image = any(image is not None for _, image in parts)
 
-        system = self.personality() + MEMORY_NOTE + GROUP_NOTE
+        system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
         if self.settings.web_search:
             system += WEB_NOTE
 
@@ -192,12 +199,15 @@ class ClaudeClient:
         responses = await self._answer(params, messages, has_image)
         text, leaked = self._final_text(responses)
         web_used = self._log_usage(responses)
-        if leaked and not text:
-            # Réponse faite uniquement de réflexion écrite : on redemande une fois.
-            logger.warning("Réponse sans texte (réflexion écrite dans la réponse) : nouvel essai.")
-            responses = await self._answer(params, messages, has_image)
-            text, _ = self._final_text(responses)
-            web_used = self._log_usage(responses) or web_used
+        if leaked:
+            # Le reste du texte peut contenir de la réflexion sous une autre forme (JSON, bloc
+            # de code…) : on redemande une fois, et on garde la version nettoyée en dernier recours.
+            logger.warning("Réflexion écrite dans la réponse : nouvel essai.")
+            retry = await self._answer(params, messages, has_image)
+            retry_text, retry_leaked = self._final_text(retry)
+            web_used = self._log_usage(retry) or web_used
+            if retry_text and (not retry_leaked or not text):
+                responses, text = retry, retry_text
 
         stop_reason = responses[-1].stop_reason
         if stop_reason == "max_tokens":
@@ -258,7 +268,9 @@ class ClaudeClient:
                     parts = []
         text, removed = LEAKED_REASONING.subn("", "".join(parts))
         if removed:
-            logger.warning("Réflexion écrite retirée de la réponse (%s balise(s)).", removed)
+            blocks = ", ".join(block.type for response in responses for block in response.content)
+            logger.warning("Réflexion écrite retirée de la réponse (%s balise(s) ; blocs reçus : %s).",
+                           removed, blocks)
             text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip(), bool(removed)
 

@@ -11,8 +11,14 @@ Corrections
   le vocal.
 - Réflexion affichée : quand le modèle écrit sa réflexion dans sa réponse
   (faux appel d'outil <invoke name="think">… ou raisonnement entre balises
-  <reasoning>…), elle est retirée du message envoyé et de la mémoire. Si la
-  réponse ne contenait que ça, le bot redemande une réponse.
+  <reasoning>…), le bot redemande une réponse. Si la nouvelle réponse en
+  contient aussi, la réflexion est retirée du message envoyé et de la mémoire.
+  - Les consignes ajoutées automatiquement à la personnalité suivent les
+    recommandations d'Anthropic contre ces fuites : plus d'interdiction de
+    commenter les recherches web (ce commentaire n'est de toute façon jamais
+    affiché), et une consigne générale contre les balises internes.
+  - Au démarrage, le log indique le modèle, la réflexion, l'effort et la
+    recherche web réellement utilisés.
 - Logs : chaque requête HTTP vers l'API d'Anthropic n'est plus journalisée
   (le SDK 2.x passe par httpx2, qui n'était pas rendu silencieux).
 
