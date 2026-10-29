@@ -35,6 +35,9 @@ def main() -> None:
         sys.exit(1)
 
     setup_logging(settings.log_file)
+    # Rika n'utilise pas le vocal : inutile de signaler l'absence de PyNaCl et de davey.
+    discord.VoiceClient.warn_nacl = False
+    discord.VoiceClient.warn_dave = False
     bot = ChatBot(settings)
     try:
         bot.run(settings.discord_token, log_handler=None)

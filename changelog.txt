@@ -2,6 +2,15 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.5 — 29/10/2026
+------------------------
+
+Corrections
+- Les avertissements de discord.py sur le vocal (PyNaCl et davey non
+  installés) n'apparaissent plus à chaque démarrage : le bot n'utilise pas
+  le vocal.
+
+
 Version 5.4.0 — 29/10/2026
 --------------------------
 
