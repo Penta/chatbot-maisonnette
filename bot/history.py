@@ -58,8 +58,11 @@ class ConversationHistory:
         await self._save()
 
     async def reset(self, channel_id: int | str) -> None:
-        self._data[str(channel_id)] = []
-        await self._save()
+        """Vide la mémoire du salon, après la fin d'une éventuelle réponse en cours."""
+        # Sans le verrou, une réponse en cours réécrirait son échange juste après le reset.
+        async with self.lock(channel_id):
+            self._data[str(channel_id)] = []
+            await self._save()
 
     # ------------------------------------------------------------ internes
 

@@ -447,6 +447,9 @@ async def reset_command(interaction: discord.Interaction) -> None:
         )
         return
     bot: ChatBot = interaction.client  # type: ignore[assignment]
+    # Le reset attend la fin d'une éventuelle réponse en cours, ce qui peut dépasser
+    # les 3 secondes accordées par Discord pour répondre à une commande.
+    await interaction.response.defer()
     await bot.history.reset(interaction.channel_id)
     logger.info("Historique réinitialisé dans le salon %s par %s", interaction.channel_id, interaction.user)
-    await interaction.response.send_message("L'historique de conversation a été réinitialisé.")
+    await interaction.followup.send("L'historique de conversation a été réinitialisé.")
