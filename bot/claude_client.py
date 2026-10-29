@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,6 +59,19 @@ WEB_NOTE = (
 
 # Nombre maximal de relances quand l'API met la réponse en pause pendant les recherches.
 MAX_CONTINUATIONS = 3
+
+# Il arrive que le modèle écrive sa réflexion dans sa réponse au lieu de réfléchir pour de vrai :
+# faux appel d'outil (<invoke name="think">…) ou raisonnement entre balises (<reasoning>…).
+# Ce n'est que du texte, à ne jamais afficher. Une balise de raisonnement jamais refermée
+# (réponse coupée) emporte tout ce qui la suit. Seul le préfixe « antml: » est accepté, pour
+# ne pas confondre avec un émoji Discord comme <a:think:123>.
+_LEAKED_TAGS = r"invoke|function_calls|reasoning|thinking|think"
+LEAKED_REASONING = re.compile(
+    rf"<(?:antml:)?({_LEAKED_TAGS})\b[^>]*>.*?</(?:antml:)?\1\s*>"
+    r"|<(?:antml:)?(?:reasoning|thinking|think)\b[^>]*>.*"
+    rf"|</?(?:antml:)?(?:{_LEAKED_TAGS}|parameter)\b[^>]*>",
+    re.DOTALL,
+)
 
 
 class ClaudeError(Exception):
@@ -175,15 +189,15 @@ class ClaudeClient:
                 {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses},
             ]
 
-        responses = [await self._call(params, has_image)]
-        # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
-        # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
-        while responses[-1].stop_reason == "pause_turn" and len(responses) <= MAX_CONTINUATIONS:
-            messages = messages + [{"role": "assistant", "content": responses[-1].content}]
-            responses.append(await self._call({**params, "messages": messages}, has_image))
-
-        text = self._final_text(responses)
+        responses = await self._answer(params, messages, has_image)
+        text, leaked = self._final_text(responses)
         web_used = self._log_usage(responses)
+        if leaked and not text:
+            # Réponse faite uniquement de réflexion écrite : on redemande une fois.
+            logger.warning("Réponse sans texte (réflexion écrite dans la réponse) : nouvel essai.")
+            responses = await self._answer(params, messages, has_image)
+            text, _ = self._final_text(responses)
+            web_used = self._log_usage(responses) or web_used
 
         stop_reason = responses[-1].stop_reason
         if stop_reason == "max_tokens":
@@ -196,6 +210,15 @@ class ClaudeClient:
             logger.warning("Réponse vide de Claude (stop_reason=%s).", stop_reason)
             raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
         return Answer(text, web_used)
+
+    async def _answer(self, params: dict, messages: list[dict], has_image: bool) -> list:
+        responses = [await self._call(params, has_image)]
+        # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
+        # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
+        while responses[-1].stop_reason == "pause_turn" and len(responses) <= MAX_CONTINUATIONS:
+            messages = messages + [{"role": "assistant", "content": responses[-1].content}]
+            responses.append(await self._call({**params, "messages": messages}, has_image))
+        return responses
 
     async def _call(self, params: dict, has_image: bool):
         try:
@@ -222,8 +245,9 @@ class ClaudeClient:
             raise ClaudeError("Une erreur est survenue de mon côté, réessaie dans un instant.")
 
     @staticmethod
-    def _final_text(responses) -> str:
-        """Texte de la réponse finale, sans les commentaires écrits entre deux recherches."""
+    def _final_text(responses) -> tuple[str, bool]:
+        """Texte de la réponse finale, sans les commentaires écrits entre deux recherches
+        ni la réflexion écrite dans la réponse ; indique aussi si de la réflexion a été retirée."""
         parts: list[str] = []
         for response in responses:
             for block in response.content:
@@ -232,7 +256,11 @@ class ClaudeClient:
                 elif block.type not in ("thinking", "redacted_thinking"):
                     # Appel ou résultat d'outil : le texte écrit avant n'était qu'un commentaire.
                     parts = []
-        return "".join(parts).strip()
+        text, removed = LEAKED_REASONING.subn("", "".join(parts))
+        if removed:
+            logger.warning("Réflexion écrite retirée de la réponse (%s balise(s)).", removed)
+            text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip(), bool(removed)
 
     def _log_usage(self, responses) -> bool:
         """Journalise la consommation et indique si Claude a utilisé Internet."""

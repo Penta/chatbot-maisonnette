@@ -9,6 +9,10 @@ Corrections
 - Les avertissements de discord.py sur le vocal (PyNaCl et davey non
   installés) n'apparaissent plus à chaque démarrage : le bot n'utilise pas
   le vocal.
+- Réflexion affichée : quand le modèle écrit sa réflexion dans sa réponse
+  (faux appel d'outil <invoke name="think">… ou raisonnement entre balises
+  <reasoning>…), elle est retirée du message envoyé et de la mémoire. Si la
+  réponse ne contenait que ça, le bot redemande une réponse.
 
 
 Version 5.4.0 — 29/10/2026
