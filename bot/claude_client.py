@@ -95,6 +95,9 @@ CUSTOM_STATUS_PROMPT = (
 
 CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
 
+# Erreur due à la configuration (clé, crédit, modèle, réglages) : seul l'administrateur peut la corriger.
+CONFIG_ERROR = "Je suis mal configuré, préviens l'administrateur du bot."
+
 # Nombre maximal de relances quand l'API met la réponse en pause pendant les recherches.
 MAX_CONTINUATIONS = 3
 
@@ -284,16 +287,41 @@ class ClaudeClient:
             logger.error("Connexion à l'API impossible : %s", exc)
             raise ClaudeError("Je n'arrive pas à joindre mon cerveau pour l'instant, réessaie plus tard.")
         except anthropic.BadRequestError as exc:
-            logger.error("Requête refusée par l'API : %s", exc)
-            if has_image:
+            # Toutes les erreurs 400 ont le même type : seul le texte de l'API en donne la cause.
+            message = self._api_message(exc).lower()
+            if has_image and "image" in message:
+                logger.error("Image refusée par l'API : %s", exc)
                 raise ClaudeError("Je n'ai pas réussi à lire cette image, essaie avec une autre.")
-            raise ClaudeError("Ta demande a été refusée par l'API, essaie de la reformuler.")
+            if "prompt is too long" in message:
+                logger.error("Requête trop longue pour le modèle : %s", exc)
+                raise ClaudeError("Ce message est trop long pour moi avec la conversation en cours. "
+                                  "Un modérateur peut vider ma mémoire avec /reset.")
+            if "credit balance" in message:
+                logger.critical("Crédit Anthropic épuisé : %s", exc)
+                raise ClaudeError(CONFIG_ERROR)
+            logger.critical("Requête refusée par l'API, sans doute à cause d'un réglage du .env "
+                            "(MODEL, MAX_TOKENS, THINKING, EFFORT, WEB_SEARCH…) : %s", exc)
+            raise ClaudeError(CONFIG_ERROR)
         except anthropic.AuthenticationError:
             logger.critical("Clé API Anthropic invalide : vérifie ANTHROPIC_API_KEY dans le .env.")
-            raise ClaudeError("Je suis mal configuré, préviens l'administrateur du bot.")
+            raise ClaudeError(CONFIG_ERROR)
+        except anthropic.PermissionDeniedError as exc:
+            logger.critical("Accès refusé par l'API (clé sans accès à ce modèle ou à cet outil ?) : %s", exc)
+            raise ClaudeError(CONFIG_ERROR)
+        except anthropic.NotFoundError as exc:
+            logger.critical("Modèle introuvable : vérifie MODEL dans le .env (%s).", exc)
+            raise ClaudeError(CONFIG_ERROR)
         except anthropic.APIStatusError as exc:
             logger.error("Erreur de l'API (%s) : %s", exc.status_code, exc)
             raise ClaudeError("Une erreur est survenue de mon côté, réessaie dans un instant.")
+
+    @staticmethod
+    def _api_message(exc: anthropic.APIStatusError) -> str:
+        """Texte de l'erreur renvoyée par l'API ({"error": {"message": …}})."""
+        body = exc.body
+        if isinstance(body, dict) and isinstance(body.get("error"), dict):
+            return str(body["error"].get("message", ""))
+        return str(exc)
 
     @staticmethod
     def _final_text(responses) -> str:
