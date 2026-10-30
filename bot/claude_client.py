@@ -16,6 +16,7 @@ from .models import thinking_off
 logger = logging.getLogger("chatbot.claude")
 
 SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+PDF_MEDIA_TYPE = "application/pdf"
 
 DEFAULT_PERSONALITY = (
     "Tu es un membre sympathique d'un serveur Discord francophone. "
@@ -112,8 +113,14 @@ class ClaudeError(Exception):
 
 @dataclass
 class ImageData:
+    """Image ou PDF joint à un message, prêt à être envoyé à Claude."""
     media_type: str
     data: bytes
+    name: str | None = None  # nom du fichier (PDF)
+
+    @property
+    def is_pdf(self) -> bool:
+        return self.media_type == PDF_MEDIA_TYPE
 
 
 @dataclass
@@ -158,14 +165,14 @@ class ClaudeClient:
 
     @staticmethod
     def build_user_content(parts: list[tuple[str, ImageData | None]]) -> str | list[dict]:
-        """Un ou plusieurs messages à la suite, chacun précédé de son image éventuelle."""
+        """Un ou plusieurs messages à la suite, chacun précédé de son image (ou PDF) éventuel."""
         if all(image is None for _, image in parts):
             return "\n".join(text for text, _ in parts)
         content: list[dict] = []
         for text, image in parts:
             if image is not None:
                 content.append({
-                    "type": "image",
+                    "type": "document" if image.is_pdf else "image",
                     "source": {
                         "type": "base64",
                         "media_type": image.media_type,
@@ -177,12 +184,12 @@ class ClaudeClient:
 
     async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]],
                   cache_history: bool = True) -> Answer:
-        """Envoie l'historique + le ou les nouveaux messages (texte, image), et renvoie la réponse de Claude.
+        """Envoie l'historique + le ou les nouveaux messages (texte, image ou PDF), et renvoie la réponse de Claude.
 
         cache_history=False évite d'écrire les messages en cache quand l'appel suivant ne les
         reprendra pas (mentions : contexte différent à chaque fois)."""
         messages = list(history) + [{"role": "user", "content": self.build_user_content(parts)}]
-        has_image = any(image is not None for _, image in parts)
+        attachments = {("pdf" if image.is_pdf else "image") for _, image in parts if image is not None}
 
         system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
         if self.settings.web_search:
@@ -219,12 +226,12 @@ class ClaudeClient:
                 {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses},
             ]
 
-        responses = [await self._call(params, has_image)]
+        responses = [await self._call(params, attachments)]
         # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
         # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
         while responses[-1].stop_reason == "pause_turn" and len(responses) <= MAX_CONTINUATIONS:
             messages = messages + [{"role": "assistant", "content": responses[-1].content}]
-            responses.append(await self._call({**params, "messages": messages}, has_image))
+            responses.append(await self._call({**params, "messages": messages}, attachments))
 
         text = self._final_text(responses)
         web_used = self._log_usage(responses)
@@ -261,7 +268,7 @@ class ClaudeClient:
         if (off := thinking_off(self.settings.model)) is not None:
             params["thinking"] = off
         try:
-            response = await self._call(params, has_image=False)
+            response = await self._call(params)
         except ClaudeError:
             return None
         self._log_usage([response])
@@ -274,7 +281,8 @@ class ClaudeClient:
             return None
         return thought[:max_length]
 
-    async def _call(self, params: dict, has_image: bool):
+    async def _call(self, params: dict, attachments: set[str] | frozenset[str] = frozenset()):
+        """Appel à l'API ; attachments : pièces jointes envoyées ("image", "pdf"), pour les messages d'erreur."""
         try:
             return await self._client.messages.create(**params)
         except anthropic.RateLimitError:
@@ -289,7 +297,10 @@ class ClaudeClient:
         except anthropic.BadRequestError as exc:
             # Toutes les erreurs 400 ont le même type : seul le texte de l'API en donne la cause.
             message = self._api_message(exc).lower()
-            if has_image and "image" in message:
+            if "pdf" in attachments and ("pdf" in message or "document" in message):
+                logger.error("PDF refusé par l'API : %s", exc)
+                raise ClaudeError("Je n'ai pas réussi à lire ce PDF, essaie avec un autre.")
+            if "image" in attachments and "image" in message:
                 logger.error("Image refusée par l'API : %s", exc)
                 raise ClaudeError("Je n'ai pas réussi à lire cette image, essaie avec une autre.")
             if "prompt is too long" in message:

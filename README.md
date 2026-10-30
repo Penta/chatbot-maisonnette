@@ -7,7 +7,8 @@ Bot Discord qui discute avec les membres du serveur grâce à Claude (Anthropic)
 - **Salon dédié** : répond à tous les messages du salon défini par `CHANNEL_ID`, avec une mémoire des derniers échanges, sauvegardée entre deux redémarrages.
 - **Mode mention** : dans les autres salons, répond quand on le mentionne, en lisant les messages récents pour comprendre la discussion.
 - **Images** : commente une image envoyée dans le salon dédié (JPEG, PNG, GIF, WebP, une par message).
-- **Fichiers texte** : lit un fichier `.txt` joint au message (un par message, 100 Ko maximum), dans le salon dédié et en mode mention. Seul le nom du fichier est gardé en mémoire, pas son contenu.
+- **Fichiers texte** : lit un fichier texte joint au message (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, code…, un par message, 100 Ko maximum), dans le salon dédié et en mode mention. Seul le nom du fichier est gardé en mémoire, pas son contenu.
+- **PDF** : lit un PDF joint au message (texte, tableaux, schémas et pages scannées), à la place d'une image, dans le salon dédié et en mode mention. 20 pages maximum par défaut (`PDF_MAX_PAGES`, 0 pour refuser les PDF) et 20 Mo ; les PDF protégés par un mot de passe sont refusés. Chaque page coûte souvent plusieurs milliers de tokens. Seul le nom du fichier est gardé en mémoire.
 - **Réponses** : quand on utilise « Répondre » sur un message, même ancien, le bot lit le message cité (et son image, si on n'en joint pas une autre).
 - **Transferts** : dans le salon dédié, le bot lit un message transféré (son texte et son image).
 - **Autres bots** : le bot ignore les autres bots, sauf quand ils le mentionnent ou répondent à l'un de ses messages (bouton « Répondre ») : deux bots peuvent ainsi discuter ensemble. Les messages système (arrivées, épinglages, boosts…) sont ignorés.
@@ -63,6 +64,7 @@ bot/history.py        mémoire des conversations
 bot/discord_bot.py    événements Discord, réactions, /reset
 bot/presence.py       statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)
-bot/text_files.py     lecture des fichiers .txt joints
+bot/text_files.py     lecture des fichiers texte joints (.txt, .md, code…)
+bot/pdf_files.py      vérification des PDF joints (pages, mot de passe)
 bot/text_utils.py     découpage des longues réponses
 ```

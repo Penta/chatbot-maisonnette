@@ -20,6 +20,7 @@ from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
 from .history import IMAGE_MARKER, WEB_MARKER, ConversationHistory
 from .images import ImageError, prepare_image
+from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
 from .text_utils import split_message
@@ -46,6 +47,10 @@ def looks_like_text(attachment: discord.Attachment) -> bool:
     return attachment.filename.lower().endswith(TEXT_EXTENSIONS)
 
 
+def looks_like_pdf(attachment: discord.Attachment) -> bool:
+    return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
+
+
 @contextlib.asynccontextmanager
 async def typing(channel: discord.abc.Messageable):
     """« En train d'écrire… » pendant le bloc, sans empêcher la réponse si Discord le refuse."""
@@ -68,8 +73,15 @@ def text_file_prompt(name: str, content: str) -> str:
 
 
 def text_file_marker(name: str) -> str:
-    """Remplace un fichier .txt dans la mémoire (son contenu n'est pas conservé)."""
+    """Remplace un fichier texte dans la mémoire (son contenu n'est pas conservé)."""
     return f"[fichier texte joint « {name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
+
+
+def attachment_marker(attachment: ImageData) -> str:
+    """Remplace une image ou un PDF dans la mémoire (son contenu n'est pas conservé)."""
+    if attachment.is_pdf:
+        return f"[PDF joint « {attachment.name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
+    return IMAGE_MARKER
 
 
 @dataclass
@@ -209,7 +221,7 @@ class ChatBot(commands.Bot):
             text = text or "(message sans texte)"
             reply_part = f" ({reply})" if reply else ""
             user_text = f"{self.timestamp(message)}, {message.author.display_name} a écrit{reply_part} : {text}"
-        stored_text = user_text + (f" {IMAGE_MARKER}" if image else "")
+        stored_text = user_text + (f" {attachment_marker(image)}" if image else "")
         if text_file:
             user_text += text_file_prompt(*text_file)
             stored_text += f" {text_file_marker(text_file[0])}"
@@ -293,12 +305,17 @@ class ChatBot(commands.Bot):
                 logger.warning("Pas la permission de lire l'historique de #%s.", message.channel)
         lines.reverse()
 
-        # Seules la première image et le premier fichier .txt de la mention sont lus (les autres
-        # pièces jointes sont ignorées). L'image du message cité ne sert que s'il n'y en a pas.
+        # Seuls la première image (à défaut, le premier PDF) et le premier fichier texte de la mention
+        # sont lus (les autres pièces jointes sont ignorées). L'image du message cité ne sert que s'il
+        # n'y a ni image ni PDF.
         images = [a for a in message.attachments if looks_like_image(a)]
+        pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
         try:
-            image = await self.download_image(images[0]) if images else None
-        except ImageError as exc:
+            if images:
+                image = await self.download_image(images[0])
+            else:
+                image = await self.download_pdf(pdfs[0]) if pdfs else None
+        except (ImageError, PdfError) as exc:
             await self.safe_reply(message, exc.user_message)
             return
         reply, reply_image = await self.read_reply(message, want_image=image is None)
@@ -476,37 +493,46 @@ class ChatBot(commands.Bot):
     async def read_attachments(
         self, message: discord.Message
     ) -> tuple[ImageData | None, tuple[str, str] | None] | bool:
-        """Vérifie les pièces jointes, puis télécharge l'image et le fichier .txt.
+        """Vérifie les pièces jointes, puis télécharge l'image (ou le PDF) et le fichier texte.
 
-        Renvoie (image, (nom, contenu) du fichier texte), chacun pouvant valoir None,
+        Renvoie (image ou PDF, (nom, contenu) du fichier texte), chacun pouvant valoir None,
         ou False si l'envoi est refusé (l'utilisateur est alors prévenu).
         """
         if not message.attachments:
             return None, None
 
         images = [a for a in message.attachments if looks_like_image(a)]
+        pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
         texts = [a for a in message.attachments if looks_like_text(a)]
-        others = [a.filename for a in message.attachments if a not in images and a not in texts]
+        others = [a.filename for a in message.attachments if a not in images + pdfs + texts]
         if others:
-            await self.safe_reply(message, f"Je ne peux lire que des images et des fichiers .txt. Fichier(s) non pris en charge : {', '.join(others)}.")
+            kinds = "des images, des PDF" if self.settings.pdf_max_pages else "des images"
+            await self.safe_reply(message, f"Je ne peux lire que {kinds} et des fichiers texte (.txt, .md, .csv, code…). "
+                                           f"Fichier(s) non pris en charge : {', '.join(others)}.")
             return False
         if len(images) > 1:
             await self.safe_reply(message, "Une seule image par message, s'il te plaît.")
             return False
+        if pdfs and (images or len(pdfs) > 1):
+            await self.safe_reply(message, "Un seul PDF par message, sans image, s'il te plaît.")
+            return False
         if len(texts) > 1:
-            await self.safe_reply(message, "Un seul fichier .txt par message, s'il te plaît.")
+            await self.safe_reply(message, "Un seul fichier texte par message, s'il te plaît.")
             return False
 
         try:
-            image = await self.download_image(images[0]) if images else None
+            if images:
+                image = await self.download_image(images[0])
+            else:
+                image = await self.download_pdf(pdfs[0]) if pdfs else None
             text_file = await self.download_text_file(texts[0]) if texts else None
-        except (ImageError, TextFileError) as exc:
+        except (ImageError, PdfError, TextFileError) as exc:
             await self.safe_reply(message, exc.user_message)
             return False
         return image, text_file
 
     async def download_text_file(self, attachment: discord.Attachment) -> tuple[str, str]:
-        """Télécharge un fichier .txt et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
+        """Télécharge un fichier texte et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
         if attachment.size > TEXT_FILE_MAX_BYTES:
             raise TextFileError(f"Ce fichier texte est trop long (maximum {TEXT_FILE_MAX_BYTES // 1000} Ko).")
 
@@ -517,6 +543,20 @@ class ChatBot(commands.Bot):
             raise TextFileError("Je n'ai pas réussi à télécharger ton fichier, réessaie.")
 
         return attachment.filename, decode_text_file(data)
+
+    async def download_pdf(self, attachment: discord.Attachment) -> ImageData:
+        """Télécharge et vérifie un PDF (lève PdfError en cas de problème)."""
+        if attachment.size > PDF_MAX_BYTES:
+            raise PdfError(f"Ce PDF est trop lourd (maximum {PDF_MAX_BYTES // 1_000_000} Mo).")
+
+        try:
+            data = await attachment.read()
+        except discord.HTTPException as exc:
+            logger.error("Téléchargement du PDF impossible : %s", exc)
+            raise PdfError("Je n'ai pas réussi à télécharger ton PDF, réessaie.")
+
+        # Lecture du PDF dans un thread : ne bloque pas le bot.
+        return await asyncio.to_thread(prepare_pdf, attachment.filename, data, self.settings.pdf_max_pages)
 
     async def download_image(self, attachment: discord.Attachment) -> ImageData:
         """Télécharge et prépare une image (lève ImageError en cas de problème)."""

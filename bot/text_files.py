@@ -1,10 +1,16 @@
-"""Lecture des fichiers texte (.txt) joints aux messages."""
+"""Lecture des fichiers texte (.txt, .md, .csv, code…) joints aux messages."""
 
 from __future__ import annotations
 
 import codecs
 
-TEXT_EXTENSIONS = (".txt",)
+# Fichiers lus comme du texte brut : notes, données, sous-titres, configuration et code.
+TEXT_EXTENSIONS = (
+    ".txt", ".md", ".log", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+    ".srt", ".vtt", ".html", ".htm", ".css", ".tex", ".sql",
+    ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs",
+    ".go", ".rs", ".rb", ".php", ".lua", ".sh", ".bat", ".ps1",
+)
 # Taille maximale d'un fichier .txt (environ 25 000 tokens, pour limiter le coût d'un message).
 TEXT_FILE_MAX_BYTES = 100_000
 

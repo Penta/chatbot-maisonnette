@@ -126,8 +126,9 @@ class Settings:
     history_file: Path
     personality_file: Path
 
-    # Images
+    # Images et PDF
     max_image_size: int
+    pdf_max_pages: int  # 0 : PDF refusés
 
     # Statut Discord (voir presence.py)
     presence: bool
@@ -202,6 +203,8 @@ def load_settings() -> Settings:
         personality_file=Path(_get_str("PERSONALITY_FILE", default="personality_prompt.txt")),
         # Taille maximale acceptée depuis Discord ; les grosses images sont réduites avant l'envoi à Claude.
         max_image_size=_get_int("MAX_IMAGE_SIZE", default=25_000_000, minimum=1),
+        # Chaque page coûte son texte et son image (souvent plusieurs milliers de tokens).
+        pdf_max_pages=_get_int("PDF_MAX_PAGES", default=20, minimum=0),
         presence=presence_raw == "on",
         presence_speed=presence_speed,
         presence_weights=_get_presence_weights(),

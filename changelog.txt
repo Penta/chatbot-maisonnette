@@ -11,6 +11,15 @@ Nouveautés
   accord avec son statut. Elle ne le fait que si quelqu'un y a écrit dans
   les 3 dernières minutes, et après avoir fini sa réponse en cours ; elle
   s'en souvient ensuite.
+- PDF : Rika lit un PDF joint au message (texte, tableaux, schémas, pages
+  scannées), dans son salon et quand on la mentionne. Un PDF par message,
+  sans image ; 20 pages au plus (PDF_MAX_PAGES dans le .env, 0 pour
+  refuser les PDF) et 20 Mo. Les PDF protégés par un mot de passe sont
+  refusés. Comme pour les images, seul le nom du fichier reste en mémoire.
+  Nouvelle dépendance : pypdf (pip install -r requirements.txt).
+- Fichiers texte : en plus des .txt, Rika lit les .md, .csv, .json, .log,
+  sous-titres (.srt, .vtt), fichiers de configuration, pages HTML et le
+  code (.py, .js, .java, .cpp, .cs…).
 
 Corrections
 - Les captures d'écran trop grandes restent en PNG au lieu d'être
