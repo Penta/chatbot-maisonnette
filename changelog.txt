@@ -26,6 +26,14 @@ Corrections
   la cause.
 - Les fichiers .txt enregistrés en « Unicode » par le Bloc-notes (UTF-16)
   sont lus, au lieu d'être refusés comme « pas du texte lisible ».
+- Stickers : un sticker accompagné de texte ou d'une pièce jointe n'efface
+  plus le message (même pendant une absence) : Claude reçoit le texte et
+  le nom du sticker. « Aucun sticker utilisable » et « Aucun emoji
+  personnalisé » ne sont plus envoyés à chaque fois : si le serveur n'a
+  rien d'utilisable, Rika répond avec des mots.
+- Si Discord refuse l'indicateur « en train d'écrire » (permission
+  manquante, panne passagère), la réponse est quand même envoyée, au lieu
+  d'être perdue.
 
 
 Version 5.6 — 30/10/2026

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import random
@@ -43,6 +44,22 @@ def looks_like_image(attachment: discord.Attachment) -> bool:
 
 def looks_like_text(attachment: discord.Attachment) -> bool:
     return attachment.filename.lower().endswith(TEXT_EXTENSIONS)
+
+
+@contextlib.asynccontextmanager
+async def typing(channel: discord.abc.Messageable):
+    """« En train d'écrire… » pendant le bloc, sans empêcher la réponse si Discord le refuse."""
+    indicator = channel.typing()
+    try:
+        await indicator.__aenter__()  # seul ce premier envoi peut échouer : les suivants sont protégés
+    except discord.HTTPException as exc:
+        logger.warning("Indicateur « en train d'écrire » impossible dans #%s : %s", channel, exc)
+        indicator = None
+    try:
+        yield
+    finally:
+        if indicator is not None:
+            await indicator.__aexit__(None, None, None)
 
 
 def text_file_prompt(name: str, content: str) -> str:
@@ -161,14 +178,17 @@ class ChatBot(commands.Bot):
     async def handle_main_channel(self, message: discord.Message) -> None:
         if self._last_main_message is None or message.created_at > self._last_main_message:
             self._last_main_message = message.created_at
-        if not self.available():
-            if message.stickers or CUSTOM_EMOJI_ONLY.match(message.content.strip()):
+        content = message.content.strip()
+        # Un sticker ou un emoji seul reçoit un sticker ou un emoji du serveur. S'il n'y en a aucun
+        # d'utilisable, Claude répond avec des mots ; accompagné de texte, le sticker lui est décrit.
+        if (message.stickers and not content and not message.attachments) or CUSTOM_EMOJI_ONLY.match(content):
+            if not self.available():
                 return  # absent : pas de réaction aux stickers ni aux emojis
-        elif await self.reply_to_sticker(message) or await self.reply_to_emoji(message):
-            return
+            if await self.reply_to_sticker(message) or await self.reply_to_emoji(message):
+                return
 
         forward, forward_image = await self.read_forward(message)
-        if not (message.content.strip() or message.attachments or forward):
+        if not (content or message.attachments or message.stickers or forward):
             return  # sondage, transfert d'un message vide… : rien à lire
 
         attachments = await self.read_attachments(message)
@@ -183,7 +203,10 @@ class ChatBot(commands.Bot):
         if forward:
             user_text = f"{self.timestamp(message)}, {message.author.display_name} a transféré un message {forward}"
         else:
-            text = message.clean_content.strip() or "(message sans texte)"
+            text = message.clean_content.strip()
+            if message.stickers:
+                text = f"{text} [sticker « {message.stickers[0].name} »]".strip()
+            text = text or "(message sans texte)"
             reply_part = f" ({reply})" if reply else ""
             user_text = f"{self.timestamp(message)}, {message.author.display_name} a écrit{reply_part} : {text}"
         stored_text = user_text + (f" {IMAGE_MARKER}" if image else "")
@@ -220,7 +243,7 @@ class ChatBot(commands.Bot):
                 parts.insert(0, (note, None))
                 stored_lines.insert(0, note)
             try:
-                async with channel.typing():
+                async with typing(channel):
                     try:
                         answer = await self.claude.ask(self.history.get(channel.id), parts)
                     except ClaudeError as exc:
@@ -304,7 +327,7 @@ class ChatBot(commands.Bot):
                 await self.safe_reply(message, exc.user_message)
                 return
 
-        async with message.channel.typing():
+        async with typing(message.channel):
             try:
                 answer = await self.claude.ask([], [(prompt, image)], cache_history=False)
             except ClaudeError as exc:
@@ -357,7 +380,7 @@ class ChatBot(commands.Bot):
                 return
             parts = [(note, None) for note in (self.presence_note(), self.presence.departure_note()) if note]
             try:
-                async with channel.typing():
+                async with typing(channel):
                     answer = await self.claude.ask(self.history.get(channel.id), parts)
             except ClaudeError as exc:
                 logger.warning("Message d'absence non envoyé : %s", exc.user_message)
@@ -417,11 +440,9 @@ class ChatBot(commands.Bot):
     # ------------------------------------------------------------- réactions
 
     async def reply_to_sticker(self, message: discord.Message) -> bool:
-        """Répond à un sticker par un sticker aléatoire du serveur."""
-        if not message.stickers:
+        """Répond à un sticker par un sticker aléatoire du serveur (False si aucun n'est utilisable)."""
+        if not message.stickers or message.guild is None:
             return False
-        if message.guild is None:
-            return True
         stickers = [s for s in message.guild.stickers if s.available]
         random.shuffle(stickers)
         for sticker in stickers:
@@ -429,19 +450,21 @@ class ChatBot(commands.Bot):
                 await message.channel.send(stickers=[sticker])
                 logger.info("Sticker envoyé : %s", sticker.name)
                 return True
+            except discord.Forbidden as exc:  # pas le droit d'envoyer de sticker : inutile d'insister
+                logger.warning("Envoi de sticker interdit : %s", exc)
+                break
             except discord.HTTPException as exc:
                 logger.warning("Sticker %s inutilisable : %s", sticker.name, exc)
-        await message.channel.send("Aucun sticker utilisable sur ce serveur.")
-        return True
+        return False
 
     async def reply_to_emoji(self, message: discord.Message) -> bool:
-        """Répond à un message composé d'un seul emoji personnalisé par un emoji aléatoire du serveur."""
+        """Répond à un message composé d'un seul emoji personnalisé par un emoji aléatoire du serveur
+        (False si le serveur n'en a aucun)."""
         if not CUSTOM_EMOJI_ONLY.match(message.content.strip()):
             return False
         emojis = [e for e in message.guild.emojis if e.available] if message.guild else []
         if not emojis:
-            await message.channel.send("Aucun emoji personnalisé sur ce serveur.")
-            return True
+            return False
         try:
             await message.channel.send(str(random.choice(emojis)))
         except discord.HTTPException as exc:
