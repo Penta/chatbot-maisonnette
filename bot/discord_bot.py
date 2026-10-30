@@ -8,6 +8,7 @@ import logging
 import random
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -32,6 +33,8 @@ QUOTE_MAX_LENGTH = 500
 # Messages écrits par quelqu'un ; les autres types sont des messages système
 # (arrivée d'un membre, message épinglé, boost, fil créé…).
 USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
+# En passant absent ou en « Ne pas déranger », le bot prévient son salon si on y a parlé depuis moins de :
+DEPARTURE_WINDOW = timedelta(minutes=3)
 
 
 def looks_like_image(attachment: discord.Attachment) -> bool:
@@ -84,6 +87,7 @@ class ChatBot(commands.Bot):
         # Messages en attente, gardés sur le disque pour y répondre même après un redémarrage.
         self._waiting_file = settings.history_file.with_name("waiting_messages.json")
         self._waiting: set[tuple[int, int]] = set()  # (salon, message)
+        self._last_main_message: datetime | None = None  # date du dernier message reçu dans le salon dédié
 
     # ------------------------------------------------------------ cycle de vie
 
@@ -155,6 +159,8 @@ class ChatBot(commands.Bot):
             await self.handle_mention(message)
 
     async def handle_main_channel(self, message: discord.Message) -> None:
+        if self._last_main_message is None or message.created_at > self._last_main_message:
+            self._last_main_message = message.created_at
         if not self.available():
             if message.stickers or CUSTOM_EMOJI_ONLY.match(message.content.strip()):
                 return  # absent : pas de réaction aux stickers ni aux emojis
@@ -335,6 +341,38 @@ class ChatBot(commands.Bot):
             await answer(channel, late=status)
         except Exception:
             logger.exception("Erreur inattendue pendant une réponse différée")
+
+    async def on_status_change(self, before: Status, after: Status) -> None:
+        """Passe absent ou en « Ne pas déranger » : prévient le salon dédié si une conversation y est en cours."""
+        if not before.available or after.available or self._last_main_message is None:
+            return
+        if discord.utils.utcnow() - self._last_main_message > DEPARTURE_WINDOW:
+            return
+        channel = self.get_channel(self.settings.channel_id)
+        if channel is None:
+            return
+        async with self.history.lock(channel.id):
+            # Attend la fin d'une réponse en cours ; le statut a pu changer encore entre-temps.
+            if self.presence.status is not after:
+                return
+            parts = [(note, None) for note in (self.presence_note(), self.presence.departure_note()) if note]
+            try:
+                async with channel.typing():
+                    answer = await self.claude.ask(self.history.get(channel.id), parts)
+            except ClaudeError as exc:
+                logger.warning("Message d'absence non envoyé : %s", exc.user_message)
+                return
+            stored_text = "\n".join(text for text, _ in parts)
+            if answer.web_used:
+                stored_text += f" {WEB_MARKER}"
+            await self.history.add_exchange(channel.id, stored_text, answer.text)
+        logger.info("Conversation en cours dans #%s : le salon est prévenu de l'absence.", channel)
+        for chunk in split_message(answer.text):
+            try:
+                await channel.send(chunk)
+            except discord.HTTPException as exc:
+                logger.error("Envoi du message d'absence impossible : %s", exc)
+                return
 
     def remember_waiting(self, message: discord.Message) -> None:
         self._waiting.add((message.channel.id, message.id))

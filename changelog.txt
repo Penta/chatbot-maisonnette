@@ -2,6 +2,17 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.7 — 30/10/2026
+------------------------
+
+Nouveautés
+- Quand Rika passe absente ou en « Ne pas déranger » (ou part dormir) en
+  pleine conversation, elle prévient son salon dans un court message, en
+  accord avec son statut. Elle ne le fait que si quelqu'un y a écrit dans
+  les 3 dernières minutes, et après avoir fini sa réponse en cours ; elle
+  s'en souvient ensuite.
+
+
 Version 5.6 — 30/10/2026
 ------------------------
 

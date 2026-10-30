@@ -5,7 +5,8 @@ quelques morceaux, une session de jeu…) ; à la fin, un nouveau statut est tir
 (PRESENCE_NIGHT), le bot est absent.
 
 Absent, le bot ne répond pas avant son retour ; en « Ne pas déranger », il répond au bout de
-quelques minutes (voir wait_turn).
+quelques minutes (voir wait_turn). S'il était en pleine conversation dans son salon, il prévient
+d'abord qu'il s'absente (voir departure_note et ChatBot.on_status_change).
 """
 
 from __future__ import annotations
@@ -225,6 +226,14 @@ class PresenceManager:
         subject = "Ces messages sont arrivés" if several else "Ce message est arrivé"
         return f"[{subject} pendant que tu étais {status.unavailability()} ; tu y réponds seulement maintenant, à {now}.]"
 
+    def departure_note(self) -> str:
+        """Demande à Claude de prévenir le salon qu'il s'absente (statut qui vient de changer)."""
+        now = datetime.now(self.settings.timezone).strftime("%H:%M")
+        return (f"[Il est {now} et tu passes à l'instant à ce statut, alors qu'une conversation est en cours "
+                "dans le salon. Préviens en un court message, dans ton style et dans le fil de la discussion, "
+                "que tu t'absentes, en accord avec ton statut. Ne pose pas de question : tu ne verras "
+                "pas la réponse tout de suite.]")
+
     async def apply(self) -> None:
         """Envoie le statut à Discord (aussi rappelé après une reconnexion, qui l'efface)."""
         try:
@@ -361,11 +370,12 @@ class PresenceManager:
         return random.choice([item for item in items if not is_current(item)] or items)
 
     async def set_status(self, status: Status) -> None:
-        self.status = status
+        before, self.status = self.status, status
         self._changed.set()  # réveille les réponses en attente
         self._changed = asyncio.Event()
         logger.info("Statut Discord : %s", status.describe() or "en ligne, sans activité")
         await self.apply()
+        self.bot.dispatch("status_change", before, status)  # appelle on_status_change du bot
 
     # ------------------------------------------------------------ nuit
 
