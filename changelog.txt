@@ -48,6 +48,11 @@ Corrections
   Leur empreinte est gardée dans slash_commands.sha256, à côté de
   l'historique (le supprimer force un nouvel envoi). Un échec de l'envoi
   n'empêche plus le bot de démarrer : il réessaie au démarrage suivant.
+- Historique : un fichier conversation_history.json d'une forme inattendue
+  (liste, « channels » qui n'est pas un dictionnaire, mauvais encodage)
+  n'empêche plus le bot de démarrer : il est mis de côté et Rika repart
+  d'une mémoire vide. Les copies de secours sont datées
+  (.corrompu-AAAA-MM-JJ_HH-MM-SS) et ne s'écrasent plus entre elles.
 
 
 Version 5.6 — 30/10/2026

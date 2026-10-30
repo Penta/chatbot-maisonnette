@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger("chatbot.history")
@@ -77,29 +78,42 @@ class ConversationHistory:
         if not self.file_path.exists():
             return {}
         try:
-            raw = json.loads(self.file_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as exc:
-            backup = self.file_path.with_suffix(self.file_path.suffix + ".corrompu")
-            logger.error("Fichier d'historique illisible (%s). Copie de secours : %s", exc, backup)
-            try:
-                os.replace(self.file_path, backup)
-            except OSError:
-                pass
+            channels = self._channels(json.loads(self.file_path.read_text(encoding="utf-8")))
+        except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
+            self._set_aside(exc)
             return {}
-
-        if isinstance(raw, dict) and raw.get("version") == FILE_VERSION:
-            channels = raw.get("channels", {})
-        else:
-            logger.info("Ancien format d'historique détecté : conversion automatique.")
-            channels = {cid: (val or {}).get("messages", []) for cid, val in (raw or {}).items()
-                        if isinstance(val, dict)}
-
         return {str(cid): self._trim(self._sanitize(msgs)) for cid, msgs in channels.items()}
 
     @staticmethod
-    def _sanitize(messages: list) -> list[dict]:
+    def _channels(raw) -> dict:
+        """Messages de chaque salon, quel que soit le format du fichier (ValueError s'il est inattendu)."""
+        if not isinstance(raw, dict):
+            raise ValueError(f"le fichier contient un {type(raw).__name__} au lieu d'un dictionnaire")
+        if raw.get("version") == FILE_VERSION:
+            channels = raw.get("channels") or {}
+            if not isinstance(channels, dict):
+                raise ValueError(f"« channels » est un {type(channels).__name__} au lieu d'un dictionnaire")
+            return channels
+        logger.info("Ancien format d'historique détecté : conversion automatique.")
+        return {cid: val.get("messages") for cid, val in raw.items() if isinstance(val, dict)}
+
+    def _set_aside(self, exc: Exception) -> None:
+        """Met de côté un fichier illisible, sous un nom daté : il sera remplacé à la prochaine
+        sauvegarde, et les copies précédentes ne sont jamais écrasées."""
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        backup = self.file_path.with_name(f"{self.file_path.name}.corrompu-{stamp}")
+        logger.error("Fichier d'historique illisible (%s). Copie de secours : %s", exc, backup)
+        try:
+            os.replace(self.file_path, backup)
+        except OSError as err:
+            logger.error("Copie de secours impossible : %s", err)
+
+    @staticmethod
+    def _sanitize(messages) -> list[dict]:
         """Convertit des messages (éventuellement de l'ancien format Mistral) en texte simple,
         et fusionne les messages consécutifs d'un même rôle."""
+        if not isinstance(messages, list):
+            return []
         clean: list[dict] = []
         for msg in messages:
             if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant"):
