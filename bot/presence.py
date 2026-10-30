@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
-from .presence_sources import PresenceSources, Track
+from .presence_sources import Game, PresenceSources, SourceError, Track
 
 if TYPE_CHECKING:
     from discord.ext import commands
@@ -32,6 +32,7 @@ UTC = timezone.utc  # datetime.UTC n'existe qu'à partir de Python 3.11
 SOURCES_REFRESH_INTERVAL = 24 * 3600  # secondes
 CUSTOM_STATUS_MAX_LENGTH = 128  # limite de Discord
 RECENT_CUSTOM_STATUSES = 4  # statuts personnalisés récents, à ne pas répéter
+GAME_ATTEMPTS = 5  # jeux essayés avant d'abandonner (fiche introuvable, jeu pour adultes…)
 
 # Durée de chaque statut, tirée au sort entre ces bornes.
 ANIME_EPISODES = (1, 5)
@@ -66,6 +67,7 @@ class Status:
     title: str | None = None    # anime, jeu, pensée, ou raison d'une absence
     track: Track | None = None  # musique en cours
     episode: int | None = None  # épisode en cours (None pour un film)
+    details: str | None = None  # présentation du jeu, pour Claude uniquement
 
     def activity(self) -> discord.BaseActivity | None:
         if self.kind is Kind.ANIME:
@@ -96,7 +98,8 @@ class Status:
         if self.kind is Kind.MUSIC:
             return f"tu écoutes « {self.track.title} » de {self.track.artist}"
         if self.kind is Kind.GAME:
-            return f"tu joues à « {self.title} » sur Steam"
+            details = f" (présentation du jeu sur Steam : {self.details})" if self.details else ""
+            return f"tu joues à « {self.title} » sur Steam{details}"
         if self.kind is Kind.THOUGHT:
             return f"tu affiches le statut personnalisé « {self.title} »"
         if self.kind is Kind.DND:
@@ -128,7 +131,7 @@ class PresenceManager:
         self.weights = {Kind(name): weight for name, weight in settings.presence_weights.items()}
         self.sources = PresenceSources(
             settings.history_file.with_name("presence_sources.json"),
-            settings.deezer_playlists, settings.steam_api_key, settings.steam_id,
+            settings.deezer_playlists, settings.steam_api_key,
         )
         self.status = Status(Kind.ONLINE)
         self.program: list[Step] = []  # étapes restantes du statut en cours
@@ -139,7 +142,7 @@ class PresenceManager:
 
     def start(self) -> None:
         if not self.sources.steam_enabled:
-            logger.info("STEAM_API_KEY ou STEAM_ID absent : pas de statut « joue à ».")
+            logger.info("STEAM_API_KEY absent : pas de statut « joue à ».")
         self._tasks.append(asyncio.create_task(self._run()))
 
     def stop(self) -> None:
@@ -259,14 +262,29 @@ class PresenceManager:
 
         seconds = random.randint(*MINUTES[kind.value]) * 60 if kind.value in MINUTES else 0
         if kind is Kind.GAME:
-            title = self.pick(self.sources.games, lambda g: g == self.status.title)
-            return [(Status(kind, title=title), seconds / speed)]
+            game = await self.pick_game()
+            if game is None:
+                return [(Status(Kind.ONLINE), seconds / speed)]
+            return [(Status(kind, title=game.name, details=game.description), seconds / speed)]
         if kind in (Kind.THOUGHT, Kind.IDLE, Kind.DND):
             text = await self.write_custom_status(kind, seconds)
             if kind is Kind.THOUGHT and not text:
                 kind = Kind.ONLINE  # pensée impossible à écrire : en ligne, sans activité
             return [(Status(kind, title=text), seconds / speed)]
         return [(Status(kind), seconds / speed)]
+
+    async def pick_game(self) -> Game | None:
+        """Jeu au hasard dans toute la boutique Steam, en écartant les jeux pour adultes."""
+        for appid in random.sample(self.sources.games, min(GAME_ATTEMPTS, len(self.sources.games))):
+            try:
+                game = await self.sources.game_details(appid)
+            except SourceError as exc:
+                logger.warning("Fiche du jeu Steam %s illisible : %s", appid, exc)
+                return None
+            if game:
+                return game
+            logger.info("Jeu Steam %s écarté (introuvable, pas un jeu ou pour adultes).", appid)
+        return None
 
     async def write_custom_status(self, kind: Kind, seconds: int) -> str | None:
         local = datetime.now(self.settings.timezone)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
 from dataclasses import asdict, dataclass
@@ -25,7 +26,14 @@ query ($page: Int) {
 ANIME_PAGES = 10  # 10 pages de 50 : le top 500 des animes les plus populaires
 # Les tops Deezer contiennent 100 titres.
 DEEZER_TRACKS_URL = "https://api.deezer.com/playlist/{}/tracks?limit=100"
-STEAM_URL = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
+STEAM_APPS_URL = "https://api.steampowered.com/IStoreService/GetAppList/v1/"
+STEAM_PAGE_SIZE = 50_000  # maximum accepté par Steam
+STEAM_MAX_PAGES = 10
+STEAM_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
+# Descripteurs de contenu Steam écartés : 3 = contenu sexuel réservé aux adultes,
+# 4 = nudité ou contenu sexuel fréquents (1 = « un peu de nudité » reste accepté).
+STEAM_EXCLUDED_DESCRIPTORS = {3, 4}
+STEAM_DESCRIPTION_MAX_LENGTH = 300
 DEFAULT_TRACK_DURATION = 180  # secondes, si Deezer n'indique pas la durée
 DEFAULT_EPISODE_DURATION = 24  # minutes, si AniList n'indique pas la durée
 TIMEOUT = aiohttp.ClientTimeout(total=30)
@@ -40,6 +48,12 @@ class Anime:
     title: str
     episodes: int | None  # épisodes déjà sortis (None : inconnu) ; 1 pour un film
     duration: int         # minutes par épisode
+
+
+@dataclass(frozen=True)
+class Game:
+    name: str
+    description: str | None  # présentation courte de la boutique Steam
 
 
 @dataclass(frozen=True)
@@ -68,18 +82,17 @@ class PresenceSources:
     Si une source ne répond pas, sa liste précédente (ou celle du cache) est conservée."""
 
     def __init__(self, cache_file: Path, deezer_playlists: tuple[int, ...],
-                 steam_api_key: str | None, steam_id: str | None):
+                 steam_api_key: str | None):
         self.cache_file = cache_file
         self.deezer_playlists = deezer_playlists
         self.steam_api_key = steam_api_key
-        self.steam_id = steam_id
         self.anime: list[Anime] = []
         self.music: list[Track] = []
-        self.games: list[str] = []
+        self.games: list[int] = []  # identifiants de tous les jeux de la boutique Steam
 
     @property
     def steam_enabled(self) -> bool:
-        return bool(self.steam_api_key and self.steam_id)
+        return bool(self.steam_api_key)
 
     def load_cache(self) -> None:
         try:
@@ -87,7 +100,7 @@ class PresenceSources:
             self.anime = [Anime(**a) for a in data.get("anime", [])]
             self.music = [Track(**t) for t in data.get("music", [])]
             if self.steam_enabled:
-                self.games = list(data.get("games", []))
+                self.games = [g for g in data.get("games", []) if isinstance(g, int)]
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError) as exc:
@@ -96,7 +109,8 @@ class PresenceSources:
     def save_cache(self) -> None:
         data = {"anime": [asdict(a) for a in self.anime], "music": [asdict(t) for t in self.music], "games": self.games}
         try:
-            self.cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            # Sans indentation : la liste des jeux compte plus de 100 000 identifiants.
+            self.cache_file.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         except OSError as exc:
             logger.warning("Impossible d'écrire le cache des statuts %s : %s", self.cache_file, exc)
 
@@ -150,11 +164,37 @@ class PresenceSources:
                     tracks[t["id"]] = Track(t["title"], t["artist"]["name"], t.get("duration") or DEFAULT_TRACK_DURATION)
         return list(tracks.values())
 
-    async def fetch_games(self, session: aiohttp.ClientSession) -> list[str]:
-        params = {"key": self.steam_api_key, "steamid": self.steam_id, "include_appinfo": "1",
-                  "include_played_free_games": "1", "format": "json"}
-        data = await get_json(session, "GET", STEAM_URL, params=params)
-        games = data.get("response", {}).get("games")
-        if not games:
-            raise SourceError("bibliothèque vide ou privée : « Détails des jeux » doit être public dans le profil Steam")
-        return sorted({g["name"] for g in games if g.get("name")})
+    async def fetch_games(self, session: aiohttp.ClientSession) -> list[int]:
+        """Identifiants de tous les jeux de la boutique (sans DLC, logiciels ni vidéos), page par page."""
+        games: list[int] = []
+        last_appid = 0
+        for _ in range(STEAM_MAX_PAGES):
+            params = {"key": self.steam_api_key, "include_games": "true", "include_dlc": "false",
+                      "include_software": "false", "include_videos": "false", "include_hardware": "false",
+                      "max_results": str(STEAM_PAGE_SIZE), "last_appid": str(last_appid)}
+            data = (await get_json(session, "GET", STEAM_APPS_URL, params=params)).get("response", {})
+            games += [app["appid"] for app in data.get("apps", []) if app.get("appid")]
+            if not data.get("have_more_results") or not data.get("last_appid"):
+                break
+            last_appid = data["last_appid"]
+        return games
+
+    @staticmethod
+    async def game_details(appid: int) -> Game | None:
+        """Fiche d'un jeu sur la boutique, ou None s'il ne convient pas (introuvable, pas un jeu, pour adultes)."""
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            data = await get_json(session, "GET", STEAM_DETAILS_URL,
+                                  params={"appids": str(appid), "l": "french", "cc": "fr"})
+        entry = data.get(str(appid)) or {}
+        info = entry.get("data") if entry.get("success") else None
+        if not info or info.get("type") != "game" or not info.get("name"):
+            return None
+        descriptors = set((info.get("content_descriptors") or {}).get("ids") or [])
+        try:
+            adult = int(info.get("required_age") or 0) >= 18
+        except ValueError:
+            adult = False
+        if adult or descriptors & STEAM_EXCLUDED_DESCRIPTORS:
+            return None
+        description = html.unescape(info.get("short_description") or "").strip()
+        return Game(info["name"], description[:STEAM_DESCRIPTION_MAX_LENGTH] or None)

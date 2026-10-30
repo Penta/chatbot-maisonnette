@@ -136,7 +136,6 @@ class Settings:
     presence_night: tuple[int, int] | None  # heures de début et de fin ; None = pas de nuit
     deezer_playlists: tuple[int, ...]
     steam_api_key: str | None
-    steam_id: str | None
 
     # Divers
     timezone: ZoneInfo
@@ -209,7 +208,6 @@ def load_settings() -> Settings:
         presence_night=_get_night(),
         deezer_playlists=_get_deezer_playlists(),
         steam_api_key=_get_str("STEAM_API_KEY"),
-        steam_id=_get_str("STEAM_ID"),
         timezone=timezone,
         price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", default=default_input),
         price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", default=default_output),

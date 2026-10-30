@@ -19,9 +19,10 @@ Nouveautés
     durée réelle d'un épisode (un film compte pour un épisode).
   - Musiques : 6 à 20 titres au hasard dans le Top Worldwide, le Top France
     et le Top Japan de Deezer, chacun à sa durée réelle.
-  - Jeux : un jeu au hasard dans la bibliothèque Steam indiquée par
-    STEAM_API_KEY et STEAM_ID (sans eux, pas de statut « joue à »), pendant
-    45 min à 2 h.
+  - Jeux : un jeu au hasard dans toute la boutique Steam (clé STEAM_API_KEY ;
+    sans elle, pas de statut « joue à »), pendant 45 min à 2 h. Les jeux
+    pour adultes sont écartés, et Rika connaît la présentation du jeu sur la
+    boutique.
   - En ligne sans activité : 15 à 45 min.
   - Pensée du moment (30 à 90 min), raison d'une absence (10 à 60 min) ou
     d'un Ne pas déranger (30 à 90 min) : écrites par Claude avec la
