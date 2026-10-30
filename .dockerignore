@@ -11,6 +11,7 @@
 
 **/conversation_history.json*
 **/presence_sources.json
+**/waiting_messages.json
 **/bot.log*
 
 .venv/

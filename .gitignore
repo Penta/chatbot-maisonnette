@@ -6,6 +6,7 @@ venv/
 bot.log*
 conversation_history.json*
 presence_sources.json
+waiting_messages.json
 .claude/
 .vscode/
 # Personnalité perso (peut contenir des infos privées)

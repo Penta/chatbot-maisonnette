@@ -70,7 +70,10 @@ PRESENCE_NOTE = (
     "(anime que tu regardes, musique que tu écoutes, jeu auquel tu joues, statut personnalisé ou disponibilité) ; "
     "tout le serveur le voit sous ton pseudo. C'est vraiment ce que tu es en train de faire : tu peux en parler "
     "naturellement si c'est pertinent ou si on te le demande, mais pas à chaque message, et sans recopier cette mention. "
-    "Seul le statut du dernier message est d'actualité."
+    "Seul le statut du dernier message est d'actualité. "
+    "Quand tu es absente, tu ne réponds qu'à ton retour, et en « Ne pas déranger », seulement au bout de "
+    "quelques minutes : « [Ces messages sont arrivés pendant que tu étais …] » te l'indique. Réponds alors "
+    "comme quelqu'un qui revient, naturellement, sans forcément t'excuser."
 )
 
 # Demandes de statut personnalisé (pensée du moment, raison d'une absence), écrit avec la

@@ -3,6 +3,9 @@
 Chaque statut est tiré au sort selon PRESENCE_WEIGHTS, avec sa propre durée (quelques épisodes,
 quelques morceaux, une session de jeu…) ; à la fin, un nouveau statut est tiré. Pendant la nuit
 (PRESENCE_NIGHT), le bot est absent.
+
+Absent, le bot ne répond pas avant son retour ; en « Ne pas déranger », il répond au bout de
+quelques minutes (voir wait_turn).
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ SOURCES_REFRESH_INTERVAL = 24 * 3600  # secondes
 CUSTOM_STATUS_MAX_LENGTH = 128  # limite de Discord
 RECENT_CUSTOM_STATUSES = 4  # statuts personnalisés récents, à ne pas répéter
 GAME_ATTEMPTS = 5  # jeux essayés avant d'abandonner (fiche introuvable, jeu pour adultes…)
+DND_REPLY_MINUTES = (5, 15)  # délai de réponse en « Ne pas déranger »
 
 # Durée de chaque statut, tirée au sort entre ces bornes.
 ANIME_EPISODES = (1, 5)
@@ -89,6 +93,19 @@ class Status:
             return discord.Status.idle
         return discord.Status.online
 
+    @property
+    def available(self) -> bool:
+        return self.kind not in (Kind.DND, Kind.IDLE, Kind.NIGHT)
+
+    def unavailability(self) -> str:
+        """Pourquoi le bot ne répondait pas, vu de lui-même (statut absent ou Ne pas déranger)."""
+        reason = f" (statut affiché : « {self.title} »)" if self.title else ""
+        if self.kind is Kind.NIGHT:
+            return "absente pour la nuit"
+        if self.kind is Kind.DND:
+            return f"en « Ne pas déranger »{reason}"
+        return f"absente{reason}"
+
     def describe(self) -> str | None:
         """Ce que fait le bot, vu de lui-même (None : en ligne, sans activité)."""
         reason = f" (statut affiché : « {self.title} »)" if self.title else ""
@@ -139,10 +156,13 @@ class PresenceManager:
         self.status_end: datetime | None = None  # fin du statut en cours, toutes étapes comprises
         self.recent_custom: deque[str] = deque(maxlen=RECENT_CUSTOM_STATUSES)
         self._tasks: list[asyncio.Task] = []
+        self._changed = asyncio.Event()  # déclenché à chaque changement de statut (voir wait_turn)
 
     def start(self) -> None:
         if not self.sources.steam_enabled:
             logger.info("STEAM_API_KEY absent : pas de statut « joue à ».")
+        if self.is_night(datetime.now(self.settings.timezone)):
+            self.status = Status(Kind.NIGHT)  # démarrage la nuit : absent dès le premier message
         self._tasks.append(asyncio.create_task(self._run()))
 
     def stop(self) -> None:
@@ -174,6 +194,36 @@ class PresenceManager:
                     description += (f" (fin du morceau dans environ {current}) ; encore {len(self.program)} "
                                     f"morceau(x) après celui-ci, environ {total} de musique en tout")
         return f"[ton statut Discord : {description}]"
+
+    @property
+    def available(self) -> bool:
+        return self.status.available
+
+    async def wait_turn(self) -> None:
+        """Attend que le bot puisse répondre : dès qu'il redevient disponible, ou, en « Ne pas
+        déranger », au bout d'un délai tiré au sort (DND_REPLY_MINUTES)."""
+        loop = asyncio.get_running_loop()
+        deadline: float | None = None
+        while not self.available:
+            changed = self._changed
+            timeout = None
+            if self.status.kind is Kind.DND:
+                if deadline is None:
+                    minutes = random.uniform(*DND_REPLY_MINUTES)
+                    deadline = loop.time() + minutes * 60 / self.settings.presence_speed
+                timeout = deadline - loop.time()
+                if timeout <= 0:
+                    return
+            try:
+                await asyncio.wait_for(changed.wait(), timeout)
+            except asyncio.TimeoutError:
+                return
+
+    def late_note(self, status: Status, several: bool) -> str:
+        """Indique à Claude qu'il répond en retard, et pourquoi."""
+        now = datetime.now(self.settings.timezone).strftime("%H:%M")
+        subject = "Ces messages sont arrivés" if several else "Ce message est arrivé"
+        return f"[{subject} pendant que tu étais {status.unavailability()} ; tu y réponds seulement maintenant, à {now}.]"
 
     async def apply(self) -> None:
         """Envoie le statut à Discord (aussi rappelé après une reconnexion, qui l'efface)."""
@@ -312,6 +362,8 @@ class PresenceManager:
 
     async def set_status(self, status: Status) -> None:
         self.status = status
+        self._changed.set()  # réveille les réponses en attente
+        self._changed = asyncio.Event()
         logger.info("Statut Discord : %s", status.describe() or "en ligne, sans activité")
         await self.apply()
 

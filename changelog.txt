@@ -36,8 +36,17 @@ Nouveautés
   - Les listes sont téléchargées au démarrage puis une fois par jour, et
     gardées dans presence_sources.json (à côté de l'historique) au cas où
     un site ne répondrait plus.
-  - Pour l'instant, « Ne pas déranger » et absente ne changent que
-    l'affichage : Rika répond toujours tout de suite.
+- Absente (et la nuit), Rika ne répond plus avant son retour ; en « Ne pas
+  déranger », elle répond au bout de 5 à 15 minutes, ou dès qu'elle change
+  de statut.
+  - Dans son salon, tous les messages arrivés entre-temps reçoivent une
+    seule réponse groupée. Ailleurs, elle répond à chaque mention avec
+    « Répondre », pour qu'on sache à quel message elle répond.
+  - Elle sait qu'elle répond en retard, et pourquoi (absente, Ne pas
+    déranger, la nuit, avec la raison affichée).
+  - Elle ne réagit pas aux stickers ni aux emojis seuls pendant ce temps.
+  - Les messages en attente sont gardés dans waiting_messages.json (à côté
+    de l'historique) : après un redémarrage, Rika y répond quand même.
 
 
 Version 5.5 — 29/10/2026

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -17,7 +18,7 @@ from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
 from .history import IMAGE_MARKER, WEB_MARKER, ConversationHistory
 from .images import ImageError, prepare_image
-from .presence import PresenceManager
+from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
 from .text_utils import split_message
 
@@ -77,6 +78,12 @@ class ChatBot(commands.Bot):
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._announced = False
         self.presence = PresenceManager(self, self.claude, settings) if settings.presence else None
+        # Absent ou en « Ne pas déranger » : réponses différées, par salon.
+        self._waiters: dict[int, asyncio.Task] = {}  # attente en cours
+        self._mentions: dict[int, list[discord.Message]] = {}  # mentions en attente (hors salon dédié)
+        # Messages en attente, gardés sur le disque pour y répondre même après un redémarrage.
+        self._waiting_file = settings.history_file.with_name("waiting_messages.json")
+        self._waiting: set[tuple[int, int]] = set()  # (salon, message)
 
     # ------------------------------------------------------------ cycle de vie
 
@@ -99,6 +106,7 @@ class ChatBot(commands.Bot):
         if self._announced:
             return  # simple reconnexion : on ne reposte pas le message de démarrage
         self._announced = True
+        self._replay_task = asyncio.create_task(self.replay_waiting())  # référence gardée : pas de ramasse-miettes
 
         channel = self.get_channel(self.settings.channel_id)
         if channel is None:
@@ -119,6 +127,8 @@ class ChatBot(commands.Bot):
     async def close(self) -> None:
         if self.presence:
             self.presence.stop()
+        for task in self._waiters.values():
+            task.cancel()  # les messages en attente restent dans waiting_messages.json
         await self.claude.close()
         await super().close()
 
@@ -145,9 +155,10 @@ class ChatBot(commands.Bot):
             await self.handle_mention(message)
 
     async def handle_main_channel(self, message: discord.Message) -> None:
-        if await self.reply_to_sticker(message):
-            return
-        if await self.reply_to_emoji(message):
+        if not self.available():
+            if message.stickers or CUSTOM_EMOJI_ONLY.match(message.content.strip()):
+                return  # absent : pas de réaction aux stickers ni aux emojis
+        elif await self.reply_to_sticker(message) or await self.reply_to_emoji(message):
             return
 
         forward, forward_image = await self.read_forward(message)
@@ -176,39 +187,67 @@ class ChatBot(commands.Bot):
 
         # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
         # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel.
-        pending = self._pending.setdefault(message.channel.id, [])
-        pending.append(PendingMessage(message, user_text, stored_text, image))
-        async with self.history.lock(message.channel.id):
+        self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, user_text, stored_text, image))
+        if not self.available() or message.channel.id in self._waiters:
+            self.answer_later(message, self.answer_main_channel)
+            return
+        await self.answer_main_channel(message.channel)
+
+    async def answer_main_channel(self, channel: discord.abc.Messageable, late: Status | None = None) -> None:
+        """Répond en une fois aux messages en attente du salon dédié."""
+        pending = self._pending.setdefault(channel.id, [])
+        async with self.history.lock(channel.id):
             if not pending:
                 return  # déjà parti avec un message précédent
             batch = sorted(pending, key=lambda p: p.message.id)
             pending.clear()
             last = batch[-1].message
             if len(batch) > 1:
-                logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), message.channel)
+                logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
             # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
             parts = [(p.user_text, p.image) for p in batch]
             stored_lines = [p.stored_text for p in batch]
+            notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
             if note := self.presence_note():
+                notes.append(note)
+            for note in reversed(notes):
                 parts.insert(0, (note, None))
                 stored_lines.insert(0, note)
-            async with message.channel.typing():
-                try:
-                    answer = await self.claude.ask(self.history.get(message.channel.id), parts)
-                except ClaudeError as exc:
-                    await self.safe_reply(last, exc.user_message)
-                    return
-                except Exception:
-                    logger.exception("Erreur inattendue pendant le traitement d'un message")
-                    await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
-                    return
+            try:
+                async with channel.typing():
+                    try:
+                        answer = await self.claude.ask(self.history.get(channel.id), parts)
+                    except ClaudeError as exc:
+                        await self.safe_reply(last, exc.user_message)
+                        return
+                    except Exception:
+                        logger.exception("Erreur inattendue pendant le traitement d'un message")
+                        await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
+                        return
+            finally:
+                self.forget_waiting(*(p.message for p in batch))
             stored_text = "\n".join(stored_lines)
             if answer.web_used:
                 stored_text += f" {WEB_MARKER}"
-            await self.history.add_exchange(message.channel.id, stored_text, answer.text)
+            await self.history.add_exchange(channel.id, stored_text, answer.text)
         await self.send_answer(last, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
+        if not self.available() or message.channel.id in self._waiters:
+            self._mentions.setdefault(message.channel.id, []).append(message)
+            self.answer_later(message, self.answer_mentions)
+            return
+        await self.answer_mention(message)
+
+    async def answer_mentions(self, channel: discord.abc.Messageable, late: Status | None = None) -> None:
+        """Répond, une par une, aux mentions reçues pendant une absence (avec « Répondre »)."""
+        for message in sorted(self._mentions.pop(channel.id, []), key=lambda m: m.id):
+            try:
+                await self.answer_mention(message, late)
+            finally:
+                self.forget_waiting(message)
+
+    async def answer_mention(self, message: discord.Message, late: Status | None = None) -> None:
         """Hors du salon dédié : répond à une mention en lisant les messages récents."""
         lines: list[str] = []
         if self.settings.context_message_limit > 0:
@@ -241,6 +280,8 @@ class ChatBot(commands.Bot):
         channel_name = f"#{message.channel.name}" if hasattr(message.channel, "name") else "un message privé"
 
         parts = []
+        if late:
+            parts.append(self.presence.late_note(late, several=False))
         if note := self.presence_note():
             parts.append(note)
         if lines:
@@ -267,7 +308,73 @@ class ChatBot(commands.Bot):
                 logger.exception("Erreur inattendue pendant le traitement d'une mention")
                 await self.safe_reply(message, "Désolé, une erreur inattendue est survenue.")
                 return
-        await self.send_answer(message, answer.text)
+        # En retard, la réponse cite la mention : on sait à quoi elle répond.
+        await self.send_answer(message, answer.text, reply=late is not None)
+
+    # ------------------------------------------------------ réponses différées
+
+    def available(self) -> bool:
+        return self.presence is None or self.presence.available
+
+    def answer_later(self, message: discord.Message, answer) -> None:
+        """Met le message de côté : answer(salon, late=statut) y répondra quand le bot le pourra."""
+        self.remember_waiting(message)
+        channel = message.channel
+        if channel.id in self._waiters:
+            return  # une attente est déjà en cours dans ce salon : le message en profitera
+        status = self.presence.status
+        logger.info("Réponse différée dans #%s : %s.", channel, status.unavailability())
+        self._waiters[channel.id] = asyncio.create_task(self._answer_when_possible(channel, answer, status))
+
+    async def _answer_when_possible(self, channel: discord.abc.Messageable, answer, status: Status) -> None:
+        try:
+            await self.presence.wait_turn()
+        finally:
+            self._waiters.pop(channel.id, None)
+        try:
+            await answer(channel, late=status)
+        except Exception:
+            logger.exception("Erreur inattendue pendant une réponse différée")
+
+    def remember_waiting(self, message: discord.Message) -> None:
+        self._waiting.add((message.channel.id, message.id))
+        self._save_waiting()
+
+    def forget_waiting(self, *messages: discord.Message) -> None:
+        keys = {(m.channel.id, m.id) for m in messages}
+        if keys & self._waiting:
+            self._waiting -= keys
+            self._save_waiting()
+
+    def _save_waiting(self) -> None:
+        try:
+            self._waiting_file.write_text(json.dumps(sorted(self._waiting)), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Impossible d'écrire %s : %s", self._waiting_file, exc)
+
+    async def replay_waiting(self) -> None:
+        """Au démarrage : reprend les messages restés sans réponse avant le redémarrage."""
+        try:
+            saved = json.loads(self._waiting_file.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as exc:
+            logger.warning("%s illisible, ignoré : %s", self._waiting_file, exc)
+            return
+        messages = []
+        for channel_id, message_id in saved:
+            try:
+                channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+                messages.append(await channel.fetch_message(message_id))
+            except discord.HTTPException:
+                pass  # message supprimé, salon inaccessible…
+        self._waiting.clear()
+        self._save_waiting()
+        if messages:
+            logger.info("%d message(s) resté(s) sans réponse avant le redémarrage : reprise.", len(messages))
+            # En parallèle, comme à leur arrivée : ceux du salon dédié sont regroupés.
+            await asyncio.gather(*(self.on_message(m) for m in sorted(messages, key=lambda m: m.id)),
+                                 return_exceptions=True)
 
     # ------------------------------------------------------------- réactions
 
@@ -463,11 +570,14 @@ class ChatBot(commands.Bot):
     def timestamp(self, message: discord.Message | discord.MessageSnapshot) -> str:
         return message.created_at.astimezone(self.settings.timezone).strftime("%d/%m/%Y %H:%M")
 
-    async def send_answer(self, message: discord.Message, answer: str) -> None:
-        # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre ».
-        for chunk in split_message(answer):
+    async def send_answer(self, message: discord.Message, answer: str, reply: bool = False) -> None:
+        # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre »
+        # (sauf reply=True : le premier morceau répond alors au message).
+        for i, chunk in enumerate(split_message(answer)):
+            # fail_if_not_exists=False : si le message a été supprimé entre-temps, envoi normal.
+            reference = message.to_reference(fail_if_not_exists=False) if reply and i == 0 else None
             try:
-                await message.channel.send(chunk)
+                await message.channel.send(chunk, reference=reference, mention_author=False)
             except discord.HTTPException as exc:
                 logger.error("Envoi de la réponse impossible : %s", exc)
                 return
