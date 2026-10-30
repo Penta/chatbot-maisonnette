@@ -12,6 +12,7 @@
 **/conversation_history.json*
 **/presence_sources.json
 **/waiting_messages.json
+**/slash_commands.sha256
 **/bot.log*
 
 .venv/

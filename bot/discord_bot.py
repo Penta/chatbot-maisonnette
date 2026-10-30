@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import random
@@ -117,20 +118,44 @@ class ChatBot(commands.Bot):
         self._waiting_file = settings.history_file.with_name("waiting_messages.json")
         self._waiting: set[tuple[int, int]] = set()  # (salon, message)
         self._last_main_message: datetime | None = None  # date du dernier message reçu dans le salon dédié
+        # Empreinte des commandes slash envoyées à Discord (voir sync_commands).
+        self._commands_file = settings.history_file.with_name("slash_commands.sha256")
 
     # ------------------------------------------------------------ cycle de vie
 
     async def setup_hook(self) -> None:
         # Exécuté une seule fois au démarrage (contrairement à on_ready).
         self.tree.add_command(reset_command)
-        synced = await self.tree.sync()
-        logger.info("%d commande(s) slash synchronisée(s).", len(synced))
+        await self.sync_commands()
         s = self.settings
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s",
                     s.model, "on" if s.thinking else "off", s.effort or "par défaut",
                     "on" if s.web_search else "off")
         if self.presence:
             self.presence.start()
+
+    async def sync_commands(self) -> None:
+        """Envoie les commandes slash à Discord, seulement si elles ont changé depuis le dernier envoi
+        (Discord limite ces envois : inutile de les refaire à chaque démarrage)."""
+        payload = [command.to_dict(self.tree) for command in self.tree.get_commands()]
+        signature = json.dumps([self.application_id, payload], sort_keys=True, ensure_ascii=False)
+        digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+        try:
+            if self._commands_file.read_text(encoding="utf-8").strip() == digest:
+                logger.info("Commandes slash inchangées : pas de synchronisation.")
+                return
+        except OSError:
+            pass  # premier démarrage, ou fichier illisible : on synchronise
+        try:
+            synced = await self.tree.sync()
+        except discord.HTTPException as exc:  # le bot fonctionne quand même ; nouvel essai au prochain démarrage
+            logger.error("Synchronisation des commandes slash impossible : %s", exc)
+            return
+        logger.info("%d commande(s) slash synchronisée(s).", len(synced))
+        try:
+            self._commands_file.write_text(digest, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Impossible d'écrire %s : %s", self._commands_file, exc)
 
     async def on_ready(self) -> None:
         logger.info("Connecté en tant que %s (version %s)", self.user, VERSION)
