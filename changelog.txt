@@ -9,10 +9,11 @@ Corrections
 - Les avertissements de discord.py sur le vocal (PyNaCl et davey non
   installés) n'apparaissent plus à chaque démarrage : le bot n'utilise pas
   le vocal.
-- Réflexion affichée : quand le modèle écrit sa réflexion dans sa réponse
-  (faux appel d'outil <invoke name="think">… ou raisonnement entre balises
-  <reasoning>…), le bot redemande une réponse. Si la nouvelle réponse en
-  contient aussi, la réflexion est retirée du message envoyé et de la mémoire.
+- Réflexion affichée : avec Sonnet 5.5 et EFFORT=high, le modèle écrivait
+  parfois sa réflexion dans sa réponse (faux appel d'outil
+  <invoke name="think">…, raisonnement entre balises <reasoning>…), quand il
+  choisissait de ne pas réfléchir. Ça n'arrive plus avec EFFORT=medium :
+  c'est le réglage conseillé.
   - Les consignes ajoutées automatiquement à la personnalité suivent les
     recommandations d'Anthropic contre ces fuites : plus d'interdiction de
     commenter les recherches web (ce commentaire n'est de toute façon jamais
