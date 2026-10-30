@@ -32,6 +32,8 @@ class ConversationHistory:
     def __init__(self, file_path: Path, max_length: int):
         self.file_path = file_path
         self.max_length = max_length
+        # Marge au-delà de max_length avant de couper (voir _trim) : la moitié, en échanges entiers.
+        self.margin = max(2, max_length // 4 * 2)
         self._data: dict[str, list[dict]] = self._load()
         self._locks: dict[str, asyncio.Lock] = {}
         self._save_lock = asyncio.Lock()
@@ -68,8 +70,15 @@ class ConversationHistory:
     # ------------------------------------------------------------ internes
 
     def _trim(self, messages: list[dict]) -> list[dict]:
-        """Garde les N derniers messages, en commençant toujours par un message utilisateur."""
-        trimmed = messages[-self.max_length:]
+        """Garde au moins les N derniers messages, en commençant toujours par un message utilisateur.
+
+        La mémoire est coupée par blocs : elle grandit jusqu'à N + marge messages, puis revient à N
+        d'un coup. Entre deux coupes, son début ne change pas et reste dans le cache de prompt ;
+        couper un échange à chaque message obligerait à réécrire tout l'historique en cache."""
+        if len(messages) <= self.max_length + self.margin:
+            trimmed = messages
+        else:
+            trimmed = messages[-self.max_length:]
         while trimmed and trimmed[0]["role"] != "user":
             trimmed = trimmed[1:]
         return trimmed

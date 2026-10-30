@@ -17,6 +17,13 @@ Nouveautés
   refuser les PDF) et 20 Mo. Les PDF protégés par un mot de passe sont
   refusés. Comme pour les images, seul le nom du fichier reste en mémoire.
   Nouvelle dépendance : pypdf (pip install -r requirements.txt).
+- Mémoire moins chère : quand elle est pleine, elle n'oublie plus un
+  échange à chaque message, mais plusieurs d'un coup. Elle grandit jusqu'à
+  MAX_HISTORY_LENGTH + la moitié (20 → 30 messages), puis revient à
+  MAX_HISTORY_LENGTH. Entre deux coupes, le début de la conversation reste
+  dans le cache de prompt au lieu d'être réécrit à chaque message : dans
+  une conversation animée, l'historique coûte environ 2 à 3 fois moins
+  cher.
 - Fichiers texte : en plus des .txt, Rika lit les .md, .csv, .json, .log,
   sous-titres (.srt, .vtt), fichiers de configuration, pages HTML et le
   code (.py, .js, .java, .cpp, .cs…).
