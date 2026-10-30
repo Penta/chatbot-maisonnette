@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,14 +48,19 @@ def _get_int(name: str, default: int | None = None, required: bool = False, mini
     return value
 
 
-def _get_float(name: str, default: float | None = None) -> float | None:
+def _get_float(name: str, default: float | None = None, minimum: float | None = None) -> float | None:
     raw = _get_str(name)
     if raw is None:
         return default
     try:
-        return float(raw.replace(",", "."))
+        value = float(raw.replace(",", "."))
     except ValueError:
         raise ConfigError(f"La variable {name} doit être un nombre (valeur actuelle : {raw!r}).")
+    if not math.isfinite(value):  # float() accepte « nan » et « inf »
+        raise ConfigError(f"La variable {name} doit être un nombre (valeur actuelle : {raw!r}).")
+    if minimum is not None and value < minimum:
+        raise ConfigError(f"La variable {name} doit être supérieure ou égale à {minimum:g} (valeur actuelle : {value:g}).")
+    return value
 
 
 def _get_presence_weights() -> dict[str, int]:
@@ -194,7 +200,7 @@ def load_settings() -> Settings:
         max_tokens=_get_int("MAX_TOKENS", default=1500, minimum=1),
         thinking=thinking,
         effort=effort,
-        api_timeout=_get_float("API_TIMEOUT", default=60.0),
+        api_timeout=_get_float("API_TIMEOUT", default=60.0, minimum=1),
         web_search=web_search_raw == "on",
         web_max_uses=_get_int("WEB_MAX_USES", default=3, minimum=1),
         max_history_length=_get_int("MAX_HISTORY_LENGTH", default=10, minimum=2),
@@ -212,8 +218,8 @@ def load_settings() -> Settings:
         deezer_playlists=_get_deezer_playlists(),
         steam_api_key=_get_str("STEAM_API_KEY"),
         timezone=timezone,
-        price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", default=default_input),
-        price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", default=default_output),
-        price_web_search_per_1000=_get_float("PRICE_WEB_SEARCH_PER_1000", default=10.0),
+        price_input_per_mtok=_get_float("PRICE_INPUT_PER_MTOK", default=default_input, minimum=0),
+        price_output_per_mtok=_get_float("PRICE_OUTPUT_PER_MTOK", default=default_output, minimum=0),
+        price_web_search_per_1000=_get_float("PRICE_WEB_SEARCH_PER_1000", default=10.0, minimum=0),
         log_file=Path(_get_str("LOG_FILE", default="bot.log")),
     )

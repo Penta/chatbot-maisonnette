@@ -60,6 +60,10 @@ Corrections
   n'empêche plus le bot de démarrer : il est mis de côté et Rika repart
   d'une mémoire vide. Les copies de secours sont datées
   (.corrompu-AAAA-MM-JJ_HH-MM-SS) et ne s'écrasent plus entre elles.
+- .env : API_TIMEOUT doit valoir au moins 1 seconde, et les prix
+  (PRICE_*) ne peuvent plus être négatifs. « nan » et « inf » sont refusés
+  pour tous les réglages décimaux, PRESENCE_SPEED compris. Une valeur
+  invalide arrête le bot au démarrage avec un message clair.
 
 
 Version 5.6 — 30/10/2026
