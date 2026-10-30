@@ -24,6 +24,8 @@ Corrections
   de prévenir l'administrateur pour un réglage du .env refusé, un crédit
   épuisé, un modèle introuvable ou un accès refusé ; les logs en donnent
   la cause.
+- Les fichiers .txt enregistrés en « Unicode » par le Bloc-notes (UTF-16)
+  sont lus, au lieu d'être refusés comme « pas du texte lisible ».
 
 
 Version 5.6 — 30/10/2026

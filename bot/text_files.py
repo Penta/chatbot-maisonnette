@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import codecs
+
 TEXT_EXTENSIONS = (".txt",)
 # Taille maximale d'un fichier .txt (environ 25 000 tokens, pour limiter le coût d'un message).
 TEXT_FILE_MAX_BYTES = 100_000
@@ -16,14 +18,21 @@ class TextFileError(Exception):
 
 
 def decode_text_file(data: bytes) -> str:
-    """Décode le contenu d'un fichier .txt (UTF-8, sinon Windows-1252)."""
-    if b"\x00" in data:
+    """Décode le contenu d'un fichier .txt (UTF-16 avec BOM, UTF-8, sinon Windows-1252)."""
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        # « Unicode » du Bloc-notes : deux octets par caractère, dont beaucoup de \x00.
+        try:
+            text = data.decode("utf-16")
+        except UnicodeDecodeError:
+            raise TextFileError("Ce fichier ne contient pas du texte lisible.")
+    else:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # Fichiers enregistrés par d'anciens éditeurs Windows (Bloc-notes, etc.).
+            text = data.decode("cp1252", errors="replace")
+    if "\x00" in text:
         raise TextFileError("Ce fichier ne contient pas du texte lisible.")
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        # Fichiers enregistrés par d'anciens éditeurs Windows (Bloc-notes, etc.).
-        text = data.decode("cp1252", errors="replace")
     text = text.replace("\r\n", "\n").strip()
     if not text:
         raise TextFileError("Ce fichier texte est vide.")
