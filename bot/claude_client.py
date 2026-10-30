@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,34 @@ WEB_NOTE = (
     "pour y répondre : ta réponse d'alors s'appuyait sur de vrais résultats, même si tu ne les vois plus. "
     "Ne prétends donc jamais avoir inventé une réponse marquée ainsi."
 )
+
+# Ajouté quand PRESENCE=on : le statut Discord en cours est indiqué au début des messages.
+PRESENCE_NOTE = (
+    "\n\nAu début d'un message, « [ton statut Discord : …] » indique ce que tu fais à ce moment-là "
+    "(anime que tu regardes, musique que tu écoutes, jeu auquel tu joues, statut personnalisé ou disponibilité) ; "
+    "tout le serveur le voit sous ton pseudo. C'est vraiment ce que tu es en train de faire : tu peux en parler "
+    "naturellement si c'est pertinent ou si on te le demande, mais pas à chaque message, et sans recopier cette mention. "
+    "Seul le statut du dernier message est d'actualité."
+)
+
+# Demandes de statut personnalisé (pensée du moment, raison d'une absence), écrit avec la
+# personnalité du bot. Les clés sont les noms des statuts de presence.py.
+CUSTOM_STATUS_REQUESTS = {
+    "pensee": "Écris le statut personnalisé que tu affiches en ce moment sous ton pseudo Discord : "
+              "une courte pensée du moment, dans ton style",
+    "absent": "Tu t'absentes de ton PC pendant {duration}. Écris le statut personnalisé que tu affiches "
+              "sous ton pseudo Discord pendant ce temps : une raison plausible, dans ton style",
+    "ne_pas_deranger": "Tu passes en « Ne pas déranger » sur Discord pendant {duration}. Écris le statut "
+                       "personnalisé que tu affiches sous ton pseudo pour expliquer pourquoi : une raison "
+                       "plausible, dans ton style",
+}
+CUSTOM_STATUS_PROMPT = (
+    "Nous sommes {now}. {request}, de 60 caractères au plus. Les emojis du serveur ne s'affichent pas "
+    "dans un statut : si tu veux un emoji, prends un emoji classique (Unicode).{recent} "
+    "Réponds uniquement par ce statut, sans guillemets ni explication."
+)
+
+CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
 
 # Nombre maximal de relances quand l'API met la réponse en pause pendant les recherches.
 MAX_CONTINUATIONS = 3
@@ -152,6 +181,8 @@ class ClaudeClient:
         system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
         if self.settings.web_search:
             system += WEB_NOTE
+        if self.settings.presence:
+            system += PRESENCE_NOTE
 
         # Cache de prompt : les outils et la personnalité, identiques d'un message à l'autre, sont
         # relus depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque message).
@@ -203,6 +234,39 @@ class ClaudeClient:
             logger.warning("Réponse vide de Claude (stop_reason=%s).", stop_reason)
             raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
         return Answer(text, web_used)
+
+    async def write_custom_status(self, kind: str, now: str, duration: str, recent: list[str],
+                                  max_length: int) -> str | None:
+        """Statut personnalisé du bot (voir CUSTOM_STATUS_REQUESTS), ou None en cas d'échec."""
+        recent_part = ""
+        if recent:
+            recent_part = " Ne reprends pas tes statuts récents : " + ", ".join(f"« {r} »" for r in recent) + "."
+        prompt = CUSTOM_STATUS_PROMPT.format(
+            now=now, request=CUSTOM_STATUS_REQUESTS[kind].format(duration=duration), recent=recent_part,
+        )
+        params: dict = {
+            "model": self.settings.model,
+            "max_tokens": 1000,
+            "system": self.personality() + OUTPUT_NOTE,
+            "messages": [{"role": "user", "content": prompt}],
+            # Une phrase courte : inutile de réfléchir longtemps.
+            "extra_body": {"output_config": {"effort": "low"}},
+        }
+        if (off := thinking_off(self.settings.model)) is not None:
+            params["thinking"] = off
+        try:
+            response = await self._call(params, has_image=False)
+        except ClaudeError:
+            return None
+        self._log_usage([response])
+        lines = [line.strip() for line in self._final_text([response]).splitlines() if line.strip()]
+        # Un emoji du serveur s'afficherait sous forme de code (<:nom:123…>) : on le retire.
+        thought = CUSTOM_EMOJI.sub("", lines[0]).strip("\"'«» ") if lines else ""
+        thought = re.sub(r"\s{2,}", " ", thought)
+        if not thought or "<" in thought:  # vide, ou balise interne écrite par erreur
+            logger.warning("Statut personnalisé inutilisable : %r", thought)
+            return None
+        return thought[:max_length]
 
     async def _call(self, params: dict, has_image: bool):
         try:

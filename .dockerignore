@@ -10,6 +10,7 @@
 **/*.key
 
 **/conversation_history.json*
+**/presence_sources.json
 **/bot.log*
 
 .venv/

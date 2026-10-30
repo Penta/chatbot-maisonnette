@@ -2,6 +2,43 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.6 — 30/10/2026
+------------------------
+
+Nouveautés
+- Statut Discord : sous son pseudo, Rika regarde un anime, écoute de la
+  musique, joue à un jeu, affiche une pensée du moment, ou passe en « Ne pas
+  déranger » ou absente.
+  - Chances de chaque statut : anime 20 %, musique 20 %, pensée 10 %, jeu
+    20 %, en ligne sans activité 20 %, Ne pas déranger 5 %, absente 5 %
+    (PRESENCE_WEIGHTS dans le .env). Chaque statut a sa propre durée, tirée
+    au sort ; à la fin, un nouveau statut est tiré, jamais le même que le
+    précédent.
+  - Animes : un titre (romaji) au hasard dans le top 500 d'AniList. Rika
+    regarde 1 à 5 épisodes à la suite, à partir d'un épisode précis, à la
+    durée réelle d'un épisode (un film compte pour un épisode).
+  - Musiques : 6 à 20 titres au hasard dans le Top Worldwide, le Top France
+    et le Top Japan de Deezer, chacun à sa durée réelle.
+  - Jeux : un jeu au hasard dans la bibliothèque Steam indiquée par
+    STEAM_API_KEY et STEAM_ID (sans eux, pas de statut « joue à »), pendant
+    45 min à 2 h.
+  - En ligne sans activité : 15 à 45 min.
+  - Pensée du moment (30 à 90 min), raison d'une absence (10 à 60 min) ou
+    d'un Ne pas déranger (30 à 90 min) : écrites par Claude avec la
+    personnalité du bot, selon l'heure et la durée, sans reprendre les
+    dernières.
+  - De 2 h à 6 h, Rika est automatiquement absente (PRESENCE_NIGHT), quoi
+    qu'elle soit en train de faire.
+  - Quand on lui parle, Rika sait ce qu'elle est en train de faire, et pour
+    combien de temps encore.
+  - PRESENCE_SPEED=10 rend tous les statuts 10 fois plus courts, pour tester.
+  - Les listes sont téléchargées au démarrage puis une fois par jour, et
+    gardées dans presence_sources.json (à côté de l'historique) au cas où
+    un site ne répondrait plus.
+  - Pour l'instant, « Ne pas déranger » et absente ne changent que
+    l'affichage : Rika répond toujours tout de suite.
+
+
 Version 5.5 — 29/10/2026
 ------------------------
 

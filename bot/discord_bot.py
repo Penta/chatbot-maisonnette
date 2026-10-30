@@ -17,6 +17,7 @@ from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
 from .history import IMAGE_MARKER, WEB_MARKER, ConversationHistory
 from .images import ImageError, prepare_image
+from .presence import PresenceManager
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
 from .text_utils import split_message
 
@@ -75,6 +76,7 @@ class ChatBot(commands.Bot):
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._announced = False
+        self.presence = PresenceManager(self, self.claude, settings) if settings.presence else None
 
     # ------------------------------------------------------------ cycle de vie
 
@@ -87,9 +89,13 @@ class ChatBot(commands.Bot):
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s",
                     s.model, "on" if s.thinking else "off", s.effort or "par défaut",
                     "on" if s.web_search else "off")
+        if self.presence:
+            self.presence.start()
 
     async def on_ready(self) -> None:
         logger.info("Connecté en tant que %s (version %s)", self.user, VERSION)
+        if self.presence:
+            await self.presence.apply()  # une reconnexion complète efface le statut
         if self._announced:
             return  # simple reconnexion : on ne reposte pas le message de démarrage
         self._announced = True
@@ -111,6 +117,8 @@ class ChatBot(commands.Bot):
             logger.error("Impossible d'envoyer le message de démarrage : %s", exc)
 
     async def close(self) -> None:
+        if self.presence:
+            self.presence.stop()
         await self.claude.close()
         await super().close()
 
@@ -178,11 +186,15 @@ class ChatBot(commands.Bot):
             last = batch[-1].message
             if len(batch) > 1:
                 logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), message.channel)
+            # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
+            parts = [(p.user_text, p.image) for p in batch]
+            stored_lines = [p.stored_text for p in batch]
+            if note := self.presence_note():
+                parts.insert(0, (note, None))
+                stored_lines.insert(0, note)
             async with message.channel.typing():
                 try:
-                    answer = await self.claude.ask(
-                        self.history.get(message.channel.id), [(p.user_text, p.image) for p in batch]
-                    )
+                    answer = await self.claude.ask(self.history.get(message.channel.id), parts)
                 except ClaudeError as exc:
                     await self.safe_reply(last, exc.user_message)
                     return
@@ -190,7 +202,7 @@ class ChatBot(commands.Bot):
                     logger.exception("Erreur inattendue pendant le traitement d'un message")
                     await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
                     return
-            stored_text = "\n".join(p.stored_text for p in batch)
+            stored_text = "\n".join(stored_lines)
             if answer.web_used:
                 stored_text += f" {WEB_MARKER}"
             await self.history.add_exchange(message.channel.id, stored_text, answer.text)
@@ -229,6 +241,8 @@ class ChatBot(commands.Bot):
         channel_name = f"#{message.channel.name}" if hasattr(message.channel, "name") else "un message privé"
 
         parts = []
+        if note := self.presence_note():
+            parts.append(note)
         if lines:
             parts.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
         reply_part = f" ({reply})" if reply else ""
@@ -442,6 +456,9 @@ class ChatBot(commands.Bot):
         return USER_MENTION.sub(name, text)
 
     # ------------------------------------------------------------- envoi
+
+    def presence_note(self) -> str | None:
+        return self.presence.prompt_note() if self.presence else None
 
     def timestamp(self, message: discord.Message | discord.MessageSnapshot) -> str:
         return message.created_at.astimezone(self.settings.timezone).strftime("%d/%m/%Y %H:%M")
