@@ -20,6 +20,9 @@ API_MAX_BYTES = 3_750_000
 Image.MAX_IMAGE_PIXELS = 80_000_000
 
 _DIRECT_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif", "WEBP": "image/webp"}
+# Formats sans perte (captures d'écran, dessins…) : PNG essayé avant le JPEG.
+_LOSSLESS_FORMATS = {"PNG", "GIF", "BMP", "TIFF"}
+_PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels en PNG
 
 
 class ImageError(Exception):
@@ -50,16 +53,23 @@ def prepare_image(data: bytes) -> ImageData:
     original_size, original_dims = len(data), img.size
     img.seek(0)                      # GIF ou WebP animé : première image uniquement
     img = ImageOps.exif_transpose(img)  # respecte l'orientation des photos de téléphone
+    if img.mode in ("1", "P"):  # sinon réduite au plus proche voisin, qui abîme le texte
+        img = img.convert("RGBA" if "transparency" in img.info else "RGB")
     img.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
 
     has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
     result: ImageData | None = None
 
-    if has_alpha:  # garde la transparence en PNG si la taille le permet
-        png = _encode(img.convert("RGBA"), "PNG", optimize=True)
+    # PNG si la taille le permet : garde la transparence, et le texte net des captures d'écran
+    # (le JPEG le brouille). Les photos, déjà en JPEG, passent directement au JPEG.
+    if has_alpha or fmt in _LOSSLESS_FORMATS:
+        if has_alpha:
+            png = _encode(img.convert("RGBA"), "PNG", optimize=True)
+        else:
+            png = _encode(img if img.mode in _PNG_MODES else img.convert("RGB"), "PNG", optimize=True)
         if len(png) <= API_MAX_BYTES:
             result = ImageData("image/png", png)
-        else:  # sinon fond blanc + JPEG
+        elif has_alpha:  # sinon fond blanc + JPEG
             background = Image.new("RGB", img.size, "white")
             background.paste(img.convert("RGBA"), mask=img.convert("RGBA").getchannel("A"))
             img = background

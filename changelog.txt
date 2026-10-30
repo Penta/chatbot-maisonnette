@@ -12,6 +12,12 @@ Nouveautés
   les 3 dernières minutes, et après avoir fini sa réponse en cours ; elle
   s'en souvient ensuite.
 
+Corrections
+- Les captures d'écran trop grandes restent en PNG au lieu d'être
+  converties en JPEG, qui brouillait le texte (le JPEG ne sert plus que si
+  le PNG dépasse la limite de l'API). Les images en palette (PNG optimisés,
+  GIF) sont réduites proprement, et non plus au plus proche voisin.
+
 
 Version 5.6 — 30/10/2026
 ------------------------
