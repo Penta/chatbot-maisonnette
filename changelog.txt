@@ -2,8 +2,8 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
-Version 5.7 — 30/10/2026
-------------------------
+Version 5.7
+-----------
 
 Nouveautés
 - Quand Rika passe absente ou en « Ne pas déranger » (ou part dormir) en
@@ -66,8 +66,8 @@ Corrections
   invalide arrête le bot au démarrage avec un message clair.
 
 
-Version 5.6 — 30/10/2026
-------------------------
+Version 5.6
+-----------
 
 Nouveautés
 - Statut Discord : sous son pseudo, Rika regarde un anime, écoute de la
@@ -113,8 +113,8 @@ Nouveautés
     de l'historique) : après un redémarrage, Rika y répond quand même.
 
 
-Version 5.5 — 29/10/2026
-------------------------
+Version 5.5
+-----------
 
 Corrections
 - Les avertissements de discord.py sur le vocal (PyNaCl et davey non
@@ -135,8 +135,8 @@ Corrections
   (le SDK 2.x passe par httpx2, qui n'était pas rendu silencieux).
 
 
-Version 5.4.0 — 29/10/2026
---------------------------
+Version 5.4.0
+-------------
 
 Nouveautés
 - Changement de modèle facile : il suffit de modifier CLAUDE_MODEL dans le
@@ -172,8 +172,8 @@ Corrections
   mention qui est envoyée à Claude.
 
 
-Version 5.3.0 — 29/10/2026
---------------------------
+Version 5.3.0
+-------------
 
 Nouveautés
 - Accès à Internet (désactivé par défaut) : avec WEB_SEARCH=on dans le .env,
@@ -197,8 +197,8 @@ Améliorations
   et des recherches web (PRICE_WEB_SEARCH_PER_1000).
 
 
-Version 5.2.0 — 28/10/2026
---------------------------
+Version 5.2.0
+-------------
 
 Nouveautés
 - Fichiers texte : le bot lit un fichier .txt joint au message et en tient
@@ -222,8 +222,8 @@ Améliorations
     restent en « Répondre », pour qu'on sache à qui ils s'adressent.
 
 
-Version 5.1.0 — 27/10/2026
---------------------------
+Version 5.1.0
+-------------
 
 Nouveautés
 - Réponses aux messages : quand on utilise « Répondre » sur un message, même
@@ -254,8 +254,8 @@ Divers
 - README : précision sur les droits nécessaires pour /reset.
 
 
-Version 5.0.0 — 27/10/2026
---------------------------
+Version 5.0.0
+-------------
 
 Nouveautés
 - Passage de Mistral à Claude (Anthropic) pour générer les réponses.
