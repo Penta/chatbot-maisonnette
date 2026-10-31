@@ -75,6 +75,9 @@ MEMBER_MEMORY_NOTE = (
     "que d'en ajouter une (« jeu préféré : Zelda » devient « jeu préféré : Elden Ring »). La première ligne "
     "d'une fiche est « Surnoms : … » : complète-la dès que tu comprends qu'un surnom désigne ce membre. "
     "Si tu ne sais pas avec certitude de qui on parle, ne note rien, ou demande. "
+    "Les fiches des membres concernés par un message (auteurs, membres mentionnés, auteur du message "
+    "cité) sont jointes à la fin de ce message ; pour un autre membre de la liste, lis sa fiche avec "
+    "l'outil si tu en as besoin. "
     "Une fiche est limitée à {member_limit} caractères et le fichier général à {server_limit} : si une note "
     "est refusée faute de place, réécris tout le fichier en plus court (« reecrire »), en fusionnant les "
     "lignes et en retirant le moins important."
@@ -215,13 +218,26 @@ class ClaudeClient:
         return content
 
     async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]],
-                  emojis: list[str] | None = None, cache_history: bool = True) -> Answer:
+                  emojis: list[str] | None = None, cache_history: bool = True, member_notes: str = "") -> Answer:
         """Envoie l'historique + le ou les nouveaux messages (texte, image ou PDF), et renvoie la réponse de Claude.
 
         emojis : noms des emojis du serveur que Claude peut écrire (voir EMOJI_NOTE).
         cache_history=False évite d'écrire les messages en cache quand l'appel suivant ne les
-        reprendra pas (mentions : contexte différent à chaque fois)."""
-        messages = list(history) + [{"role": "user", "content": self.build_user_content(parts)}]
+        reprendra pas (mentions : contexte différent à chaque fois).
+        member_notes : fiches des membres concernés (voir MemoryStore.notes_for), jointes au message
+        mais absentes de l'historique."""
+        content = self.build_user_content(parts)
+        # Les fiches, absentes de l'historique enregistré, viennent après le marqueur de cache :
+        # placées avant, elles empêcheraient le message suivant de relire l'historique en cache.
+        history_marker = cache_history
+        if member_notes:
+            if isinstance(content, str):
+                content = [{"type": "text", "text": content}]
+            if cache_history:
+                content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
+                history_marker = False  # marqueur déjà placé, avant les fiches
+            content.append({"type": "text", "text": member_notes})
+        messages = list(history) + [{"role": "user", "content": content}]
         attachments = {("pdf" if image.is_pdf else "image") for _, image in parts if image is not None}
 
         system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
@@ -236,11 +252,15 @@ class ClaudeClient:
             system += PRESENCE_NOTE
         if emojis:
             system += EMOJI_NOTE.format(example=emojis[0], names=" ".join(f":{name}:" for name in emojis))
+        if self.memory:
+            # En dernier : la liste des membres et le fichier général sont ce qui change le plus souvent.
+            system += self.memory.system_context()
 
         # Cache de prompt : les outils et la personnalité, identiques d'un message à l'autre, sont
         # relus depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque message).
-        # Le marqueur sur "system" couvre ce bloc fixe ; celui de premier niveau couvre en plus
-        # l'historique, qui change à chaque message mais reprend le début de la requête précédente.
+        # Le marqueur sur "system" couvre ce bloc fixe ; celui de premier niveau (ou celui placé avant
+        # les fiches) couvre en plus l'historique, qui change à chaque message mais reprend le début
+        # de la requête précédente.
         # Une écriture en cache coûte 25 % de plus : inutile si elle ne sera jamais relue.
         params: dict = {
             "model": self.settings.model,
@@ -248,7 +268,7 @@ class ClaudeClient:
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": messages,
         }
-        if cache_history:
+        if history_marker:
             params["cache_control"] = {"type": "ephemeral"}
         # Par défaut, les modèles récents réfléchissent avant de répondre, et cette réflexion
         # consomme le budget MAX_TOKENS. Avec THINKING=off, on la coupe de la façon propre au

@@ -7,8 +7,8 @@ Version 5.10
 
 Nouveautés
 - Mémoire des membres (MEMORY=on, en construction) : le bot tient un
-  registre des membres qu'il voit, auteurs des messages qu'il lit et
-  membres mentionnés, sans les autres bots. Pour chacun, il garde le
+  registre des membres qu'il voit : auteurs des messages qu'il lit,
+  membres mentionnés et auteurs des messages cités, sans les bots. Pour chacun, il garde le
   nom d'utilisateur, le nom d'affichage, le pseudo sur le serveur et les
   5 derniers anciens pseudos, mis à jour à chaque message. Le registre
   est dans memories/registre.json, à côté de l'historique (MEMORY_DIR
@@ -26,6 +26,16 @@ Nouveautés
   (permission « Ajouter des réactions » nécessaire). Outil maison plutôt
   que celui d'Anthropic, qui lui ferait relire tout le dossier avant
   chaque réponse (un appel de plus à chaque message).
+  Le bot joint lui-même à chaque message les fiches des membres
+  concernés (auteurs, membres mentionnés, auteur du message cité), sans
+  appel supplémentaire ; elles ne sont pas enregistrées dans
+  l'historique, et le cache s'arrête juste avant elles pour que
+  l'historique reste relu en cache au message suivant. Le prompt
+  contient aussi la liste des membres, avec tous leurs noms (pseudo,
+  nom d'utilisateur, surnoms de la fiche, anciens pseudos) et le chemin
+  de leur fiche, ce qui permet à Rika de noter une info sur quelqu'un
+  cité par son seul nom ou surnom ; ainsi que le fichier général. Les
+  membres qui ont désactivé la mémoire n'y figurent pas.
 
 Divers
 - /reset et /skip sont réservés aux membres qui ont la permission

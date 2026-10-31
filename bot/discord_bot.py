@@ -232,11 +232,24 @@ class ChatBot(commands.Bot):
         elif mentioned:
             await self.handle_mention(message)
 
+    async def concerned_members(self, message: discord.Message) -> list[discord.User | discord.Member]:
+        """Membres concernés par un message, sans les bots : auteur, membres mentionnés, auteur du message cité."""
+        users = [message.author, *message.mentions]
+        if (cited := await self.fetch_cited(message)) is not None:
+            users.append(cited.author)
+        unique = {user.id: user for user in users if not user.bot}
+        return list(unique.values())
+
+    async def member_notes(self, messages: list[discord.Message]) -> str:
+        """Fiches des membres concernés par ces messages, à joindre pour Claude (vide sans mémoire)."""
+        if not self.memory:
+            return ""
+        ids = [user.id for message in messages for user in await self.concerned_members(message)]
+        return self.memory.notes_for(ids)
+
     async def register_members(self, message: discord.Message) -> None:
-        """Ajoute au registre l'auteur et les membres mentionnés (sauf les bots), ou met leurs noms à jour."""
-        for user in (message.author, *message.mentions):
-            if user.bot:
-                continue
+        """Ajoute au registre les membres concernés par le message, ou met leurs noms à jour."""
+        for user in await self.concerned_members(message):
             # En message privé, l'auteur n'est pas un membre du serveur : son pseudo n'est pas connu.
             in_guild = isinstance(user, discord.Member)
             await self.members.see(user.id, user.name, user.global_name,
@@ -347,8 +360,9 @@ class ChatBot(commands.Bot):
             try:
                 async with typing(channel):
                     try:
+                        notes = await self.member_notes([p.message for p in batch])
                         answer = await self.claude.ask(self.history.get(channel.id), parts,
-                                                       emojis=emoji_names(last.guild))
+                                                       emojis=emoji_names(last.guild), member_notes=notes)
                     except ClaudeError as exc:
                         await self.safe_reply(last, exc.user_message)
                         return
@@ -437,7 +451,7 @@ class ChatBot(commands.Bot):
         async with typing(message.channel):
             try:
                 answer = await self.claude.ask([], [(prompt, image)], emojis=emoji_names(message.guild),
-                                               cache_history=False)
+                                               cache_history=False, member_notes=await self.member_notes([message]))
             except ClaudeError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return

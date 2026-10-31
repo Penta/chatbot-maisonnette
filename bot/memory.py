@@ -13,12 +13,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .members import MemberRegistry, display_name
+from .members import NAME_KEYS, MemberRegistry, display_name
 
 logger = logging.getLogger("chatbot.memory")
 
 SERVER_FILE = "serveur.md"
 MEMBER_FILE = re.compile(r"^membres/(\d+)\.md$")
+# Première ligne d'une fiche : les surnoms du membre, repris dans la liste des membres.
+NICKNAMES_LINE = re.compile(r"^surnoms\s*:\s*(.*)$", re.IGNORECASE)
 
 MEMORY_TOOL = {
     "name": "memoire",
@@ -73,6 +75,56 @@ class MemoryStore:
 
     def member_file(self, member_id: int | str) -> str:
         return f"membres/{member_id}.md"
+
+    def nicknames(self, member_id: int | str) -> list[str]:
+        """Surnoms notés sur la première ligne de la fiche (« Surnoms : pnt, le Pent »)."""
+        first_line = self.read(self.member_file(member_id)).partition("\n")[0]
+        match = NICKNAMES_LINE.match(first_line.strip())
+        if match is None:
+            return []
+        return [name.strip() for name in re.split(r"[,;]", match.group(1)) if name.strip()]
+
+    def system_context(self) -> str:
+        """Liste des membres (tous leurs noms et le chemin de leur fiche) et fichier général, pour le
+        prompt système. Ils changent rarement : le prompt reste presque toujours en cache."""
+        lines = []
+        for member_id, entry in self.members.members().items():
+            if not entry["memory"]:
+                continue  # mémoire désactivée : Rika ne doit rien noter sur ce membre
+            name = display_name(entry)
+            # Sans doublon, majuscules comprises (« penta » et « Penta » : un seul nom).
+            others: dict[str, str] = {name.casefold(): name}
+            for other in [entry[key] for key in NAME_KEYS] + self.nicknames(member_id):
+                if other:
+                    others.setdefault(other.casefold(), other)
+            others = list(others.values())[1:]
+            details = []
+            if others:
+                details.append("aussi : " + ", ".join(others))
+            if entry["former_names"]:
+                details.append("anciens pseudos : " + ", ".join(entry["former_names"]))
+            suffix = f" ({' ; '.join(details)})" if details else ""
+            lines.append(f"- {name}{suffix} → {self.member_file(member_id)}")
+        members = "\n".join(lines) or "(aucun membre pour l'instant)"
+        server = self.read(SERVER_FILE) or "(vide pour l'instant)"
+        return (f"\n\nListe des membres, avec tous leurs noms et le chemin de leur fiche :\n{members}"
+                f"\n\nTon fichier général ({SERVER_FILE}) :\n{server}")
+
+    def notes_for(self, member_ids: list[int]) -> str:
+        """Fiches des membres concernés par un message, jointes à ce message (vide s'il n'y en a aucune).
+        Les membres inconnus du registre ou qui ont désactivé la mémoire sont ignorés."""
+        sections = []
+        for member_id in dict.fromkeys(member_ids):
+            entry = self.members.get(member_id)
+            if entry is None or not entry["memory"]:
+                continue
+            path = self.member_file(member_id)
+            content = self.read(path) or "(rien de noté pour l'instant)"
+            sections.append(f"=== {display_name(entry)} ({path}) ===\n{content}")
+        if not sections:
+            return ""
+        return ("[Tes fiches sur les membres concernés par ce message, jointes automatiquement : "
+                "elles ne font pas partie du message.]\n\n" + "\n\n".join(sections))
 
     async def run(self, command: dict) -> ToolResult:
         """Exécute une commande de l'outil « memoire »."""
