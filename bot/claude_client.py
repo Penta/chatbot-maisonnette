@@ -11,6 +11,7 @@ from pathlib import Path
 import anthropic
 
 from .config import Settings
+from .emojis import DISCORD_EMOJI, SHORT_EMOJI
 from .models import thinking_off
 from .text_utils import strip_reasoning
 
@@ -78,6 +79,15 @@ PRESENCE_NOTE = (
     "comme quelqu'un qui revient, naturellement, sans forcément t'excuser."
 )
 
+# Ajouté quand le serveur a des emojis utilisables : leur liste, tirée de Discord. Les codes Discord
+# (<:nom:123…>) sont 3 fois plus longs et Claude se tromperait d'identifiant : il écrit le nom seul,
+# remplacé à l'envoi (voir emojis.py).
+EMOJI_NOTE = (
+    "\n\nEmojis du serveur : écris-les par leur nom entre deux-points, par exemple :{example}: ; "
+    "ils s'affichent ensuite en image sur Discord, et les messages de la conversation les montrent "
+    "sous cette même forme. Les seuls disponibles : {names}."
+)
+
 # Demandes de statut personnalisé (pensée du moment, raison d'une absence), écrit avec la
 # personnalité du bot. Les clés sont les noms des statuts de presence.py.
 CUSTOM_STATUS_REQUESTS = {
@@ -94,8 +104,6 @@ CUSTOM_STATUS_PROMPT = (
     "dans un statut : si tu veux un emoji, prends un emoji classique (Unicode).{recent} "
     "Réponds uniquement par ce statut, sans guillemets ni explication."
 )
-
-CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
 
 # Erreur due à la configuration (clé, crédit, modèle, réglages) : seul l'administrateur peut la corriger.
 CONFIG_ERROR = "Je suis mal configuré, préviens l'administrateur du bot."
@@ -184,9 +192,10 @@ class ClaudeClient:
         return content
 
     async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]],
-                  cache_history: bool = True) -> Answer:
+                  emojis: list[str] | None = None, cache_history: bool = True) -> Answer:
         """Envoie l'historique + le ou les nouveaux messages (texte, image ou PDF), et renvoie la réponse de Claude.
 
+        emojis : noms des emojis du serveur que Claude peut écrire (voir EMOJI_NOTE).
         cache_history=False évite d'écrire les messages en cache quand l'appel suivant ne les
         reprendra pas (mentions : contexte différent à chaque fois)."""
         messages = list(history) + [{"role": "user", "content": self.build_user_content(parts)}]
@@ -197,6 +206,8 @@ class ClaudeClient:
             system += WEB_NOTE
         if self.settings.presence:
             system += PRESENCE_NOTE
+        if emojis:
+            system += EMOJI_NOTE.format(example=emojis[0], names=" ".join(f":{name}:" for name in emojis))
 
         # Cache de prompt : les outils et la personnalité, identiques d'un message à l'autre, sont
         # relus depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque message).
@@ -278,8 +289,8 @@ class ClaudeClient:
             return None
         self._log_usage([response])
         lines = [line.strip() for line in self._final_text([response]).splitlines() if line.strip()]
-        # Un emoji du serveur s'afficherait sous forme de code (<:nom:123…>) : on le retire.
-        thought = CUSTOM_EMOJI.sub("", lines[0]).strip("\"'«» ") if lines else ""
+        # Un emoji du serveur s'afficherait sous forme de code (<:nom:123…> ou :nom:) : on le retire.
+        thought = SHORT_EMOJI.sub("", DISCORD_EMOJI.sub("", lines[0])).strip("\"'«» ") if lines else ""
         thought = re.sub(r"\s{2,}", " ", thought)
         if not thought or "<" in thought:  # vide, ou balise interne écrite par erreur
             logger.warning("Statut personnalisé inutilisable : %r", thought)

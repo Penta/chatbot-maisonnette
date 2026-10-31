@@ -13,6 +13,7 @@ Bot Discord qui discute avec les membres du serveur grâce à Claude (Anthropic)
 - **Transferts** : dans le salon dédié, le bot lit un message transféré (son texte et son image).
 - **Autres bots** : le bot ignore les autres bots, sauf quand ils le mentionnent ou répondent à l'un de ses messages (bouton « Répondre ») : deux bots peuvent ainsi discuter ensemble. Les messages système (arrivées, épinglages, boosts…) sont ignorés.
 - **Stickers et emojis** : répond à un sticker seul par un sticker du serveur, et à un emoji personnalisé seul par un emoji du serveur (avec des mots si le serveur n'en a aucun d'utilisable). Un sticker accompagné de texte est décrit à Claude avec le message.
+- **Emojis dans les réponses** : la liste des emojis du serveur est donnée automatiquement à Claude, qui les écrit par leur nom (`:hap:`) ; le bot les remplace par l'emoji avant l'envoi. Les emojis animés sont compris (un bot n'a pas besoin de Nitro) ; seuls ceux réservés à des rôles que le bot n'a pas sont exclus. Un emoji ajouté ou retiré du serveur est pris en compte tout de suite : la personnalité dit seulement quand en mettre (par exemple « Tu termines chaque message par un seul emoji du serveur »), sans recopier la liste.
 - **Statut Discord** : sous son pseudo, le bot regarde quelques épisodes d'un anime (top 500 d'AniList), écoute quelques morceaux (tops Deezer), joue à un jeu (toute la boutique Steam, sans les jeux pour adultes), affiche une pensée du moment, ou passe en « Ne pas déranger » ou absent avec une raison écrite par Claude. Chaque statut a sa propre durée (réglages `PRESENCE_*` du `.env`), le bot est absent la nuit, et il sait ce qu'il est en train de faire quand on lui parle. Absent, il ne répond qu'à son retour ; en « Ne pas déranger », au bout de 5 à 15 minutes. S'il change de statut en pleine conversation (message dans son salon depuis moins de 3 minutes), il prévient d'abord qu'il s'absente. Les messages reçus entre-temps reçoivent une réponse groupée dans le salon dédié, et une réponse à chaque mention ailleurs (gardés dans `waiting_messages.json`, même après un redémarrage). Les listes sont téléchargées au démarrage puis une fois par jour, et gardées dans `presence_sources.json` à côté de l'historique.
 - **`/reset`** : efface la mémoire du salon (réservé aux modérateurs et administrateurs).
 - **Personnalité** modifiable dans `personality_prompt.txt`, prise en compte sans redémarrer. Pour une personnalité perso, crée `personality_prompt.local.txt` et indique-le dans `PERSONALITY_FILE` du `.env` : les fichiers `*.local.txt` ne sont jamais envoyés sur GitHub.
@@ -62,6 +63,7 @@ bot/config.py         lecture et validation du .env
 bot/claude_client.py  appels à l'API de Claude
 bot/history.py        mémoire des conversations
 bot/discord_bot.py    événements Discord, réactions, /reset
+bot/emojis.py         emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py       statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)
 bot/text_files.py     lecture des fichiers texte joints (.txt, .md, code…)

@@ -19,6 +19,7 @@ from discord.ext import commands
 from . import VERSION
 from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
+from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
@@ -178,6 +179,8 @@ class ChatBot(commands.Bot):
                          self.settings.channel_id)
             return
         name = channel.guild.me.display_name if getattr(channel, "guild", None) else self.user.name
+        logger.info("%d emoji(s) du serveur utilisable(s) dans les réponses.",
+                    len(usable_emojis(getattr(channel, "guild", None))))
         embed = discord.Embed(
             title="Bot en ligne",
             description=f"{name} est désormais en ligne. Version {VERSION}.",
@@ -323,7 +326,8 @@ class ChatBot(commands.Bot):
             try:
                 async with typing(channel):
                     try:
-                        answer = await self.claude.ask(self.history.get(channel.id), parts)
+                        answer = await self.claude.ask(self.history.get(channel.id), parts,
+                                                       emojis=emoji_names(last.guild))
                     except ClaudeError as exc:
                         await self.safe_reply(last, exc.user_message)
                         return
@@ -333,7 +337,7 @@ class ChatBot(commands.Bot):
                         return
             finally:
                 self.forget_waiting(*(p.message for p in batch))
-            await self.history.add_exchange(channel.id, lines, answer.text, answer.web_used)
+            await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
         await self.send_answer(last, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
@@ -357,7 +361,7 @@ class ChatBot(commands.Bot):
         if self.settings.context_message_limit > 0:
             try:
                 async for msg in message.channel.history(limit=self.settings.context_message_limit, before=message):
-                    content = msg.clean_content.strip()
+                    content = short_emojis(msg.clean_content.strip())
                     if msg.attachments:
                         content = (content + " [pièce jointe]").strip()
                     if msg.stickers:
@@ -385,7 +389,7 @@ class ChatBot(commands.Bot):
         image = image or reply_image
 
         bot_name = f"@{message.guild.me.display_name}" if message.guild else f"@{self.user.name}"
-        text = message.clean_content.replace(bot_name, "").strip() or "(simple mention, sans texte)"
+        text = short_emojis(message.clean_content.replace(bot_name, "").strip()) or "(simple mention, sans texte)"
         channel_name = f"#{message.channel.name}" if hasattr(message.channel, "name") else "un message privé"
 
         parts = []
@@ -409,7 +413,8 @@ class ChatBot(commands.Bot):
 
         async with typing(message.channel):
             try:
-                answer = await self.claude.ask([], [(prompt, image)], cache_history=False)
+                answer = await self.claude.ask([], [(prompt, image)], emojis=emoji_names(message.guild),
+                                               cache_history=False)
             except ClaudeError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return
@@ -461,14 +466,15 @@ class ChatBot(commands.Bot):
             parts = [(note, None) for note in (self.presence_note(), self.presence.departure_note()) if note]
             try:
                 async with typing(channel):
-                    answer = await self.claude.ask(self.history.get(channel.id), parts)
+                    answer = await self.claude.ask(self.history.get(channel.id), parts,
+                                                   emojis=emoji_names(channel.guild))
             except ClaudeError as exc:
                 logger.warning("Message d'absence non envoyé : %s", exc.user_message)
                 return
             lines = [{"content": text} for text, _ in parts]
-            await self.history.add_exchange(channel.id, lines, answer.text, answer.web_used)
+            await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
         logger.info("Conversation en cours dans #%s : le salon est prévenu de l'absence.", channel)
-        for chunk in split_message(answer.text):
+        for chunk in split_message(discord_emojis(short_emojis(answer.text), channel.guild)):
             try:
                 await channel.send(chunk)
             except discord.HTTPException as exc:
@@ -540,7 +546,7 @@ class ChatBot(commands.Bot):
         (False si le serveur n'en a aucun)."""
         if not CUSTOM_EMOJI_ONLY.match(message.content.strip()):
             return False
-        emojis = [e for e in message.guild.emojis if e.available] if message.guild else []
+        emojis = usable_emojis(message.guild)
         if not emojis:
             return False
         try:
@@ -705,7 +711,7 @@ class ChatBot(commands.Bot):
     @staticmethod
     def describe_quoted(content: str, image: ImageData | None, attachments: list, stickers: list) -> str:
         """Description d'un message cité ou transféré (vide s'il n'y a rien de lisible)."""
-        content = content.strip()
+        content = short_emojis(content.strip())
         if len(content) > QUOTE_MAX_LENGTH:
             content = content[:QUOTE_MAX_LENGTH].rstrip() + "…"
         parts = [f"« {content} »"] if content else []
@@ -732,7 +738,7 @@ class ChatBot(commands.Bot):
     @staticmethod
     def message_body(message: discord.Message) -> str:
         """Texte d'un message du salon dédié, tel qu'il est conservé en mémoire (sans ce qui le précède)."""
-        text = message.clean_content.strip()
+        text = short_emojis(message.clean_content.strip())
         if message.stickers:
             text = f"{text} [sticker « {message.stickers[0].name} »]".strip()
         return text or "(message sans texte)"
@@ -743,6 +749,8 @@ class ChatBot(commands.Bot):
     async def send_answer(self, message: discord.Message, answer: str, reply: bool = False) -> None:
         # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre »
         # (sauf reply=True : le premier morceau répond alors au message).
+        # Les emojis passent par leur nom : un code écrit avec un mauvais identifiant est ainsi corrigé.
+        answer = discord_emojis(short_emojis(answer), message.guild)
         for i, chunk in enumerate(split_message(answer)):
             # fail_if_not_exists=False : si le message a été supprimé entre-temps, envoi normal.
             reference = message.to_reference(fail_if_not_exists=False) if reply and i == 0 else None

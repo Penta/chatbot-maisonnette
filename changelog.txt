@@ -2,6 +2,26 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.9
+-----------
+
+Nouveautés
+- Emojis du serveur : Rika reçoit automatiquement la liste des emojis du
+  serveur et peut tous les utiliser, sans qu'il faille les recopier dans
+  la personnalité ; un emoji ajouté ou retiré est pris en compte tout de
+  suite. Elle les écrit par leur nom (:hap:), et le bot les remplace par
+  l'emoji avant l'envoi : plus d'identifiant inventé, et environ 3 fois
+  moins de tokens par emoji. Les emojis animés sont compris (un bot n'a
+  pas besoin de Nitro) ; seuls ceux réservés à des rôles qu'elle n'a pas
+  sont exclus, y compris quand elle répond à un emoji seul. Dans sa
+  mémoire et dans les messages qu'elle
+  lit, les emojis apparaissent aussi par leur nom.
+  La personnalité dit seulement quand en mettre, par exemple : « Tu
+  termines chaque message par un seul emoji du serveur, directement
+  après le dernier mot. » Une ancienne liste de codes (<:hap:123…>)
+  fonctionne encore, mais n'est plus utile.
+
+
 Version 5.8
 -----------
 
