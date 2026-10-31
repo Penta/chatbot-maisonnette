@@ -22,6 +22,7 @@ from .config import Settings
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
+from .members import MemberRegistry
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
@@ -115,6 +116,7 @@ class ChatBot(commands.Bot):
         self.settings = settings
         self.claude = ClaudeClient(settings)
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
+        self.members = MemberRegistry(settings.memory_dir / "registre.json") if settings.memory else None
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._announced = False
         self.presence = PresenceManager(self, self.claude, settings) if settings.presence else None
@@ -137,9 +139,9 @@ class ChatBot(commands.Bot):
             self.tree.add_command(skip_command)
         await self.sync_commands()
         s = self.settings
-        logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s",
+        logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
                     s.model, "on" if s.thinking else "off", s.effort or "par défaut",
-                    "on" if s.web_search else "off")
+                    "on" if s.web_search else "off", f"on ({s.memory_dir})" if s.memory else "off")
         if self.presence:
             self.presence.start()
 
@@ -217,11 +219,23 @@ class ChatBot(commands.Bot):
         in_main_channel = message.channel.id == self.settings.channel_id
         # Mention directe uniquement (@everyone et @here ne comptent pas).
         mentioned = self.user is not None and self.user in message.mentions
+        if (in_main_channel or mentioned) and self.members:
+            await self.register_members(message)
 
         if in_main_channel:
             await self.handle_main_channel(message)
         elif mentioned:
             await self.handle_mention(message)
+
+    async def register_members(self, message: discord.Message) -> None:
+        """Ajoute au registre l'auteur et les membres mentionnés (sauf les bots), ou met leurs noms à jour."""
+        for user in (message.author, *message.mentions):
+            if user.bot:
+                continue
+            # En message privé, l'auteur n'est pas un membre du serveur : son pseudo n'est pas connu.
+            in_guild = isinstance(user, discord.Member)
+            await self.members.see(user.id, user.name, user.global_name,
+                                   user.nick if in_guild else None, in_guild=in_guild)
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         """Message modifié : la mémoire, ou le message s'il attend encore sa réponse, prend le nouveau texte."""

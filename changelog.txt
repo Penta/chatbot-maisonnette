@@ -5,6 +5,15 @@ CHANGELOG — Chatbot Discord
 Version 5.10
 ------------
 
+Nouveautés
+- Mémoire des membres (MEMORY=on, en construction) : le bot tient un
+  registre des membres qu'il voit, auteurs des messages qu'il lit et
+  membres mentionnés, sans les autres bots. Pour chacun, il garde le
+  nom d'utilisateur, le nom d'affichage, le pseudo sur le serveur et les
+  5 derniers anciens pseudos, mis à jour à chaque message. Le registre
+  est dans memories/registre.json, à côté de l'historique (MEMORY_DIR
+  pour un autre dossier), et n'est réécrit que si quelque chose change.
+
 Divers
 - /reset et /skip sont réservés aux membres qui ont la permission
   Administrateur (avant : aussi aux modérateurs, avec « Gérer les

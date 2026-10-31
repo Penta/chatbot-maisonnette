@@ -132,6 +132,10 @@ class Settings:
     history_file: Path
     personality_file: Path
 
+    # Mémoire des membres : fiches tenues par Claude (voir members.py)
+    memory: bool
+    memory_dir: Path
+
     # Images et PDF
     max_image_size: int
     pdf_max_pages: int  # 0 : PDF refusés
@@ -185,6 +189,13 @@ def load_settings() -> Settings:
     if web_search_raw not in ("on", "off"):
         raise ConfigError(f"WEB_SEARCH doit valoir « on » ou « off » (valeur actuelle : {web_search_raw!r}).")
 
+    memory_raw = (_get_str("MEMORY", default="off") or "off").lower()
+    if memory_raw not in ("on", "off"):
+        raise ConfigError(f"MEMORY doit valoir « on » ou « off » (valeur actuelle : {memory_raw!r}).")
+    history_file = Path(_get_str("HISTORY_FILE", default="conversation_history.json"))
+    # Vide : à côté de l'historique, comme les autres fichiers du bot (donc sur le même volume avec Docker).
+    memory_dir = _get_str("MEMORY_DIR")
+
     presence_raw = (_get_str("PRESENCE", default="on") or "on").lower()
     if presence_raw not in ("on", "off"):
         raise ConfigError(f"PRESENCE doit valoir « on » ou « off » (valeur actuelle : {presence_raw!r}).")
@@ -205,8 +216,10 @@ def load_settings() -> Settings:
         web_max_uses=_get_int("WEB_MAX_USES", default=3, minimum=1),
         max_history_length=_get_int("MAX_HISTORY_LENGTH", default=10, minimum=2),
         context_message_limit=_get_int("CONTEXT_MESSAGE_LIMIT", default=20, minimum=0),
-        history_file=Path(_get_str("HISTORY_FILE", default="conversation_history.json")),
+        history_file=history_file,
         personality_file=Path(_get_str("PERSONALITY_FILE", default="personality_prompt.txt")),
+        memory=memory_raw == "on",
+        memory_dir=Path(memory_dir) if memory_dir else history_file.with_name("memories"),
         # Taille maximale acceptée depuis Discord ; les grosses images sont réduites avant l'envoi à Claude.
         max_image_size=_get_int("MAX_IMAGE_SIZE", default=25_000_000, minimum=1),
         # Chaque page coûte son texte et son image (souvent plusieurs milliers de tokens).

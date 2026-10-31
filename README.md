@@ -149,6 +149,7 @@ Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque app
 | `presence_sources.json` | Listes d'animes, de musiques et de jeux, mises à jour une fois par jour |
 | `presence_state.json` | Statut Discord en cours, repris après un redémarrage |
 | `slash_commands.sha256` | Empreinte des commandes slash, pour ne les envoyer à Discord que quand elles changent |
+| `memories/registre.json` | Avec `MEMORY=on` : membres vus par le bot, leurs noms et anciens pseudos, et leurs réglages de la mémoire. Si le fichier est illisible, il est mis de côté sous un nom daté |
 | `bot.log` | Logs (5 Mo par fichier, 2 anciens fichiers gardés) |
 
 Le détail de chaque version est dans `changelog.txt`.
@@ -161,6 +162,7 @@ bot/config.py            lecture et validation du .env
 bot/models.py            particularités de chaque modèle Claude (réflexion, tarifs)
 bot/claude_client.py     appels à l'API de Claude, personnalité
 bot/history.py           mémoire des conversations
+bot/members.py           registre des membres (noms, anciens pseudos, réglages de la mémoire)
 bot/discord_bot.py       événements Discord, réponses, /reset et /skip
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py          statut Discord : tirage au sort et changements
