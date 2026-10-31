@@ -13,6 +13,19 @@ Nouveautés
   5 derniers anciens pseudos, mis à jour à chaque message. Le registre
   est dans memories/registre.json, à côté de l'historique (MEMORY_DIR
   pour un autre dossier), et n'est réécrit que si quelque chose change.
+  Rika tient une fiche par membre (memories/membres/<id>.md) et un
+  fichier général du serveur (memories/serveur.md), avec un outil
+  « memoire » exécuté par le bot : lire, ajouter, remplacer ou réécrire,
+  dans ces seuls fichiers. Elle note en style télégraphique, une ligne
+  par fait, avec la source quand l'info vient d'un autre membre. Une
+  fiche est limitée à 3000 caractères (MEMORY_MEMBER_LIMIT) et le
+  fichier général à 5000 (MEMORY_SERVER_LIMIT) : une note de trop est
+  refusée, et Rika réécrit alors le fichier en plus court. Au plus 5
+  lectures ou écritures par réponse (MEMORY_MAX_OPERATIONS). Quand elle
+  a noté quelque chose, elle ajoute 📝 au message auquel elle répond
+  (permission « Ajouter des réactions » nécessaire). Outil maison plutôt
+  que celui d'Anthropic, qui lui ferait relire tout le dossier avant
+  chaque réponse (un appel de plus à chaque message).
 
 Divers
 - /reset et /skip sont réservés aux membres qui ont la permission

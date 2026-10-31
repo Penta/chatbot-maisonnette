@@ -55,11 +55,11 @@ Il te faut :
    - dans **Privileged Gateway Intents**, active **Message Content Intent**. Les intents « Presence » et « Server Members » ne servent pas.
 3. Onglet **OAuth2 > URL Generator** :
    - coche les scopes **bot** et **applications.commands** (ce dernier pour `/reset` et `/skip`) ;
-   - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History** ;
+   - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History**, plus **Add Reactions** avec `MEMORY=on` ;
    - ouvre l'adresse générée et invite le bot sur ton serveur.
 4. Dans Discord, active le mode développeur (**Paramètres utilisateur > Avancés > Mode développeur**), puis fais un clic droit sur le salon du bot > **Copier l'identifiant du salon** : c'est le `CHANNEL_ID`.
 
-Le bot n'a besoin d'aucune autre permission : il n'utilise que les emojis et stickers du serveur.
+Le bot n'a besoin d'aucune autre permission : il n'utilise que les emojis et stickers du serveur. Pour un bot déjà invité, **Add Reactions** s'ajoute à son rôle dans les paramètres du serveur.
 
 ## Installation
 
@@ -150,6 +150,7 @@ Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque app
 | `presence_state.json` | Statut Discord en cours, repris après un redémarrage |
 | `slash_commands.sha256` | Empreinte des commandes slash, pour ne les envoyer à Discord que quand elles changent |
 | `memories/registre.json` | Avec `MEMORY=on` : membres vus par le bot, leurs noms et anciens pseudos, et leurs réglages de la mémoire. Si le fichier est illisible, il est mis de côté sous un nom daté |
+| `memories/membres/<id>.md`, `memories/serveur.md` | Avec `MEMORY=on` : fiche de chaque membre et fichier général du serveur, tenus par Claude |
 | `bot.log` | Logs (5 Mo par fichier, 2 anciens fichiers gardés) |
 
 Le détail de chaque version est dans `changelog.txt`.
@@ -163,6 +164,7 @@ bot/models.py            particularités de chaque modèle Claude (réflexion, t
 bot/claude_client.py     appels à l'API de Claude, personnalité
 bot/history.py           mémoire des conversations
 bot/members.py           registre des membres (noms, anciens pseudos, réglages de la mémoire)
+bot/memory.py            fiches des membres et fichier général : outil « memoire » de Claude
 bot/discord_bot.py       événements Discord, réponses, /reset et /skip
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py          statut Discord : tirage au sort et changements

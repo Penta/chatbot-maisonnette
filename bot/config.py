@@ -135,6 +135,9 @@ class Settings:
     # Mémoire des membres : fiches tenues par Claude (voir members.py)
     memory: bool
     memory_dir: Path
+    memory_member_limit: int   # caractères maximum d'une fiche de membre
+    memory_server_limit: int   # caractères maximum du fichier général
+    memory_max_operations: int  # lectures et écritures maximum par réponse
 
     # Images et PDF
     max_image_size: int
@@ -220,6 +223,10 @@ def load_settings() -> Settings:
         personality_file=Path(_get_str("PERSONALITY_FILE", default="personality_prompt.txt")),
         memory=memory_raw == "on",
         memory_dir=Path(memory_dir) if memory_dir else history_file.with_name("memories"),
+        # Chaque fiche jointe est relue à chaque message : plus elle est longue, plus il coûte.
+        memory_member_limit=_get_int("MEMORY_MEMBER_LIMIT", default=3000, minimum=200),
+        memory_server_limit=_get_int("MEMORY_SERVER_LIMIT", default=5000, minimum=200),
+        memory_max_operations=_get_int("MEMORY_MAX_OPERATIONS", default=5, minimum=1),
         # Taille maximale acceptée depuis Discord ; les grosses images sont réduites avant l'envoi à Claude.
         max_image_size=_get_int("MAX_IMAGE_SIZE", default=25_000_000, minimum=1),
         # Chaque page coûte son texte et son image (souvent plusieurs milliers de tokens).

@@ -12,6 +12,7 @@ import anthropic
 
 from .config import Settings
 from .emojis import DISCORD_EMOJI, SHORT_EMOJI
+from .memory import MEMORY_TOOL, MemoryStore, ToolResult
 from .models import thinking_off
 from .text_utils import strip_reasoning
 
@@ -58,13 +59,33 @@ WEB_NOTE = (
     "que tu ne connais pas, ou un lien partagé dans la conversation ; sinon réponds directement. "
     "Garde des réponses courtes ; quand c'est utile, nomme simplement ta source dans ta phrase "
     "(par exemple « selon Famitsu »), sans recopier d'adresse. "
-    # Le texte écrit avant un appel d'outil n'est jamais affiché (voir _final_text). L'interdire
-    # pousse au contraire le modèle à écrire ses appels d'outils sous forme de texte.
-    "Quand tu utilises un outil, tu peux d'abord dire une courte phrase. "
-    "Si aucun outil ne permet de faire ce qu'on te demande, dis-le au lieu de deviner. "
     "Dans les messages précédents, la mention « [recherche web : …] » signifie que tu as bien cherché sur Internet "
     "pour y répondre : ta réponse d'alors s'appuyait sur de vrais résultats, même si tu ne les vois plus. "
     "Ne prétends donc jamais avoir inventé une réponse marquée ainsi."
+)
+
+# Ajouté quand MEMORY=on. Les fiches jointes et la liste des membres viennent avec chaque message.
+MEMBER_MEMORY_NOTE = (
+    "\n\nMémoire des membres : avec ton outil « memoire », tu tiens une fiche sur chaque membre et un fichier "
+    "général sur le serveur (blagues récurrentes, événements, habitudes). Quand tu apprends sur quelqu'un "
+    "quelque chose qui vaut la peine d'être retenu, note-le dans sa fiche, quelle que soit la personne qui "
+    "te l'apprend ; une info donnée par quelqu'un d'autre que l'intéressé se note avec sa source "
+    "(« d'après Toto »). Inutile de dire dans ta réponse tout ce que tu retiens. "
+    "Écris en style télégraphique, une ligne par fait, sans doublon, et mets à jour la ligne existante plutôt "
+    "que d'en ajouter une (« jeu préféré : Zelda » devient « jeu préféré : Elden Ring »). La première ligne "
+    "d'une fiche est « Surnoms : … » : complète-la dès que tu comprends qu'un surnom désigne ce membre. "
+    "Si tu ne sais pas avec certitude de qui on parle, ne note rien, ou demande. "
+    "Une fiche est limitée à {member_limit} caractères et le fichier général à {server_limit} : si une note "
+    "est refusée faute de place, réécris tout le fichier en plus court (« reecrire »), en fusionnant les "
+    "lignes et en retirant le moins important."
+)
+
+# Ajouté quand Claude a au moins un outil (recherche web ou mémoire). Le texte écrit avant un appel
+# d'outil n'est jamais affiché (voir _final_text) ; l'interdire pousserait au contraire le modèle à
+# écrire ses appels d'outils sous forme de texte.
+TOOL_NOTE = (
+    "\n\nQuand tu utilises un outil, tu peux d'abord dire une courte phrase. "
+    "Si aucun outil ne permet de faire ce qu'on te demande, dis-le au lieu de deviner."
 )
 
 # Ajouté quand PRESENCE=on : le statut Discord en cours est indiqué au début des messages.
@@ -136,11 +157,13 @@ class ImageData:
 class Answer:
     text: str
     web_used: bool  # Claude a fait au moins une recherche web ou lu une page
+    memory_written: bool = False  # Claude a noté quelque chose dans sa mémoire
 
 
 class ClaudeClient:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, memory: MemoryStore | None = None):
         self.settings = settings
+        self.memory = memory  # None : mémoire des membres désactivée
         # Le SDK réessaie tout seul les erreurs temporaires (surcharge, limite de requêtes…).
         self._client = anthropic.AsyncAnthropic(
             api_key=settings.anthropic_api_key,
@@ -204,6 +227,11 @@ class ClaudeClient:
         system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
         if self.settings.web_search:
             system += WEB_NOTE
+        if self.memory:
+            system += MEMBER_MEMORY_NOTE.format(member_limit=self.memory.member_limit,
+                                                server_limit=self.memory.server_limit)
+        if self.settings.web_search or self.memory:
+            system += TOOL_NOTE
         if self.settings.presence:
             system += PRESENCE_NOTE
         if emojis:
@@ -231,18 +259,39 @@ class ClaudeClient:
             params["thinking"] = off
         if self.settings.effort:
             params["extra_body"] = {"output_config": {"effort": self.settings.effort}}
+        tools: list[dict] = []
         if self.settings.web_search:
-            # Outils exécutés par Anthropic : pas de boucle d'outils à gérer de notre côté.
-            params["tools"] = [
+            # Outils exécutés par Anthropic : leurs appels se font sans nous.
+            tools += [
                 {"type": "web_search_20260209", "name": "web_search", "max_uses": self.settings.web_max_uses},
                 {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses},
             ]
+        if self.memory:
+            tools.append(MEMORY_TOOL)  # exécuté par le bot : voir _run_tools
+        if tools:
+            params["tools"] = tools
 
         responses = [await self._call(params, attachments)]
-        # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
-        # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
-        while responses[-1].stop_reason == "pause_turn" and len(responses) <= MAX_CONTINUATIONS:
-            messages = messages + [{"role": "assistant", "content": responses[-1].content}]
+        pauses = operations = 0
+        memory_written = False
+        while True:
+            last = responses[-1]
+            # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
+            # on renvoie alors sa réponse partielle telle quelle pour qu'elle continue.
+            if last.stop_reason == "pause_turn" and pauses < MAX_CONTINUATIONS:
+                pauses += 1
+                follow_up = []
+            # Appel à l'outil « memoire » : le bot l'exécute et renvoie le résultat. Une fois la limite
+            # d'opérations atteinte, un dernier tour lui demande de répondre, puis la boucle s'arrête.
+            elif last.stop_reason == "tool_use" and self.memory and operations <= self.settings.memory_max_operations:
+                results, written = await self._run_tools(last, operations)
+                follow_up = [{"role": "user", "content": results}]
+                memory_written = memory_written or written
+                operations += len(results)
+            else:
+                break
+            # Réponse renvoyée telle quelle, réflexion comprise : l'API l'exige pour continuer.
+            messages = messages + [{"role": "assistant", "content": last.content}, *follow_up]
             responses.append(await self._call({**params, "messages": messages}, attachments))
 
         text = self._final_text(responses)
@@ -262,7 +311,29 @@ class ClaudeClient:
         if not text:
             logger.warning("Réponse vide de Claude (stop_reason=%s).", stop_reason)
             raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
-        return Answer(text, web_used)
+        return Answer(text, web_used, memory_written)
+
+    async def _run_tools(self, response, done: int) -> tuple[list[dict], bool]:
+        """Exécute les appels à l'outil « memoire » d'une réponse. Renvoie leurs résultats, à envoyer
+        tous dans un même message comme l'exige l'API, et si un fichier a été modifié.
+        done : opérations déjà faites pour cette réponse."""
+        results = []
+        written = False
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            if done >= self.settings.memory_max_operations:
+                result = ToolResult("Limite d'opérations atteinte pour ce message : réponds maintenant, "
+                                    "sans rien noter de plus.", is_error=True)
+            elif block.name != MEMORY_TOOL["name"] or not isinstance(block.input, dict):
+                result = ToolResult(f"Outil inconnu : {block.name}.", is_error=True)
+            else:
+                result = await self.memory.run(block.input)
+            done += 1
+            written = written or result.written
+            results.append({"type": "tool_result", "tool_use_id": block.id, "content": result.content,
+                            "is_error": result.is_error})
+        return results, written
 
     async def write_custom_status(self, kind: str, now: str, duration: str, recent: list[str],
                                   max_length: int) -> str | None:
