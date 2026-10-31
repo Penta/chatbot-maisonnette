@@ -36,6 +36,17 @@ Nouveautés
   de leur fiche, ce qui permet à Rika de noter une info sur quelqu'un
   cité par son seul nom ou surnom ; ainsi que le fichier général. Les
   membres qui ont désactivé la mémoire n'y figurent pas.
+- /memoire : chaque membre voit sa fiche, visible par lui seul, et peut
+  la modifier dans une fenêtre déjà remplie, tout effacer ou désactiver
+  la mémoire (avec confirmation : sa fiche est alors effacée, plus rien
+  n'est retenu sur lui ni joint à ses messages). Il peut la réactiver au
+  même endroit. Les administrateurs (permission Administrateur) voient,
+  modifient et effacent la fiche de n'importe qui avec
+  /memoire membre:@… ; seul le membre lui-même peut désactiver sa
+  mémoire. /memoire-serveur, réservé aux administrateurs, fait de même
+  pour le fichier général. Avec MEMORY=off, les deux commandes le
+  signalent. MEMORY_MEMBER_LIMIT et MEMORY_SERVER_LIMIT ne peuvent pas
+  dépasser 20000 (taille maximale de la fenêtre de modification).
 
 Divers
 - /reset et /skip sont réservés aux membres qui ont la permission

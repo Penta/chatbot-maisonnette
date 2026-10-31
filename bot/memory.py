@@ -186,6 +186,29 @@ class MemoryStore:
         logger.info("Mémoire : %s sur %s (%s), %d → %d caractères", action, name, label, len(before), len(after))
         return ToolResult(f"C'est fait. {name} : {len(after)}/{limit} caractères.", written=True)
 
+    def limit(self, name: str) -> int:
+        return self.server_limit if name == SERVER_FILE else self.member_limit
+
+    async def overwrite(self, name: str, text: str, by: str) -> str | None:
+        """Remplace tout un fichier, ou le supprime si text est vide : modification faite par un membre
+        avec /memoire (by : son nom, pour les logs). Renvoie un message d'erreur, ou None."""
+        text = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
+        limit = self.limit(name)
+        if len(text) > limit:
+            return f"Trop long : {len(text)} caractères pour {limit} au plus. Rien n'a été modifié."
+        path = self.root / name
+        async with self._lock:
+            try:
+                if text:
+                    await asyncio.to_thread(self._write_atomic, path, text)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.error("Mémoire : impossible de modifier %s : %s", name, exc)
+                return "Modification impossible pour l'instant, à cause d'une erreur du bot."
+        logger.info("Mémoire : %s %s par %s (%d caractères)", name, "modifié" if text else "effacé", by, len(text))
+        return None
+
     # ------------------------------------------------------------ internes
 
     @staticmethod

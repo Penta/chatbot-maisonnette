@@ -32,6 +32,13 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 - **Emojis du serveur** : le bot connaît automatiquement tous les emojis du serveur, animés compris, et peut les utiliser dans ses réponses. Un emoji ajouté ou retiré est pris en compte tout de suite.
 - **Stickers et emojis seuls** : à un sticker seul, il répond par un sticker du serveur ; à un emoji seul, par un emoji du serveur.
 
+### Mémoire des membres
+
+Avec `MEMORY=on` :
+
+- **`/memoire`** : chacun voit la fiche que le bot tient sur lui, visible par lui seul. Il peut la modifier dans une fenêtre déjà remplie, tout effacer (après confirmation) ou désactiver la mémoire : sa fiche est alors effacée et plus rien n'est retenu sur lui, jusqu'à ce qu'il la réactive. Les administrateurs voient, modifient et effacent la fiche de n'importe quel membre avec `/memoire membre:@…` ; seul le membre lui-même peut désactiver la mémoire.
+- **`/memoire-serveur`** : le fichier général du serveur, à voir, modifier ou effacer. Réservé aux administrateurs.
+
 ### Modération
 
 - **`/reset`** : efface la mémoire du salon. Réservé aux membres qui ont la permission Administrateur.
@@ -54,7 +61,7 @@ Il te faut :
    - clique sur **Reset Token** et copie le token : c'est le `DISCORD_TOKEN` (à garder secret) ;
    - dans **Privileged Gateway Intents**, active **Message Content Intent**. Les intents « Presence » et « Server Members » ne servent pas.
 3. Onglet **OAuth2 > URL Generator** :
-   - coche les scopes **bot** et **applications.commands** (ce dernier pour `/reset` et `/skip`) ;
+   - coche les scopes **bot** et **applications.commands** (ce dernier pour les commandes comme `/reset` et `/memoire`) ;
    - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History**, plus **Add Reactions** avec `MEMORY=on` ;
    - ouvre l'adresse générée et invite le bot sur ton serveur.
 4. Dans Discord, active le mode développeur (**Paramètres utilisateur > Avancés > Mode développeur**), puis fais un clic droit sur le salon du bot > **Copier l'identifiant du salon** : c'est le `CHANNEL_ID`.
@@ -165,7 +172,8 @@ bot/claude_client.py     appels à l'API de Claude, personnalité
 bot/history.py           mémoire des conversations
 bot/members.py           registre des membres (noms, anciens pseudos, réglages de la mémoire)
 bot/memory.py            fiches des membres et fichier général : outil « memoire » de Claude
-bot/discord_bot.py       événements Discord, réponses, /reset et /skip
+bot/memory_views.py      /memoire et /memoire-serveur : affichage, fenêtre « Modifier », confirmations
+bot/discord_bot.py       événements Discord, réponses, commandes slash
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py          statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)

@@ -198,6 +198,12 @@ def load_settings() -> Settings:
     history_file = Path(_get_str("HISTORY_FILE", default="conversation_history.json"))
     # Vide : à côté de l'historique, comme les autres fichiers du bot (donc sur le même volume avec Docker).
     memory_dir = _get_str("MEMORY_DIR")
+    memory_limits = {name: _get_int(name, default=default, minimum=200)
+                     for name, default in (("MEMORY_MEMBER_LIMIT", 3000), ("MEMORY_SERVER_LIMIT", 5000))}
+    for name, value in memory_limits.items():
+        # La fenêtre « Modifier » de /memoire contient au plus 5 zones de 4000 caractères.
+        if value > 20000:
+            raise ConfigError(f"{name} ne peut pas dépasser 20000 (valeur actuelle : {value}).")
 
     presence_raw = (_get_str("PRESENCE", default="on") or "on").lower()
     if presence_raw not in ("on", "off"):
@@ -224,8 +230,8 @@ def load_settings() -> Settings:
         memory=memory_raw == "on",
         memory_dir=Path(memory_dir) if memory_dir else history_file.with_name("memories"),
         # Chaque fiche jointe est relue à chaque message : plus elle est longue, plus il coûte.
-        memory_member_limit=_get_int("MEMORY_MEMBER_LIMIT", default=3000, minimum=200),
-        memory_server_limit=_get_int("MEMORY_SERVER_LIMIT", default=5000, minimum=200),
+        memory_member_limit=memory_limits["MEMORY_MEMBER_LIMIT"],
+        memory_server_limit=memory_limits["MEMORY_SERVER_LIMIT"],
         memory_max_operations=_get_int("MEMORY_MAX_OPERATIONS", default=5, minimum=1),
         # Taille maximale acceptée depuis Discord ; les grosses images sont réduites avant l'envoi à Claude.
         max_image_size=_get_int("MAX_IMAGE_SIZE", default=25_000_000, minimum=1),

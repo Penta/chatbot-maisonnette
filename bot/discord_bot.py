@@ -24,6 +24,7 @@ from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
 from .members import MemberRegistry
 from .memory import MemoryStore
+from .memory_views import MemoryCard, member_target, see_user, server_target
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
@@ -142,6 +143,9 @@ class ChatBot(commands.Bot):
         self.tree.add_command(reset_command)
         if self.presence:
             self.tree.add_command(skip_command)
+        # Toujours présentes : avec MEMORY=off, elles indiquent que la mémoire est coupée.
+        self.tree.add_command(memory_command)
+        self.tree.add_command(server_memory_command)
         await self.sync_commands()
         s = self.settings
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
@@ -250,10 +254,7 @@ class ChatBot(commands.Bot):
     async def register_members(self, message: discord.Message) -> None:
         """Ajoute au registre les membres concernés par le message, ou met leurs noms à jour."""
         for user in await self.concerned_members(message):
-            # En message privé, l'auteur n'est pas un membre du serveur : son pseudo n'est pas connu.
-            in_guild = isinstance(user, discord.Member)
-            await self.members.see(user.id, user.name, user.global_name,
-                                   user.nick if in_guild else None, in_guild=in_guild)
+            await see_user(self.members, user)
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         """Message modifié : la mémoire, ou le message s'il attend encore sa réponse, prend le nouveau texte."""
@@ -870,3 +871,46 @@ async def skip_command(interaction: discord.Interaction) -> None:
     remaining = bot.presence.remaining()
     duration = f", pendant environ {remaining}" if remaining else ""
     await interaction.followup.send(f"Nouveau statut : {status.label()}{duration}.", ephemeral=True)
+
+
+MEMORY_OFF = "La mémoire des membres est désactivée sur ce bot (MEMORY=off)."
+
+
+def bot_name(interaction: discord.Interaction) -> str:
+    return interaction.guild.me.display_name if interaction.guild else interaction.client.user.name
+
+
+@app_commands.command(name="memoire", description="Voir, modifier ou effacer ce que le bot a retenu sur toi")
+@app_commands.describe(membre="Réservé aux administrateurs : la fiche d'un autre membre")
+@app_commands.guild_only()
+async def memory_command(interaction: discord.Interaction, membre: discord.Member | None = None) -> None:
+    bot: ChatBot = interaction.client  # type: ignore[assignment]
+    if bot.memory is None:
+        await interaction.response.send_message(MEMORY_OFF, ephemeral=True)
+        return
+    target = membre or interaction.user
+    if target.bot:
+        await interaction.response.send_message("Les bots n'ont pas de fiche.", ephemeral=True)
+        return
+    if target.id != interaction.user.id and not interaction.permissions.administrator:
+        logger.info("/memoire sur %s refusé pour %s", target, interaction.user)
+        await interaction.response.send_message(
+            "Seuls les administrateurs peuvent voir la fiche d'un autre membre.", ephemeral=True)
+        return
+    await see_user(bot.members, target)  # un membre qui n'a encore jamais écrit peut déjà désactiver la mémoire
+    card = MemoryCard(bot.memory, member_target(bot.memory, target, interaction.user.id),
+                      interaction.user.id, bot_name(interaction))
+    await card.send(interaction)
+
+
+@app_commands.command(name="memoire-serveur", description="Voir ou modifier le fichier général du bot sur le serveur")
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)  # comme /reset
+async def server_memory_command(interaction: discord.Interaction) -> None:
+    if not await allowed(interaction):
+        return
+    bot: ChatBot = interaction.client  # type: ignore[assignment]
+    if bot.memory is None:
+        await interaction.response.send_message(MEMORY_OFF, ephemeral=True)
+        return
+    await MemoryCard(bot.memory, server_target(), interaction.user.id, bot_name(interaction)).send(interaction)
