@@ -48,6 +48,10 @@ Nouveautés
   statuts sont désactivés pour respecter la règle, elle s'assouplit.
   Les derniers types tirés sont gardés dans presence_state.json.
 
+Divers
+- Image Docker : Python 3.15 au lieu de 3.13. Toutes les dépendances
+  ont leurs paquets précompilés pour cette version.
+
 
 Version 5.8
 -----------
