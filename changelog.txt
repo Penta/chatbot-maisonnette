@@ -2,6 +2,16 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.10
+------------
+
+Divers
+- /reset et /skip sont réservés aux membres qui ont la permission
+  Administrateur (avant : aussi aux modérateurs, avec « Gérer les
+  messages »). Les commandes sont renvoyées à Discord au premier
+  démarrage de la 5.10.
+
+
 Version 5.9
 -----------
 

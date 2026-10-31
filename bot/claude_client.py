@@ -322,7 +322,7 @@ class ClaudeClient:
             if "prompt is too long" in message:
                 logger.error("Requête trop longue pour le modèle : %s", exc)
                 raise ClaudeError("Ce message est trop long pour moi avec la conversation en cours. "
-                                  "Un modérateur peut vider ma mémoire avec /reset.")
+                                  "Un administrateur peut vider ma mémoire avec /reset.")
             if "credit balance" in message:
                 logger.critical("Crédit Anthropic épuisé : %s", exc)
                 raise ClaudeError(CONFIG_ERROR)

@@ -775,15 +775,14 @@ class ChatBot(commands.Bot):
 # ------------------------------------------------------------- commandes slash
 
 async def allowed(interaction: discord.Interaction) -> bool:
-    """Commande réservée aux modérateurs et administrateurs : prévient les autres et renvoie False."""
+    """Commande réservée aux administrateurs : prévient les autres et renvoie False."""
     # Vérification côté bot, au cas où un admin aurait ouvert la commande à tous dans les paramètres du serveur.
-    perms = interaction.permissions
-    if perms.manage_messages or perms.administrator:
+    if interaction.permissions.administrator:
         return True
     logger.info("Tentative de /%s refusée pour %s dans le salon %s",
                 interaction.command.name if interaction.command else "?", interaction.user, interaction.channel_id)
     await interaction.response.send_message(
-        "Seuls les modérateurs et administrateurs du serveur peuvent utiliser cette commande.",
+        "Seuls les administrateurs du serveur peuvent utiliser cette commande.",
         ephemeral=True,
     )
     return False
@@ -791,9 +790,8 @@ async def allowed(interaction: discord.Interaction) -> bool:
 
 @app_commands.command(name="reset", description="Réinitialise la mémoire du bot dans ce salon")
 @app_commands.guild_only()
-# Masque la commande aux membres sans « Gérer les messages » (modérateurs) ;
-# les administrateurs ont implicitement toutes les permissions.
-@app_commands.default_permissions(manage_messages=True)
+# Masque la commande aux membres qui n'ont pas la permission Administrateur.
+@app_commands.default_permissions(administrator=True)
 async def reset_command(interaction: discord.Interaction) -> None:
     if not await allowed(interaction):
         return
@@ -808,7 +806,7 @@ async def reset_command(interaction: discord.Interaction) -> None:
 
 @app_commands.command(name="skip", description="Passe tout de suite au statut Discord suivant du bot")
 @app_commands.guild_only()
-@app_commands.default_permissions(manage_messages=True)  # comme /reset
+@app_commands.default_permissions(administrator=True)  # comme /reset
 async def skip_command(interaction: discord.Interaction) -> None:
     if not await allowed(interaction):
         return

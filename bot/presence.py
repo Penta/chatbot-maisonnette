@@ -137,7 +137,7 @@ class Status:
         return None
 
     def label(self) -> str:
-        """Le statut tel qu'il s'affiche sur Discord, pour les modérateurs (/skip)."""
+        """Le statut tel qu'il s'affiche sur Discord, pour les administrateurs (/skip)."""
         reason = f" (« {self.title} »)" if self.title else ""
         if self.kind is Kind.ANIME:
             episode = f"l'épisode {self.episode} de " if self.episode else ""

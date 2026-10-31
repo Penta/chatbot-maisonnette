@@ -34,7 +34,7 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 
 ### Modération
 
-- **`/reset`** : efface la mémoire du salon. Réservé aux modérateurs (« Gérer les messages ») et aux administrateurs.
+- **`/reset`** : efface la mémoire du salon. Réservé aux membres qui ont la permission Administrateur.
 - **`/skip`** (avec `PRESENCE=on`) : abandonne le statut Discord en cours et en tire un nouveau tout de suite ; seul celui qui lance la commande voit le nouveau statut. Absent, le bot répond alors aux messages en attente s'il passe en ligne. Sans effet la nuit. Réservé aux mêmes personnes que `/reset`.
 - Le bot ne peut jamais pinger `@everyone`, `@here`, un rôle ou un membre.
 
