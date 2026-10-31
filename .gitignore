@@ -6,6 +6,7 @@ venv/
 bot.log*
 conversation_history.json*
 presence_sources.json
+presence_state.json
 waiting_messages.json
 slash_commands.sha256
 .claude/

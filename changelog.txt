@@ -20,6 +20,17 @@ Nouveautés
   termines chaque message par un seul emoji du serveur, directement
   après le dernier mot. » Une ancienne liste de codes (<:hap:123…>)
   fonctionne encore, mais n'est plus utile.
+- Statut Discord gardé entre deux redémarrages : Rika reprend son statut
+  là où elle en serait si elle ne s'était pas arrêtée, comme s'il avait
+  continué pendant l'arrêt. Après un redémarrage rapide, elle regarde
+  toujours le même épisode ou joue au même jeu ; après un arrêt plus
+  long, l'anime a avancé d'autant d'épisodes et la playlist d'autant de
+  morceaux. Absente ou en « Ne pas déranger », elle le reste : les
+  messages en attente gardent leur réponse différée. Un statut terminé
+  pendant l'arrêt, coupé par la nuit ou désactivé depuis dans
+  PRESENCE_WEIGHTS laisse place à un nouveau, et ses derniers statuts
+  personnalisés ne sont pas répétés. Le statut est gardé dans
+  presence_state.json, à côté de l'historique.
 
 
 Version 5.8

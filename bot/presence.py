@@ -7,15 +7,20 @@ quelques morceaux, une session de jeu…) ; à la fin, un nouveau statut est tir
 Absent, le bot ne répond pas avant son retour ; en « Ne pas déranger », il répond au bout de
 quelques minutes (voir wait_turn). S'il était en pleine conversation dans son salon, il prévient
 d'abord qu'il s'absente (voir departure_note et ChatBot.on_status_change).
+
+Le statut en cours est gardé dans presence_state.json : après un redémarrage, le bot le reprend
+là où il en serait s'il ne s'était pas arrêté (voir restore).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import random
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -128,6 +133,17 @@ class Status:
             return "tu es absente pour la nuit"
         return None
 
+    def to_dict(self) -> dict:
+        data = {"kind": self.kind.value, "title": self.title, "episode": self.episode, "details": self.details,
+                "track": asdict(self.track) if self.track else None}
+        return {key: value for key, value in data.items() if value is not None}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Status:
+        track = Track(**data["track"]) if data.get("track") else None
+        return cls(Kind(data["kind"]), title=data.get("title"), track=track,
+                   episode=data.get("episode"), details=data.get("details"))
+
 
 # Un statut et sa durée en secondes. Un anime ou une musique en enchaîne plusieurs (un par épisode
 # ou par morceau) : c'est le « programme » du statut.
@@ -156,6 +172,7 @@ class PresenceManager:
         self.step_end = datetime.min.replace(tzinfo=UTC)  # fin de l'étape en cours (UTC)
         self.status_end: datetime | None = None  # fin du statut en cours, toutes étapes comprises
         self.recent_custom: deque[str] = deque(maxlen=RECENT_CUSTOM_STATUSES)
+        self.state_file = settings.history_file.with_name("presence_state.json")
         self._tasks: list[asyncio.Task] = []
         self._changed = asyncio.Event()  # déclenché à chaque changement de statut (voir wait_turn)
 
@@ -164,7 +181,61 @@ class PresenceManager:
             logger.info("STEAM_API_KEY absent : pas de statut « joue à ».")
         if self.is_night(datetime.now(self.settings.timezone)):
             self.status = Status(Kind.NIGHT)  # démarrage la nuit : absent dès le premier message
+        else:
+            self.restore()
         self._tasks.append(asyncio.create_task(self._run()))
+
+    # ------------------------------------------------------------ sauvegarde
+
+    def save(self) -> None:
+        """Garde le statut en cours et la suite de son programme, pour les reprendre au redémarrage."""
+        data = {
+            "saved_at": datetime.now(UTC).isoformat(),
+            "status": self.status.to_dict(),
+            "step_end": self.step_end.isoformat(),
+            "status_end": self.status_end.isoformat() if self.status_end else None,
+            "program": [[status.to_dict(), seconds] for status, seconds in self.program],
+            "recent_custom": list(self.recent_custom),
+        }
+        tmp = self.state_file.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, self.state_file)
+        except OSError as exc:
+            logger.warning("Impossible d'écrire %s : %s", self.state_file, exc)
+
+    def restore(self) -> None:
+        """Reprend le statut d'avant le redémarrage, là où il en serait s'il avait continué
+        pendant l'arrêt (un anime avance d'autant d'épisodes). Un statut terminé entre-temps,
+        coupé par la nuit, ou désactivé depuis dans PRESENCE_WEIGHTS laisse place à un nouveau."""
+        try:
+            data = json.loads(self.state_file.read_text(encoding="utf-8"))
+            self.recent_custom.extend(data.get("recent_custom", []))
+            status = Status.from_dict(data["status"])
+            program = [(Status.from_dict(step), float(seconds)) for step, seconds in data.get("program", [])]
+            saved_at = datetime.fromisoformat(data["saved_at"])
+            step_end = datetime.fromisoformat(data["step_end"])
+            status_end = datetime.fromisoformat(data["status_end"]) if data.get("status_end") else None
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            logger.warning("%s illisible, ignoré : %s", self.state_file, exc)
+            return
+
+        now = datetime.now(UTC)
+        if self.weights.get(status.kind, 0) <= 0:
+            return  # nuit, ou statut désactivé depuis dans PRESENCE_WEIGHTS
+        if night := self.settings.presence_night:
+            if self.next_hour(saved_at.astimezone(self.settings.timezone), night[0]) <= now:
+                return  # une nuit est passée depuis : le statut s'est arrêté avec elle
+        while step_end <= now and program:
+            status, seconds = program.pop(0)
+            step_end += timedelta(seconds=seconds)
+        if step_end <= now:
+            return
+        self.status, self.program, self.step_end, self.status_end = status, program, step_end, status_end
+        logger.info("Statut d'avant le redémarrage repris : %s, encore %s.", status.describe() or "en ligne",
+                    format_duration((step_end - now).total_seconds() * self.settings.presence_speed))
 
     def stop(self) -> None:
         for task in self._tasks:
@@ -374,6 +445,7 @@ class PresenceManager:
         self._changed.set()  # réveille les réponses en attente
         self._changed = asyncio.Event()
         logger.info("Statut Discord : %s", status.describe() or "en ligne, sans activité")
+        self.save()
         await self.apply()
         self.bot.dispatch("status_change", before, status)  # appelle on_status_change du bot
 
