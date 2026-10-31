@@ -32,13 +32,21 @@ Nouveautés
   personnalisés ne sont pas répétés. Le statut est gardé dans
   presence_state.json, à côté de l'historique.
 - /skip : abandonne le statut Discord en cours (l'anime ou la playlist
-  entière) et en tire un nouveau tout de suite, jamais du même type.
+  entière) et en tire un nouveau tout de suite, selon les mêmes règles.
   Réservé aux modérateurs et administrateurs, comme /reset ; seul celui
   qui lance la commande voit le nouveau statut et sa durée. Si Rika
   était absente et passe en ligne, elle répond aussitôt aux messages en
   attente ; si elle s'éloigne en pleine conversation, elle prévient son
   salon. Sans effet la nuit, et absente avec PRESENCE=off. La commande
   est envoyée à Discord au premier démarrage de la 5.9.
+- Statuts plus variés : un nouveau statut ne peut plus être du même type
+  que les deux derniers (avant, seul le dernier était exclu), et le type
+  d'avant revient deux fois moins souvent. Les suites comme anime /
+  musique / anime deviennent impossibles : un type vu dans les 3
+  derniers statuts revient dans 15 % des tirages au lieu de 37 %, et les
+  chances de PRESENCE_WEIGHTS restent presque respectées. Si trop de
+  statuts sont désactivés pour respecter la règle, elle s'assouplit.
+  Les derniers types tirés sont gardés dans presence_state.json.
 
 
 Version 5.8

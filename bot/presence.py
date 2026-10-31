@@ -41,6 +41,9 @@ UTC = timezone.utc  # datetime.UTC n'existe qu'à partir de Python 3.11
 SOURCES_REFRESH_INTERVAL = 24 * 3600  # secondes
 CUSTOM_STATUS_MAX_LENGTH = 128  # limite de Discord
 RECENT_CUSTOM_STATUSES = 4  # statuts personnalisés récents, à ne pas répéter
+# Variété : chances des derniers types de statut tirés, du plus récent au plus ancien (0 : exclu).
+# Les deux derniers ne peuvent pas revenir, le troisième revient deux fois moins souvent.
+RECENT_KIND_FACTORS = (0, 0, 0.5)
 GAME_ATTEMPTS = 5  # jeux essayés avant d'abandonner (fiche introuvable, jeu pour adultes…)
 DND_REPLY_MINUTES = (5, 15)  # délai de réponse en « Ne pas déranger »
 
@@ -190,6 +193,7 @@ class PresenceManager:
         self.step_end = datetime.min.replace(tzinfo=UTC)  # fin de l'étape en cours (UTC)
         self.status_end: datetime | None = None  # fin du statut en cours, toutes étapes comprises
         self.recent_custom: deque[str] = deque(maxlen=RECENT_CUSTOM_STATUSES)
+        self.recent_kinds: deque[Kind] = deque(maxlen=len(RECENT_KIND_FACTORS))  # derniers types tirés
         self.state_file = settings.history_file.with_name("presence_state.json")
         self._tasks: list[asyncio.Task] = []
         self._changed = asyncio.Event()  # déclenché à chaque changement de statut (voir wait_turn)
@@ -216,6 +220,7 @@ class PresenceManager:
             "status_end": self.status_end.isoformat() if self.status_end else None,
             "program": [[status.to_dict(), seconds] for status, seconds in self.program],
             "recent_custom": list(self.recent_custom),
+            "recent_kinds": [kind.value for kind in self.recent_kinds],
         }
         tmp = self.state_file.with_suffix(".json.tmp")
         try:
@@ -231,7 +236,8 @@ class PresenceManager:
         try:
             data = json.loads(self.state_file.read_text(encoding="utf-8"))
             self.recent_custom.extend(data.get("recent_custom", []))
-            status = Status.from_dict(data["status"])
+            self.recent_kinds.extend(Kind(value) for value in data.get("recent_kinds", []))
+            status =Status.from_dict(data["status"])
             program = [(Status.from_dict(step), float(seconds)) for step, seconds in data.get("program", [])]
             saved_at = datetime.fromisoformat(data["saved_at"])
             step_end = datetime.fromisoformat(data["step_end"])
@@ -399,7 +405,8 @@ class PresenceManager:
         if now >= self.step_end:
             if not self.program:
                 self.program = await self.draw()
-                total = sum(seconds for _, seconds in self.program)
+                self.recent_kinds.append(self.program[0][0].kind)  # celui affiché (en ligne si un jeu échoue…)
+                total =sum(seconds for _, seconds in self.program)
                 self.status_end = now + timedelta(seconds=total)
                 logger.info("Nouveau statut pour %s.", format_duration(total * self.settings.presence_speed))
             status, seconds = self.program.pop(0)
@@ -415,10 +422,15 @@ class PresenceManager:
     async def draw(self) -> list[Step]:
         """Tire un nouveau statut et son programme (durées divisées par PRESENCE_SPEED)."""
         available = {kind: weight for kind, weight in self.weights.items() if weight > 0 and self.has_source(kind)}
-        # Jamais deux fois le même statut à la suite, sauf s'il n'y a pas d'autre choix.
-        if len(available) > 1:
-            available.pop(self.status.kind, None)
-        kind = random.choices(list(available), weights=list(available.values()))[0] if available else Kind.ONLINE
+        # Les derniers types tirés reviennent moins, ou pas (voir RECENT_KIND_FACTORS), tant qu'il reste un autre choix.
+        for recent, factor in zip(reversed(self.recent_kinds), RECENT_KIND_FACTORS):
+            if recent not in available:
+                continue
+            if factor == 0 and len(available) > 1:
+                del available[recent]
+            elif factor > 0:
+                available[recent] *= factor
+        kind =random.choices(list(available), weights=list(available.values()))[0] if available else Kind.ONLINE
         speed = self.settings.presence_speed
 
         if kind is Kind.ANIME:
