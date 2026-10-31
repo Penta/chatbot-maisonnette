@@ -51,7 +51,6 @@ MEMORY_TOOL = {
 class ToolResult:
     content: str
     is_error: bool = False
-    written: bool = False  # un fichier a été modifié
 
 
 class MemoryStore:
@@ -184,7 +183,7 @@ class MemoryStore:
                 logger.error("Mémoire : impossible d'écrire %s : %s", name, exc)
                 return ToolResult("Écriture impossible pour l'instant, à cause d'une erreur du bot.", is_error=True)
         logger.info("Mémoire : %s sur %s (%s), %d → %d caractères", action, name, label, len(before), len(after))
-        return ToolResult(f"C'est fait. {name} : {len(after)}/{limit} caractères.", written=True)
+        return ToolResult(f"C'est fait. {name} : {len(after)}/{limit} caractères.")
 
     def limit(self, name: str) -> int:
         return self.server_limit if name == SERVER_FILE else self.member_limit

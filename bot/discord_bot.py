@@ -42,8 +42,6 @@ QUOTE_MAX_LENGTH = 500
 USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 # En passant absent ou en « Ne pas déranger », le bot prévient son salon si on y a parlé depuis moins de :
 DEPARTURE_WINDOW = timedelta(minutes=3)
-# Ajoutée au message auquel le bot répond quand il a noté quelque chose dans sa mémoire.
-NOTED_REACTION = "📝"
 # Envoyé une seule fois à chaque membre, à son premier message, avec MEMORY=on.
 WELCOME = ("{name} peut retenir des choses sur toi au fil des conversations (tes goûts, tes projets…) "
            "pour mieux te connaître. Tape /memoire sur le serveur pour voir ce qui a été retenu, le modifier "
@@ -406,8 +404,6 @@ class ChatBot(commands.Bot):
                 self.forget_waiting(*(p.message for p in batch))
             await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
         await self.send_answer(last, answer.text)
-        if answer.memory_written:
-            await self.mark_noted(last)
 
     async def handle_mention(self, message: discord.Message) -> None:
         if not self.available() or message.channel.id in self._waiters:
@@ -493,8 +489,6 @@ class ChatBot(commands.Bot):
                 return
         # En retard, la réponse cite la mention : on sait à quoi elle répond.
         await self.send_answer(message, answer.text, reply=late is not None)
-        if answer.memory_written:
-            await self.mark_noted(message)
 
     # ------------------------------------------------------ réponses différées
 
@@ -830,13 +824,6 @@ class ChatBot(commands.Bot):
             except discord.HTTPException as exc:
                 logger.error("Envoi de la réponse impossible : %s", exc)
                 return
-
-    async def mark_noted(self, message: discord.Message) -> None:
-        """Réaction 📝 sur le message auquel le bot vient de répondre : il a noté quelque chose."""
-        try:
-            await message.add_reaction(NOTED_REACTION)
-        except discord.HTTPException as exc:  # permission « Ajouter des réactions » absente, message supprimé…
-            logger.warning("Réaction %s impossible : %s", NOTED_REACTION, exc)
 
     async def safe_reply(self, message: discord.Message, text: str) -> None:
         try:

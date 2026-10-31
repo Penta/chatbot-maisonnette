@@ -70,7 +70,8 @@ MEMBER_MEMORY_NOTE = (
     "général sur le serveur (blagues récurrentes, événements, habitudes). Quand tu apprends sur quelqu'un "
     "quelque chose qui vaut la peine d'être retenu, note-le dans sa fiche, quelle que soit la personne qui "
     "te l'apprend ; une info donnée par quelqu'un d'autre que l'intéressé se note avec sa source "
-    "(« d'après Toto »). Inutile de dire dans ta réponse tout ce que tu retiens. "
+    "(« d'après Toto »). Ne dis pas que tu notes quelque chose : c'est plus tard, quand tu t'en souviens, qu'on doit "
+    "découvrir que tu l'as retenu. "
     "Écris en style télégraphique, une ligne par fait, sans doublon, et mets à jour la ligne existante plutôt "
     "que d'en ajouter une (« jeu préféré : Zelda » devient « jeu préféré : Elden Ring »). La première ligne "
     "d'une fiche est « Surnoms : … » : complète-la dès que tu comprends qu'un surnom désigne ce membre. "
@@ -160,7 +161,6 @@ class ImageData:
 class Answer:
     text: str
     web_used: bool  # Claude a fait au moins une recherche web ou lu une page
-    memory_written: bool = False  # Claude a noté quelque chose dans sa mémoire
 
 
 class ClaudeClient:
@@ -293,7 +293,6 @@ class ClaudeClient:
 
         responses = [await self._call(params, attachments)]
         pauses = operations = 0
-        memory_written = False
         while True:
             last = responses[-1]
             # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
@@ -304,9 +303,8 @@ class ClaudeClient:
             # Appel à l'outil « memoire » : le bot l'exécute et renvoie le résultat. Une fois la limite
             # d'opérations atteinte, un dernier tour lui demande de répondre, puis la boucle s'arrête.
             elif last.stop_reason == "tool_use" and self.memory and operations <= self.settings.memory_max_operations:
-                results, written = await self._run_tools(last, operations)
+                results = await self._run_tools(last, operations)
                 follow_up = [{"role": "user", "content": results}]
-                memory_written = memory_written or written
                 operations += len(results)
             else:
                 break
@@ -331,14 +329,13 @@ class ClaudeClient:
         if not text:
             logger.warning("Réponse vide de Claude (stop_reason=%s).", stop_reason)
             raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
-        return Answer(text, web_used, memory_written)
+        return Answer(text, web_used)
 
-    async def _run_tools(self, response, done: int) -> tuple[list[dict], bool]:
+    async def _run_tools(self, response, done: int) -> list[dict]:
         """Exécute les appels à l'outil « memoire » d'une réponse. Renvoie leurs résultats, à envoyer
-        tous dans un même message comme l'exige l'API, et si un fichier a été modifié.
+        tous dans un même message comme l'exige l'API.
         done : opérations déjà faites pour cette réponse."""
         results = []
-        written = False
         for block in response.content:
             if block.type != "tool_use":
                 continue
@@ -350,10 +347,9 @@ class ClaudeClient:
             else:
                 result = await self.memory.run(block.input)
             done += 1
-            written = written or result.written
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": result.content,
                             "is_error": result.is_error})
-        return results, written
+        return results
 
     async def write_custom_status(self, kind: str, now: str, duration: str, recent: list[str],
                                   max_length: int) -> str | None:

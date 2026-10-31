@@ -6,55 +6,62 @@ Version 5.10
 ------------
 
 Nouveautés
-- Mémoire des membres (MEMORY=on, en construction) : le bot tient un
-  registre des membres qu'il voit : auteurs des messages qu'il lit,
-  membres mentionnés et auteurs des messages cités, sans les bots. Pour chacun, il garde le
-  nom d'utilisateur, le nom d'affichage, le pseudo sur le serveur et les
-  5 derniers anciens pseudos, mis à jour à chaque message. Le registre
-  est dans memories/registre.json, à côté de l'historique (MEMORY_DIR
-  pour un autre dossier), et n'est réécrit que si quelque chose change.
-  Rika tient une fiche par membre (memories/membres/<id>.md) et un
-  fichier général du serveur (memories/serveur.md), avec un outil
-  « memoire » exécuté par le bot : lire, ajouter, remplacer ou réécrire,
-  dans ces seuls fichiers. Elle note en style télégraphique, une ligne
-  par fait, avec la source quand l'info vient d'un autre membre. Une
-  fiche est limitée à 3000 caractères (MEMORY_MEMBER_LIMIT) et le
-  fichier général à 5000 (MEMORY_SERVER_LIMIT) : une note de trop est
-  refusée, et Rika réécrit alors le fichier en plus court. Au plus 5
-  lectures ou écritures par réponse (MEMORY_MAX_OPERATIONS). Quand elle
-  a noté quelque chose, elle ajoute 📝 au message auquel elle répond
-  (permission « Ajouter des réactions » nécessaire). Outil maison plutôt
-  que celui d'Anthropic, qui lui ferait relire tout le dossier avant
-  chaque réponse (un appel de plus à chaque message).
-  Le bot joint lui-même à chaque message les fiches des membres
-  concernés (auteurs, membres mentionnés, auteur du message cité), sans
-  appel supplémentaire ; elles ne sont pas enregistrées dans
-  l'historique, et le cache s'arrête juste avant elles pour que
-  l'historique reste relu en cache au message suivant. Le prompt
-  contient aussi la liste des membres, avec tous leurs noms (pseudo,
-  nom d'utilisateur, surnoms de la fiche, anciens pseudos) et le chemin
-  de leur fiche, ce qui permet à Rika de noter une info sur quelqu'un
-  cité par son seul nom ou surnom ; ainsi que le fichier général. Les
-  membres qui ont désactivé la mémoire n'y figurent pas.
+- Mémoire des membres (MEMORY=on) : Rika tient une fiche sur chaque
+  membre et un fichier général du serveur (blagues récurrentes,
+  événements, habitudes). Elle décide seule de ce qui mérite d'être
+  retenu, quelle que soit la personne qui le lui apprend, et note la
+  source quand l'info vient d'un autre membre (« d'après Toto »). Elle
+  écrit en style télégraphique, une ligne par fait, sans doublon, et met
+  à jour une ligne plutôt que d'en ajouter une. Elle ne signale pas ce
+  qu'elle note : on le découvre plus tard, quand elle s'en souvient.
+- Ce que Rika voit : le bot joint lui-même à chaque message les fiches
+  des membres concernés (auteurs, membres mentionnés, auteur du message
+  cité), sans appel supplémentaire. Son prompt contient aussi le fichier
+  général et la liste des membres, avec tous leurs noms (pseudo, nom
+  d'utilisateur, surnoms notés en tête de fiche, anciens pseudos) et le
+  chemin de leur fiche : elle peut ainsi noter une info sur quelqu'un
+  cité par son seul nom ou surnom, et lire sa fiche si besoin. Les
+  fiches jointes ne sont pas enregistrées dans l'historique, et le cache
+  s'arrête juste avant elles : l'historique reste relu en cache.
+- Comment elle écrit : avec un outil « memoire » exécuté par le bot
+  (lire, ajouter, remplacer, réécrire), limité à ces seuls fichiers. Une
+  fiche fait au plus 3000 caractères (MEMORY_MEMBER_LIMIT) et le fichier
+  général 5000 (MEMORY_SERVER_LIMIT) : une note de trop est refusée, et
+  Rika réécrit alors le fichier en plus court, en fusionnant et en
+  retirant le moins important. Au plus 5 lectures ou écritures par
+  réponse (MEMORY_MAX_OPERATIONS). Outil maison plutôt que celui
+  d'Anthropic, qui lui ferait relire tout le dossier avant chaque
+  réponse, soit un appel de plus à chaque message.
 - /memoire : chaque membre voit sa fiche, visible par lui seul, et peut
   la modifier dans une fenêtre déjà remplie, tout effacer ou désactiver
-  la mémoire (avec confirmation : sa fiche est alors effacée, plus rien
-  n'est retenu sur lui ni joint à ses messages). Il peut la réactiver au
-  même endroit. Les administrateurs (permission Administrateur) voient,
+  la mémoire (avec confirmation : sa fiche est effacée, plus rien n'est
+  retenu sur lui ni joint à ses messages). Il peut la réactiver au même
+  endroit. Les administrateurs (permission Administrateur) voient,
   modifient et effacent la fiche de n'importe qui avec
   /memoire membre:@… ; seul le membre lui-même peut désactiver sa
   mémoire. /memoire-serveur, réservé aux administrateurs, fait de même
-  pour le fichier général. Avec MEMORY=off, les deux commandes le
-  signalent. MEMORY_MEMBER_LIMIT et MEMORY_SERVER_LIMIT ne peuvent pas
-  dépasser 20000 (taille maximale de la fenêtre de modification).
-- Présentation de la mémoire : au premier message d'un membre, le bot
-  lui envoie une seule fois un message privé qui explique ce qu'il peut
-  retenir et comment le voir, le modifier ou le désactiver avec
-  /memoire. Si ses messages privés sont fermés, le message est posté
-  dans le salon, avec son nom en mention mais sans notification, et
-  s'efface au bout d'une minute. Les membres déjà actifs sont prévenus
-  à leur premier message après le passage à la 5.10 ; un membre qui a
-  déjà utilisé /memoire ne l'est pas.
+  pour le fichier général.
+- Présentation : au premier message d'un membre, le bot lui envoie une
+  seule fois un message privé qui explique ce qu'il peut retenir et
+  comment le voir, le modifier ou le désactiver avec /memoire. Si ses
+  messages privés sont fermés, le message est posté dans le salon, avec
+  son nom en mention mais sans notification, et s'efface au bout d'une
+  minute. Les membres déjà actifs sont prévenus à leur premier message
+  après le passage à la 5.10 ; un membre qui a déjà utilisé /memoire
+  ne l'est pas.
+- Registre des membres : le bot garde, pour chaque membre vu, son nom
+  d'utilisateur, son nom d'affichage, son pseudo sur le serveur et ses
+  5 derniers anciens pseudos, mis à jour à chaque message, ainsi que ses
+  réglages de la mémoire. Tout est dans le dossier memories/, à côté de
+  l'historique (MEMORY_DIR pour un autre dossier) : registre.json,
+  serveur.md et membres/<id>.md. Avec Docker, il est donc sur le même
+  volume que l'historique.
+- Mise en service : MEMORY=on dans le .env (ou la ConfigMap), sans
+  nouvelle permission Discord. Avec MEMORY=off (par défaut), rien ne
+  change, et /memoire et /memoire-serveur indiquent que la mémoire est
+  coupée.
+  MEMORY_MEMBER_LIMIT et MEMORY_SERVER_LIMIT ne peuvent pas dépasser
+  20000 (taille maximale de la fenêtre de modification).
 
 Divers
 - /reset et /skip sont réservés aux membres qui ont la permission

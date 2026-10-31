@@ -63,11 +63,11 @@ Il te faut :
    - dans **Privileged Gateway Intents**, active **Message Content Intent**. Les intents « Presence » et « Server Members » ne servent pas.
 3. Onglet **OAuth2 > URL Generator** :
    - coche les scopes **bot** et **applications.commands** (ce dernier pour les commandes comme `/reset` et `/memoire`) ;
-   - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History**, plus **Add Reactions** avec `MEMORY=on` ;
+   - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History** ;
    - ouvre l'adresse générée et invite le bot sur ton serveur.
 4. Dans Discord, active le mode développeur (**Paramètres utilisateur > Avancés > Mode développeur**), puis fais un clic droit sur le salon du bot > **Copier l'identifiant du salon** : c'est le `CHANNEL_ID`.
 
-Le bot n'a besoin d'aucune autre permission : il n'utilise que les emojis et stickers du serveur. Pour un bot déjà invité, **Add Reactions** s'ajoute à son rôle dans les paramètres du serveur.
+Le bot n'a besoin d'aucune autre permission : il n'utilise que les emojis et stickers du serveur.
 
 ## Installation
 
@@ -104,6 +104,7 @@ Tous les réglages se trouvent dans le `.env`, et chacun est expliqué dans `.en
 | `CONTEXT_MESSAGE_LIMIT` | Messages lus autour d'une mention | `20` |
 | `WEB_SEARCH` | Recherche web et lecture de liens (`on` ou `off`) ; prévois alors un `API_TIMEOUT` d'au moins 90 secondes | `off` |
 | `PRESENCE` | Statut Discord et absences (`on` ou `off`) ; les `PRESENCE_*` règlent les chances de chaque statut et la nuit | `on` |
+| `MEMORY` | Mémoire des membres (`on` ou `off`) ; `MEMORY_MEMBER_LIMIT` et `MEMORY_SERVER_LIMIT` règlent la taille des fiches et du fichier général (3000 et 5000 caractères) | `off` |
 | `PDF_MAX_PAGES` | Pages maximales d'un PDF (0 = PDF refusés) | `20` |
 | `PERSONALITY_FILE` | Fichier de la personnalité | `personality_prompt.txt` |
 | `TIMEZONE` | Fuseau horaire de l'heure donnée à Claude | `Europe/Paris` |
@@ -122,7 +123,7 @@ Pas besoin d'y recopier la liste des emojis du serveur : le bot la donne lui-mê
 
 Le `Dockerfile` construit une image prête à lancer. À chaque push sur `main`, GitHub Actions la construit et la publie sur Docker Hub (`<compte>/chatbot-maisonnette`, avec les secrets `DOCKER_USERNAME` et `DOCKER_PASSWORD` du dépôt).
 
-L'image ne contient ni `.env`, ni personnalité `*.local.txt`, ni historique. Les réglages se passent en variables d'environnement, et les fichiers à garder entre deux redémarrages doivent être sur un volume, par exemple :
+L'image ne contient ni `.env`, ni personnalité `*.local.txt`, ni historique, ni mémoire des membres. Les réglages se passent en variables d'environnement, et les fichiers à garder entre deux redémarrages doivent être sur un volume. Le dossier `memories/` se crée à côté de `HISTORY_FILE`, donc sur le même volume. Par exemple :
 
 ```
 docker run -d --name chatbot \
@@ -142,7 +143,8 @@ Chaque message envoyé à Claude est facturé selon le nombre de tokens lus (per
 - la personnalité et la mémoire sont mises en cache : relues dans les 5 minutes, elles coûtent 10 % du prix normal ;
 - les images, PDF et fichiers ne sont payés qu'une fois, au message qui les contient ;
 - `claude-haiku-5-5` coûte environ 20 fois moins cher que `claude-sonnet-5-5` ; `THINKING=off` et un `EFFORT` bas réduisent aussi les réponses ;
-- chaque page de PDF coûte souvent plusieurs milliers de tokens, et chaque recherche web est payante en plus.
+- chaque page de PDF coûte souvent plusieurs milliers de tokens, et chaque recherche web est payante en plus ;
+- avec `MEMORY=on`, les fiches jointes sont relues à chaque message, hors cache : environ 850 tokens par fiche pleine de 3000 caractères. Chaque note demande en plus un court appel, la conversation étant alors relue en cache.
 
 Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque appel les tokens utilisés et le coût estimé en dollars. Les tarifs de Sonnet, Haiku et Opus 5.5 sont connus du bot ; pour un autre modèle, renseigne `PRICE_INPUT_PER_MTOK` et `PRICE_OUTPUT_PER_MTOK`.
 
