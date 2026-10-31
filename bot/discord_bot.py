@@ -133,6 +133,8 @@ class ChatBot(commands.Bot):
     async def setup_hook(self) -> None:
         # Exécuté une seule fois au démarrage (contrairement à on_ready).
         self.tree.add_command(reset_command)
+        if self.presence:
+            self.tree.add_command(skip_command)
         await self.sync_commands()
         s = self.settings
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s",
@@ -772,20 +774,28 @@ class ChatBot(commands.Bot):
 
 # ------------------------------------------------------------- commandes slash
 
+async def allowed(interaction: discord.Interaction) -> bool:
+    """Commande réservée aux modérateurs et administrateurs : prévient les autres et renvoie False."""
+    # Vérification côté bot, au cas où un admin aurait ouvert la commande à tous dans les paramètres du serveur.
+    perms = interaction.permissions
+    if perms.manage_messages or perms.administrator:
+        return True
+    logger.info("Tentative de /%s refusée pour %s dans le salon %s",
+                interaction.command.name if interaction.command else "?", interaction.user, interaction.channel_id)
+    await interaction.response.send_message(
+        "Seuls les modérateurs et administrateurs du serveur peuvent utiliser cette commande.",
+        ephemeral=True,
+    )
+    return False
+
+
 @app_commands.command(name="reset", description="Réinitialise la mémoire du bot dans ce salon")
 @app_commands.guild_only()
 # Masque la commande aux membres sans « Gérer les messages » (modérateurs) ;
 # les administrateurs ont implicitement toutes les permissions.
 @app_commands.default_permissions(manage_messages=True)
 async def reset_command(interaction: discord.Interaction) -> None:
-    # Vérification côté bot, au cas où un admin aurait ouvert la commande à tous dans les paramètres du serveur.
-    perms = interaction.permissions
-    if not (perms.manage_messages or perms.administrator):
-        logger.info("Tentative de /reset refusée pour %s dans le salon %s", interaction.user, interaction.channel_id)
-        await interaction.response.send_message(
-            "Seuls les modérateurs et administrateurs du serveur peuvent utiliser cette commande.",
-            ephemeral=True,
-        )
+    if not await allowed(interaction):
         return
     bot: ChatBot = interaction.client  # type: ignore[assignment]
     # Le reset attend la fin d'une éventuelle réponse en cours, ce qui peut dépasser
@@ -794,3 +804,27 @@ async def reset_command(interaction: discord.Interaction) -> None:
     await bot.history.reset(interaction.channel_id)
     logger.info("Historique réinitialisé dans le salon %s par %s", interaction.channel_id, interaction.user)
     await interaction.followup.send("L'historique de conversation a été réinitialisé.")
+
+
+@app_commands.command(name="skip", description="Passe tout de suite au statut Discord suivant du bot")
+@app_commands.guild_only()
+@app_commands.default_permissions(manage_messages=True)  # comme /reset
+async def skip_command(interaction: discord.Interaction) -> None:
+    if not await allowed(interaction):
+        return
+    bot: ChatBot = interaction.client  # type: ignore[assignment]
+    # Une pensée ou une raison d'absence est écrite par Claude : plus de 3 secondes possibles.
+    await interaction.response.defer(ephemeral=True)
+    try:
+        status = await bot.presence.skip()
+    except Exception:
+        logger.exception("Erreur inattendue pendant /skip")
+        await interaction.followup.send("Le statut n'a pas pu être changé, regarde les logs.", ephemeral=True)
+        return
+    if status is None:
+        await interaction.followup.send("C'est la nuit : le bot dort, il n'y a pas de statut à passer.", ephemeral=True)
+        return
+    logger.info("Statut passé par %s", interaction.user)
+    remaining = bot.presence.remaining()
+    duration = f", pendant environ {remaining}" if remaining else ""
+    await interaction.followup.send(f"Nouveau statut : {status.label()}{duration}.", ephemeral=True)

@@ -133,6 +133,24 @@ class Status:
             return "tu es absente pour la nuit"
         return None
 
+    def label(self) -> str:
+        """Le statut tel qu'il s'affiche sur Discord, pour les modérateurs (/skip)."""
+        reason = f" (« {self.title} »)" if self.title else ""
+        if self.kind is Kind.ANIME:
+            episode = f"l'épisode {self.episode} de " if self.episode else ""
+            return f"regarde {episode}« {self.title} »"
+        if self.kind is Kind.MUSIC:
+            return f"écoute « {self.track.title} » de {self.track.artist}"
+        if self.kind is Kind.GAME:
+            return f"joue à « {self.title} »"
+        if self.kind is Kind.THOUGHT:
+            return f"pensée du moment « {self.title} »"
+        if self.kind is Kind.DND:
+            return f"Ne pas déranger{reason}"
+        if self.kind in (Kind.IDLE, Kind.NIGHT):
+            return f"absent{reason}"
+        return "en ligne, sans activité"
+
     def to_dict(self) -> dict:
         data = {"kind": self.kind.value, "title": self.title, "episode": self.episode, "details": self.details,
                 "track": asdict(self.track) if self.track else None}
@@ -175,6 +193,8 @@ class PresenceManager:
         self.state_file = settings.history_file.with_name("presence_state.json")
         self._tasks: list[asyncio.Task] = []
         self._changed = asyncio.Event()  # déclenché à chaque changement de statut (voir wait_turn)
+        self._step_lock = asyncio.Lock()  # /skip et la boucle ne changent pas le statut en même temps
+        self._wake = asyncio.Event()  # réveille la boucle après un /skip
 
     def start(self) -> None:
         if not self.sources.steam_enabled:
@@ -321,11 +341,37 @@ class PresenceManager:
         await self.bot.wait_until_ready()
         while True:
             try:
-                wake = await self._step()
+                async with self._step_lock:
+                    wake = await self._step()
             except Exception:
                 logger.exception("Erreur inattendue dans la gestion du statut")
                 wake = datetime.now(UTC) + timedelta(minutes=1)
-            await asyncio.sleep(max(1.0, (wake - datetime.now(UTC)).total_seconds()))
+            self._wake.clear()
+            try:
+                await asyncio.wait_for(self._wake.wait(), max(1.0, (wake - datetime.now(UTC)).total_seconds()))
+            except asyncio.TimeoutError:
+                pass
+
+    async def skip(self) -> Status | None:
+        """Abandonne le statut en cours (programme compris) et en tire un nouveau tout de suite.
+
+        Renvoie le nouveau statut, ou None la nuit : le bot dort, il n'y a rien à passer."""
+        async with self._step_lock:
+            if self.status.kind is Kind.NIGHT or self.is_night(datetime.now(self.settings.timezone)):
+                return None
+            logger.info("Statut passé avant sa fin.")
+            self.program = []
+            self.step_end = datetime.min.replace(tzinfo=UTC)
+            await self._step()
+        self._wake.set()  # la boucle recalcule son prochain réveil
+        return self.status
+
+    def remaining(self) -> str | None:
+        """Durée restante du statut en cours, programme compris (None : inconnue)."""
+        if self.status_end is None:
+            return None
+        seconds = (self.status_end - datetime.now(UTC)).total_seconds() * self.settings.presence_speed
+        return format_duration(seconds)
 
     async def _refresh_loop(self) -> None:
         while True:

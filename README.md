@@ -35,6 +35,7 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 ### Modération
 
 - **`/reset`** : efface la mémoire du salon. Réservé aux modérateurs (« Gérer les messages ») et aux administrateurs.
+- **`/skip`** (avec `PRESENCE=on`) : abandonne le statut Discord en cours et en tire un nouveau tout de suite ; seul celui qui lance la commande voit le nouveau statut. Absent, le bot répond alors aux messages en attente s'il passe en ligne. Sans effet la nuit. Réservé aux mêmes personnes que `/reset`.
 - Le bot ne peut jamais pinger `@everyone`, `@here`, un rôle ou un membre.
 
 ## Avant de commencer
@@ -53,7 +54,7 @@ Il te faut :
    - clique sur **Reset Token** et copie le token : c'est le `DISCORD_TOKEN` (à garder secret) ;
    - dans **Privileged Gateway Intents**, active **Message Content Intent**. Les intents « Presence » et « Server Members » ne servent pas.
 3. Onglet **OAuth2 > URL Generator** :
-   - coche les scopes **bot** et **applications.commands** (ce dernier pour `/reset`) ;
+   - coche les scopes **bot** et **applications.commands** (ce dernier pour `/reset` et `/skip`) ;
    - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History** ;
    - ouvre l'adresse générée et invite le bot sur ton serveur.
 4. Dans Discord, active le mode développeur (**Paramètres utilisateur > Avancés > Mode développeur**), puis fais un clic droit sur le salon du bot > **Copier l'identifiant du salon** : c'est le `CHANNEL_ID`.
@@ -160,7 +161,7 @@ bot/config.py            lecture et validation du .env
 bot/models.py            particularités de chaque modèle Claude (réflexion, tarifs)
 bot/claude_client.py     appels à l'API de Claude, personnalité
 bot/history.py           mémoire des conversations
-bot/discord_bot.py       événements Discord, réponses, /reset
+bot/discord_bot.py       événements Discord, réponses, /reset et /skip
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py          statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)

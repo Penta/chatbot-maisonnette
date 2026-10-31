@@ -31,6 +31,14 @@ Nouveautés
   PRESENCE_WEIGHTS laisse place à un nouveau, et ses derniers statuts
   personnalisés ne sont pas répétés. Le statut est gardé dans
   presence_state.json, à côté de l'historique.
+- /skip : abandonne le statut Discord en cours (l'anime ou la playlist
+  entière) et en tire un nouveau tout de suite, jamais du même type.
+  Réservé aux modérateurs et administrateurs, comme /reset ; seul celui
+  qui lance la commande voit le nouveau statut et sa durée. Si Rika
+  était absente et passe en ligne, elle répond aussitôt aux messages en
+  attente ; si elle s'éloigne en pleine conversation, elle prévient son
+  salon. Sans effet la nuit, et absente avec PRESENCE=off. La commande
+  est envoyée à Discord au premier démarrage de la 5.9.
 
 
 Version 5.8
