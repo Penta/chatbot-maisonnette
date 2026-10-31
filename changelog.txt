@@ -47,6 +47,14 @@ Nouveautés
   pour le fichier général. Avec MEMORY=off, les deux commandes le
   signalent. MEMORY_MEMBER_LIMIT et MEMORY_SERVER_LIMIT ne peuvent pas
   dépasser 20000 (taille maximale de la fenêtre de modification).
+- Présentation de la mémoire : au premier message d'un membre, le bot
+  lui envoie une seule fois un message privé qui explique ce qu'il peut
+  retenir et comment le voir, le modifier ou le désactiver avec
+  /memoire. Si ses messages privés sont fermés, le message est posté
+  dans le salon, avec son nom en mention mais sans notification, et
+  s'efface au bout d'une minute. Les membres déjà actifs sont prévenus
+  à leur premier message après le passage à la 5.10 ; un membre qui a
+  déjà utilisé /memoire ne l'est pas.
 
 Divers
 - /reset et /skip sont réservés aux membres qui ont la permission

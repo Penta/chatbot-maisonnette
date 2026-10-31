@@ -36,6 +36,7 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 
 Avec `MEMORY=on` :
 
+- **Présentation** : à son premier message, chaque membre reçoit une seule fois un message privé qui lui présente la mémoire et `/memoire`. Si ses messages privés sont fermés, le message est posté dans le salon et s'efface au bout d'une minute.
 - **`/memoire`** : chacun voit la fiche que le bot tient sur lui, visible par lui seul. Il peut la modifier dans une fenêtre déjà remplie, tout effacer (après confirmation) ou désactiver la mémoire : sa fiche est alors effacée et plus rien n'est retenu sur lui, jusqu'à ce qu'il la réactive. Les administrateurs voient, modifient et effacent la fiche de n'importe quel membre avec `/memoire membre:@…` ; seul le membre lui-même peut désactiver la mémoire.
 - **`/memoire-serveur`** : le fichier général du serveur, à voir, modifier ou effacer. Réservé aux administrateurs.
 
