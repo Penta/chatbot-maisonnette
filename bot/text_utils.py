@@ -8,6 +8,20 @@ DISCORD_LIMIT = 2000
 
 _FENCE_RE = re.compile(r"^\s*```(\S*)")
 
+# Bloc dans lequel le modèle écrit parfois sa réflexion au lieu de la garder pour lui.
+_REASONING_BLOCK = re.compile(r"\s*<(think|thinking|reasoning|function_calls|invoke)\b[^>]*>.*?</\1\s*>",
+                              re.S | re.I)
+
+
+def strip_reasoning(text: str) -> str:
+    """Retire la réflexion écrite au début de la réponse (<think>…</think>, faux appel d'outil…).
+
+    Seul un bloc complet tout au début est retiré : c'est là que le modèle l'écrit, et une
+    balise plus loin dans le texte (exemple, code) peut être voulue."""
+    while match := _REASONING_BLOCK.match(text):
+        text = text[match.end():]
+    return text.strip()
+
 
 def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
     """Découpe un long texte en morceaux de `limit` caractères maximum.

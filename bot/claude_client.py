@@ -12,6 +12,7 @@ import anthropic
 
 from .config import Settings
 from .models import thinking_off
+from .text_utils import strip_reasoning
 
 logger = logging.getLogger("chatbot.claude")
 
@@ -235,6 +236,10 @@ class ClaudeClient:
 
         text = self._final_text(responses)
         web_used = self._log_usage(responses)
+        # Sans ce nettoyage, la réflexion affichée resterait en mémoire et le modèle l'imiterait ensuite.
+        if (cleaned := strip_reasoning(text)) != text:
+            logger.warning("Réflexion écrite dans la réponse, retirée avant l'envoi : %r", text[:500])
+            text = cleaned
 
         stop_reason = responses[-1].stop_reason
         if stop_reason == "max_tokens":

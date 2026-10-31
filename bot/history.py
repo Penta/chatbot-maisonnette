@@ -10,6 +10,8 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from .text_utils import strip_reasoning
+
 logger = logging.getLogger("chatbot.history")
 
 FILE_VERSION = 3
@@ -271,7 +273,9 @@ class ConversationHistory:
         if not isinstance(content, str) or not content.strip():
             return None
         if msg["role"] == "assistant":
-            return {"role": "assistant", "content": content}
+            # Réflexion affichée par erreur avant la 5.8 : le modèle l'imiterait en la relisant.
+            content = strip_reasoning(content)
+            return {"role": "assistant", "content": content} if content else None
         # Le texte converti reste identique une fois rendu : le cache de prompt est conservé.
         web = content.endswith(f" {WEB_MARKER}")
         if web:

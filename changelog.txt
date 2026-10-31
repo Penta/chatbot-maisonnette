@@ -24,6 +24,15 @@ Nouveautés
   remettre cette copie à la place du fichier : la 5.7 ne sait pas lire
   le nouveau format et repartirait d'une mémoire vide.
 
+Corrections
+- Réflexion affichée : quand le modèle commence sa réponse par sa
+  réflexion (<think>…</think>, <reasoning>…, faux appel d'outil), elle
+  est retirée avant l'envoi, et le log le signale. Seul un bloc complet
+  tout au début est retiré : une balise plus loin dans le texte ou dans
+  du code reste affichée. Celle déjà présente dans la mémoire est
+  nettoyée au démarrage : en la relisant, le modèle l'imitait, et une
+  fuite en entraînait d'autres.
+
 
 Version 5.7
 -----------
