@@ -4,7 +4,7 @@ Bot Discord qui discute avec les membres du serveur grâce à Claude (Anthropic)
 
 ## Fonctionnalités
 
-- **Salon dédié** : répond à tous les messages du salon défini par `CHANNEL_ID`, avec une mémoire des derniers échanges, sauvegardée entre deux redémarrages.
+- **Salon dédié** : répond à tous les messages du salon défini par `CHANNEL_ID`, avec une mémoire des derniers échanges, sauvegardée entre deux redémarrages. Un message modifié ou supprimé sur Discord l'est aussi dans la mémoire.
 - **Mode mention** : dans les autres salons, répond quand on le mentionne, en lisant les messages récents pour comprendre la discussion.
 - **Images** : commente une image envoyée dans le salon dédié (JPEG, PNG, GIF, WebP, une par message).
 - **Fichiers texte** : lit un fichier texte joint au message (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, code…, un par message, 100 Ko maximum), dans le salon dédié et en mode mention. Seul le nom du fichier est gardé en mémoire, pas son contenu.

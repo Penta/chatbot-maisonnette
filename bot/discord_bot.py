@@ -19,7 +19,7 @@ from discord.ext import commands
 from . import VERSION
 from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
-from .history import IMAGE_MARKER, WEB_MARKER, ConversationHistory
+from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
@@ -89,9 +89,15 @@ def attachment_marker(attachment: ImageData) -> str:
 class PendingMessage:
     """Message du salon dédié, prêt à être envoyé à Claude."""
     message: discord.Message
-    user_text: str    # texte envoyé à Claude
-    stored_text: str  # texte conservé en mémoire
+    line: dict   # ligne conservée en mémoire (voir history.render_line)
+    extra: str   # ajouté pour Claude seulement : contenu du fichier texte joint
     image: ImageData | None
+
+    @property
+    def user_text(self) -> str:
+        """Texte envoyé à Claude : l'image ou le fichier lui-même remplace son repère."""
+        line = {key: value for key, value in self.line.items() if key != "attachments"}
+        return render_line(line) + self.extra
 
 
 class ChatBot(commands.Bot):
@@ -212,6 +218,39 @@ class ChatBot(commands.Bot):
         elif mentioned:
             await self.handle_mention(message)
 
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        """Message modifié : la mémoire, ou le message s'il attend encore sa réponse, prend le nouveau texte."""
+        message = payload.message
+        # Aperçu d'un lien qui s'affiche, ou transfert (qui ne se modifie pas) : rien n'a changé.
+        if message.edited_at is None or message.message_snapshots:
+            return
+        content = self.message_body(message)
+        for pending in self._pending.get(payload.channel_id, []):
+            if pending.message.id == message.id:
+                pending.line["content"] = content
+        if await self.history.edit(payload.channel_id, message.id, content):
+            logger.info("Message modifié dans le salon %s : mémoire mise à jour.", payload.channel_id)
+
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        await self.forget_deleted(payload.channel_id, {payload.message_id})
+
+    async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
+        await self.forget_deleted(payload.channel_id, payload.message_ids)
+
+    async def forget_deleted(self, channel_id: int, message_ids: set[int]) -> None:
+        """Messages supprimés : ils sortent de la mémoire et n'attendent plus de réponse."""
+        # Listes modifiées sur place : une réponse sur le point de partir les lit encore.
+        if pending := self._pending.get(channel_id):
+            pending[:] = [p for p in pending if p.message.id not in message_ids]
+        if mentions := self._mentions.get(channel_id):
+            mentions[:] = [m for m in mentions if m.id not in message_ids]
+        keys = {(channel_id, message_id) for message_id in message_ids}
+        if keys & self._waiting:
+            self._waiting -= keys
+            self._save_waiting()
+        if await self.history.delete(channel_id, message_ids):
+            logger.info("%s message(s) supprimé(s) dans le salon %s : mémoire mise à jour.", len(message_ids), channel_id)
+
     async def handle_main_channel(self, message: discord.Message) -> None:
         if self._last_main_message is None or message.created_at > self._last_main_message:
             self._last_main_message = message.created_at
@@ -237,23 +276,25 @@ class ChatBot(commands.Bot):
         reply, reply_image = await self.read_reply(message, want_image=image is None and forward_image is None)
         image = image or forward_image or reply_image
 
+        line: dict = {"id": message.id, "date": self.timestamp(message), "author": message.author.display_name}
         if forward:
-            user_text = f"{self.timestamp(message)}, {message.author.display_name} a transféré un message {forward}"
+            line["forward"] = forward
         else:
-            text = message.clean_content.strip()
-            if message.stickers:
-                text = f"{text} [sticker « {message.stickers[0].name} »]".strip()
-            text = text or "(message sans texte)"
-            reply_part = f" ({reply})" if reply else ""
-            user_text = f"{self.timestamp(message)}, {message.author.display_name} a écrit{reply_part} : {text}"
-        stored_text = user_text + (f" {attachment_marker(image)}" if image else "")
+            if reply:
+                line["reply_to"] = message.reference.message_id  # citation retirée si ce message est supprimé
+                line["reply"] = reply
+            line["content"] = self.message_body(message)
+        markers = [attachment_marker(image)] if image else []
+        extra = ""
         if text_file:
-            user_text += text_file_prompt(*text_file)
-            stored_text += f" {text_file_marker(text_file[0])}"
+            extra = text_file_prompt(*text_file)
+            markers.append(text_file_marker(text_file[0]))
+        if markers:
+            line["attachments"] = markers
 
         # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
         # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel.
-        self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, user_text, stored_text, image))
+        self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, line, extra, image))
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_main_channel)
             return
@@ -272,13 +313,13 @@ class ChatBot(commands.Bot):
                 logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
             # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
             parts = [(p.user_text, p.image) for p in batch]
-            stored_lines = [p.stored_text for p in batch]
+            lines = [p.line for p in batch]
             notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
             if note := self.presence_note():
                 notes.append(note)
             for note in reversed(notes):
                 parts.insert(0, (note, None))
-                stored_lines.insert(0, note)
+                lines.insert(0, {"content": note})
             try:
                 async with typing(channel):
                     try:
@@ -292,10 +333,7 @@ class ChatBot(commands.Bot):
                         return
             finally:
                 self.forget_waiting(*(p.message for p in batch))
-            stored_text = "\n".join(stored_lines)
-            if answer.web_used:
-                stored_text += f" {WEB_MARKER}"
-            await self.history.add_exchange(channel.id, stored_text, answer.text)
+            await self.history.add_exchange(channel.id, lines, answer.text, answer.web_used)
         await self.send_answer(last, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
@@ -427,10 +465,8 @@ class ChatBot(commands.Bot):
             except ClaudeError as exc:
                 logger.warning("Message d'absence non envoyé : %s", exc.user_message)
                 return
-            stored_text = "\n".join(text for text, _ in parts)
-            if answer.web_used:
-                stored_text += f" {WEB_MARKER}"
-            await self.history.add_exchange(channel.id, stored_text, answer.text)
+            lines = [{"content": text} for text, _ in parts]
+            await self.history.add_exchange(channel.id, lines, answer.text, answer.web_used)
         logger.info("Conversation en cours dans #%s : le salon est prévenu de l'absence.", channel)
         for chunk in split_message(answer.text):
             try:
@@ -692,6 +728,14 @@ class ChatBot(commands.Bot):
 
     def presence_note(self) -> str | None:
         return self.presence.prompt_note() if self.presence else None
+
+    @staticmethod
+    def message_body(message: discord.Message) -> str:
+        """Texte d'un message du salon dédié, tel qu'il est conservé en mémoire (sans ce qui le précède)."""
+        text = message.clean_content.strip()
+        if message.stickers:
+            text = f"{text} [sticker « {message.stickers[0].name} »]".strip()
+        return text or "(message sans texte)"
 
     def timestamp(self, message: discord.Message | discord.MessageSnapshot) -> str:
         return message.created_at.astimezone(self.settings.timezone).strftime("%d/%m/%Y %H:%M")

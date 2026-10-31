@@ -2,6 +2,29 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.8
+-----------
+
+Nouveautés
+- Messages modifiés ou supprimés : dans son salon, Rika oublie le
+  contenu d'un message supprimé (texte, pièces jointes) et sa citation
+  dans les réponses qui le citaient. Elle se souvient seulement que
+  quelqu'un a écrit un message à ce moment-là, supprimé depuis, et garde
+  sa propre réponse : la conversation ne perd pas son fil. Un message
+  modifié prend son nouveau texte, avec une mention indiquant qu'il a
+  été modifié après sa réponse. Un message supprimé avant qu'elle y réponde (pendant une
+  absence par exemple) ne reçoit plus de réponse, y compris une mention
+  hors de son salon ; modifié, elle répond au nouveau texte.
+- Nouveau format de l'historique (version 3), plus lisible : chaque
+  message Discord y garde son identifiant, et la date, l'auteur, la
+  citation, le texte et les pièces jointes sont séparés. L'ancien
+  fichier est converti automatiquement au premier lancement, sans
+  réécrire le cache de prompt, et une copie en est gardée à côté
+  (conversation_history.json.v2-<date>). Revenir à la 5.7 demande de
+  remettre cette copie à la place du fichier : la 5.7 ne sait pas lire
+  le nouveau format et repartirait d'une mémoire vide.
+
+
 Version 5.7
 -----------
 
