@@ -44,8 +44,9 @@ USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 # En passant absent ou en « Ne pas déranger », le bot prévient son salon si on y a parlé depuis moins de :
 DEPARTURE_WINDOW = timedelta(minutes=3)
 # Envoyé une seule fois à chaque membre, à son premier message, avec MEMORY=on.
-WELCOME = ("{name} peut retenir des choses sur toi au fil des conversations (tes goûts, tes projets…) "
-           "pour mieux te connaître. Tape /memoire sur le serveur pour voir ce qui a été retenu, le modifier "
+WELCOME = ("{name} peut retenir des choses sur toi au fil des conversations (tes goûts, tes projets…), "
+           "y compris ce que d'autres membres lui racontent, pour mieux te connaître. Ce qui est retenu "
+           "sert dans la conversation, mais ta fiche n'est jamais récitée aux autres. Tape /memoire sur le serveur pour voir ce qui a été retenu, le modifier "
            "ou désactiver la fonction.")
 # Durée d'affichage, en secondes, de ce message quand il est posté dans le salon.
 WELCOME_PUBLIC_DURATION = 60

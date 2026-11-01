@@ -55,6 +55,15 @@ Corrections
   bot près d'une seconde (mesuré sous Windows). Une fiche modifiée
   directement sur le disque n'est prise en compte dans la liste qu'au
   redémarrage.
+- Données personnelles : Rika ne note plus les confidences ni ses
+  jugements sur quelqu'un. Une information sensible (santé, sexualité,
+  religion, opinions, origine, adresse, argent) ne se note que si le
+  membre la donne lui-même, et elle ne l'évoque ensuite qu'avec lui.
+  Elle se sert de ce qu'elle sait dans la conversation, mais ne récite
+  plus la fiche d'un membre à quelqu'un d'autre. Le message de
+  bienvenue le précise, ainsi que le fait que les autres peuvent lui
+  raconter des choses sur toi. Les fiches déjà écrites ne sont pas
+  modifiées.
 
 Divers
 - Le token Discord et les clés Anthropic et Steam n'apparaissent plus
