@@ -15,7 +15,8 @@ Corrections
   Python.
 - Mémoire : le fichier général et la liste des membres sont présentés
   à Rika comme des notes, pas des consignes, et une note ne peut plus
-  sortir de ce cadre. Rika ne note plus de règle qui s'appliquerait à
+  sortir de ce cadre, même avec une balise non fermée ou des chevrons
+  pleine largeur. Rika ne note plus de règle qui s'appliquerait à
   tout le monde (façon d'écrire, sujet à éviter), même présentée comme
   votée ou venant d'un administrateur ; une préférence personnelle
   (« veut qu'on l'appelle Majesté ») se note toujours dans la fiche.

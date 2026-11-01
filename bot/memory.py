@@ -28,8 +28,11 @@ NICKNAMES_LINE = re.compile(r"^(?:[-*•]\s*)?\**\s*surnoms?\s*\**\s*:\s*\**\s*(
 MAX_NICKNAMES = 5
 MAX_NICKNAME_LENGTH = 32
 # Balises qui entourent les notes dans le prompt système. Retirées du contenu des notes : une note
-# ne peut pas fermer la balise pour écrire hors des notes.
-NOTE_TAGS = re.compile(r"<\s*/?\s*(liste_des_membres|fichier_general)\b[^>]*>", re.IGNORECASE)
+# ne peut pas fermer la balise pour écrire hors des notes. Chevrons et barre pleine largeur ou petits
+# (« ＜／fichier_general＞ ») et balise non fermée compris ; la fin de la balise est cherchée sur la même
+# ligne seulement, sinon seul son nom est retiré : le texte des lignes suivantes reste.
+NOTE_TAGS = re.compile(r"[<＜﹤]\s*[/／]?\s*(liste_des_membres|fichier_general)\b(?:[^>＞﹥\n]*[>＞﹥])?",
+                       re.IGNORECASE)
 # Noms plus courts ignorés pour retirer du fichier général les lignes qui citent un membre (forget) :
 # « Al » ou « Jo » retireraient des lignes sans rapport avec lui.
 MIN_CITED_NAME = 3
