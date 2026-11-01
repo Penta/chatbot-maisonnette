@@ -10,6 +10,8 @@ Corrections
   signalé dans le log dès le démarrage, et plus seulement au premier
   message. Les messages d'erreur citent CLAUDE_MODEL (et non MODEL,
   une variable qui n'existe pas).
+- TIMEZONE mal formée (« Europe/Paris/ », « ../Paris ») : message
+  d'erreur clair au démarrage, au lieu d'une trace Python.
 
 
 Version 5.10

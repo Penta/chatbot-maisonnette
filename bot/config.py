@@ -167,7 +167,7 @@ def load_settings() -> Settings:
     tz_name = _get_str("TIMEZONE", default="Europe/Paris")
     try:
         timezone = ZoneInfo(tz_name)
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):  # ValueError : nom mal formé (« Europe/Paris/ », « ../Paris »)
         raise ConfigError(f"Fuseau horaire inconnu dans TIMEZONE : {tz_name!r} (exemple valide : Europe/Paris).")
 
     thinking_raw = (_get_str("THINKING", default="off") or "off").lower()
