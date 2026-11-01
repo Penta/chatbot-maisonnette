@@ -20,8 +20,9 @@ logger = logging.getLogger("chatbot.memory")
 SERVER_FILE = "serveur.md"
 MEMBER_FILE = re.compile(r"^membres/(\d+)\.md$")
 # Ligne d'une fiche (la première, en principe) avec les surnoms du membre, repris dans la liste des
-# membres. Une puce en tête (« - Surnoms : … ») est acceptée.
-NICKNAMES_LINE = re.compile(r"^(?:[-*•]\s*)?surnoms\s*:\s*(.*)$", re.IGNORECASE)
+# membres. Une puce en tête (« - Surnoms : … »), le singulier et le gras (« **Surnom :** … »), que
+# Claude écrit volontiers, sont acceptés.
+NICKNAMES_LINE = re.compile(r"^(?:[-*•]\s*)?\**\s*surnoms?\s*\**\s*:\s*\**\s*(.*)$", re.IGNORECASE)
 # Surnoms repris dans la liste : peu nombreux et courts (comme un pseudo Discord), pour qu'une
 # ligne « Surnoms » ne puisse pas glisser un long texte dans le prompt système.
 MAX_NICKNAMES = 5
@@ -127,7 +128,8 @@ class MemoryStore:
         for line in content.splitlines():
             if match := NICKNAMES_LINE.match(line.strip()):
                 for name in re.split(r"[,;]", match.group(1)):
-                    if 0 < len(name := name.strip()) <= MAX_NICKNAME_LENGTH:
+                    # Astérisques d'un gras qui englobe toute la ligne (« **Surnoms : Bobby, B** »).
+                    if 0 < len(name := name.strip(" *")) <= MAX_NICKNAME_LENGTH:
                         names.setdefault(name.casefold(), name)
         return list(names.values())[:MAX_NICKNAMES]
 

@@ -59,6 +59,17 @@ class NicknamesTest(MemoryTestCase):
         self.write(f"membres/{MEMBER_ID}.md", "Surnoms : Bobby\nhabite à Lyon\nsurnoms : bobby ; B")
         self.assertEqual(self.store.nicknames(MEMBER_ID), ["Bobby", "B"])
 
+    async def test_singular_and_bold_recognized(self):
+        for line in ["Surnom : Bobby", "**Surnoms :** Bobby", "**Surnoms** : Bobby", "- **Surnom :** Bobby",
+                     "*Surnoms :* Bobby", "**Surnoms : Bobby**"]:
+            with self.subTest(line=line):
+                self.write(f"membres/{MEMBER_ID}.md", f"habite à Lyon\n{line}")
+                self.assertEqual(self.store.nicknames(MEMBER_ID), ["Bobby"])
+
+    async def test_other_lines_ignored(self):
+        self.write(f"membres/{MEMBER_ID}.md", "Surnommé Bobby par Alice : à éviter\nSurnoms donnés : aucun")
+        self.assertEqual(self.store.nicknames(MEMBER_ID), [])
+
     async def test_short_nickname_kept(self):
         name = "x" * MAX_NICKNAME_LENGTH
         self.write(f"membres/{MEMBER_ID}.md", f"Surnoms : {name}")

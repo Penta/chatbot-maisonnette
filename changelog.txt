@@ -73,6 +73,8 @@ Corrections
   n'est pas la première de sa fiche (ajoutée à la fin, ou fiche
   modifiée à la main), avec ou sans puce ; plusieurs lignes « Surnoms »
   sont regroupées. Avant, elles étaient ignorées sans rien dire.
+  « Surnom : … » au singulier et « **Surnoms :** … » en gras sont
+  aussi reconnus.
 - Mémoire : le chemin « memories/membres/… » (sans « / » au début) est
   accepté par l'outil, comme « /memories/membres/… ».
 - Mémoire : en désactivant la mémoire, un membre ne peut plus vider le
