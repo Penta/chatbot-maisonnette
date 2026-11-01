@@ -6,6 +6,7 @@
 **/.env
 **/.env.*
 **/*.local.txt
+**/AUDIT.md
 **/*.pem
 **/*.key
 
