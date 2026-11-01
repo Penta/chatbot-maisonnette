@@ -43,14 +43,6 @@ QUOTE_MAX_LENGTH = 500
 USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 # En passant absent ou en « Ne pas déranger », le bot prévient son salon si on y a parlé depuis moins de :
 DEPARTURE_WINDOW = timedelta(minutes=3)
-# Envoyé une seule fois à chaque membre, à son premier message, avec MEMORY=on.
-WELCOME = ("{name} peut retenir des choses sur toi au fil des conversations (tes goûts, tes projets…), "
-           "y compris ce que d'autres membres lui racontent, pour mieux te connaître. Ce qui est retenu "
-           "sert dans la conversation, mais ta fiche n'est jamais récitée aux autres ; à part toi, seuls "
-           "les administrateurs du serveur peuvent la voir et la corriger. Tape /memoire sur le serveur pour voir ce qui a été retenu, le modifier "
-           "ou désactiver la fonction.")
-# Durée d'affichage, en secondes, de ce message quand il est posté dans le salon.
-WELCOME_PUBLIC_DURATION = 60
 
 
 def author_name(user: discord.User | discord.Member) -> str:
@@ -289,7 +281,6 @@ class ChatBot(commands.Bot):
         mentioned = self.user is not None and self.user in message.mentions
         if (in_main_channel or mentioned) and self.members:
             await self.register_members(message)
-            await self.welcome(message)
 
         if in_main_channel:
             await self.handle_main_channel(message)
@@ -317,30 +308,6 @@ class ChatBot(commands.Bot):
         """Ajoute au registre les membres concernés par le message, ou met leurs noms à jour."""
         for user in await self.concerned_members(message):
             await see_user(self.members, user)
-
-    async def welcome(self, message: discord.Message) -> None:
-        """Premier message d'un membre pas encore prévenu : lui présente la mémoire et /memoire, en message
-        privé, ou dans le salon (effacé au bout d'une minute) si ses messages privés sont fermés."""
-        author = message.author
-        entry = self.members.get(author.id)
-        if author.bot or entry is None or entry["notified"] or not entry["memory"]:
-            return
-        # Marqué avant l'envoi : un deuxième message arrivé entre-temps ne le prévient pas une seconde fois.
-        await self.members.set_notified(author.id)
-        name = message.guild.me.display_name if message.guild else self.user.name
-        text = WELCOME.format(name=name)
-        try:
-            await author.send(text)
-            logger.info("Mémoire présentée à %s en message privé", author)
-            return
-        except discord.HTTPException as exc:  # messages privés fermés
-            logger.info("Message privé impossible pour %s (%s) : présentation dans le salon", author, exc)
-        try:
-            # Le nom s'affiche en mention, sans notification : le bot ne pingue jamais personne.
-            await message.channel.send(f"{author.mention} {text} (Ce message s'efface dans une minute.)",
-                                       delete_after=WELCOME_PUBLIC_DURATION)
-        except discord.HTTPException as exc:
-            logger.warning("Présentation de la mémoire impossible pour %s : %s", author, exc)
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
         """Message modifié : la mémoire, ou le message s'il attend encore sa réponse, prend le nouveau texte."""
@@ -979,10 +946,8 @@ async def memory_command(interaction: discord.Interaction, membre: discord.Membe
         await interaction.response.send_message(
             "Seuls les administrateurs peuvent voir la fiche d'un autre membre.", ephemeral=True)
         return
-    await see_user(bot.members, target)  # un membre qui n'a encore jamais écrit peut déjà désactiver la mémoire
-    if target.id == interaction.user.id:
-        await bot.members.set_notified(target.id)  # il connaît /memoire : inutile de le lui présenter
-    else:
+    await see_user(bot.members, target)  # un membre qui n'a encore jamais écrit peut déjà activer la mémoire
+    if target.id != interaction.user.id:
         # Lecture tracée, sans le contenu : un administrateur ne peut pas lire les fiches sans laisser de trace.
         logger.info("/memoire : fiche de %s ouverte par %s", target, interaction.user)
     card = MemoryCard(bot.memory, member_target(bot.memory, target, interaction.user.id),

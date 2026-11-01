@@ -19,7 +19,6 @@ def fake_bot(channel_found: bool = True) -> mock.Mock:
     bot.handle_main_channel = mock.AsyncMock()
     bot.handle_mention = mock.AsyncMock()
     bot.register_members = mock.AsyncMock()
-    bot.welcome = mock.AsyncMock()
     return bot
 
 
@@ -74,7 +73,6 @@ class MessagesTest(unittest.IsolatedAsyncioTestCase):
         bot.handle_main_channel.assert_not_awaited()
         bot.handle_mention.assert_not_awaited()
         bot.register_members.assert_not_awaited()
-        bot.welcome.assert_not_awaited()
 
     async def test_direct_message_ignored(self):
         bot = await self.receive(None, channel_id=99)

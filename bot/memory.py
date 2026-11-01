@@ -169,9 +169,9 @@ class MemoryStore:
             for discord_name in [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"]:
                 owners.setdefault(discord_name.casefold(), set()).add(member_id)
         for member_id, entry in self.members.members().items():
-            # Mémoire désactivée : Rika ne doit rien noter sur ce membre. Pas encore prévenu (membre
-            # seulement mentionné) : pas de fiche.
-            if not entry["memory"] or not entry["notified"] or member_id not in self.index():
+            # Mémoire pas activée (membre seulement mentionné, ou qui ne la veut pas) : rien n'est noté
+            # sur ce membre, même si une ancienne fiche existe encore.
+            if not entry["memory"] or member_id not in self.index():
                 continue
             name = display_name(entry)
             # Le membre écrit ses surnoms lui-même avec /memoire : « Surnoms : Alice » ferait noter dans
@@ -207,12 +207,12 @@ class MemoryStore:
         """Fiches des membres concernés par un message, jointes à ce message (vide s'il n'y en a aucune),
         en signalant celles des auteurs (author_ids). Au plus MAX_ATTACHED_NOTES, les auteurs d'abord
         puis dans l'ordre de member_ids ; les autres sont seulement nommées, avec leur chemin.
-        Les membres inconnus du registre, pas encore prévenus ou qui ont désactivé la mémoire sont ignorés."""
+        Les membres inconnus du registre ou qui n'ont pas activé la mémoire sont ignorés."""
         ids = sorted(dict.fromkeys(member_ids), key=lambda member_id: member_id not in author_ids)
         sections, skipped = [], []
         for member_id in ids:
             entry = self.members.get(member_id)
-            if entry is None or not entry["memory"] or not entry["notified"]:
+            if entry is None or not entry["memory"]:
                 continue
             path = self.member_file(member_id)
             name = with_username(display_name(entry), entry["username"])
@@ -322,15 +322,11 @@ class MemoryStore:
             return f"Trop long : {len(text)} caractères pour {limit} au plus. Rien n'a été modifié."
         path = self.root / name
         async with self._lock:
-            if text and (match := MEMBER_FILE.match(name)):
-                # Fenêtre /memoire ouverte avant la désactivation : la fiche ne peut plus qu'être effacée.
-                if not self.members.memory_enabled(match.group(1)):
-                    return "La mémoire est désactivée pour ce membre : rien n'a été enregistré."
-                # Comme pour l'outil (_check) : rien n'est noté sur un membre avant sa présentation,
-                # même par un administrateur. Une fiche existante peut toujours être effacée.
-                if not self.members.notified(match.group(1)):
-                    return ("Ce membre n'a pas encore reçu la présentation de la mémoire : rien n'a été "
-                            "enregistré. Rien ne peut être noté dans sa fiche avant son premier message.")
+            # Comme pour l'outil (_check) : rien n'est noté sur un membre qui n'a pas activé la mémoire,
+            # même par un administrateur, ni par une fenêtre ouverte avant la désactivation. Une fiche
+            # existante peut toujours être effacée.
+            if text and (match := MEMBER_FILE.match(name)) and not self.members.memory_enabled(match.group(1)):
+                return "La mémoire n'est pas activée pour ce membre : rien n'a été enregistré."
             if expected is not None and self.read(name) != expected:
                 return ("Le fichier a changé pendant ta modification (nouvelle note, ou autre modification) : "
                         "rien n'a été enregistré. Recommence avec « Modifier ».")
@@ -476,10 +472,7 @@ class MemoryStore:
         if entry is None:
             return None, "Membre inconnu : utilise un chemin de la liste des membres."
         if not entry["memory"]:
-            return None, f"{display_name(entry)} a désactivé la mémoire : ne note rien sur ce membre."
-        if not entry["notified"]:
-            return None, (f"{display_name(entry)} n'a pas de fiche : la mémoire ne lui a pas encore été "
-                          f"présentée. Ne note rien sur ce membre pour l'instant.")
+            return None, f"{display_name(entry)} n'a pas activé la mémoire : ne note rien sur ce membre."
         return self.member_limit, display_name(entry)
 
     @staticmethod

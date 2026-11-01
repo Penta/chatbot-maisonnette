@@ -12,7 +12,9 @@ from .files import write_atomic
 
 logger = logging.getLogger("chatbot.members")
 
-FILE_VERSION = 1
+# Version 2 : mémoire à activer soi-même avec /memoire (en version 1, elle l'était par défaut, après un
+# message de bienvenue : voir _migrate).
+FILE_VERSION = 2
 # Noms Discord d'un membre : nom d'utilisateur (unique), nom d'affichage, pseudo sur le serveur.
 NAME_KEYS = ("username", "global_name", "nickname")
 # Anciens pseudos gardés par membre, du plus ancien au plus récent.
@@ -21,7 +23,7 @@ MAX_FORMER_NAMES = 5
 
 class MemberRegistry:
     """Garde, pour chaque membre vu (auteur d'un message lu par le bot, ou membre mentionné), ses noms
-    actuels et ses anciens pseudos, s'il a été prévenu de la mémoire et s'il l'a désactivée.
+    actuels et ses anciens pseudos, et s'il a activé la mémoire (désactivée par défaut).
 
     Le fichier n'est réécrit que si quelque chose change : pas d'écriture à chaque message."""
 
@@ -46,14 +48,9 @@ class MemberRegistry:
         return self._data
 
     def memory_enabled(self, member_id: int | str) -> bool:
-        """La mémoire est activée par défaut, y compris pour un membre encore inconnu."""
+        """Le membre a activé la mémoire avec /memoire : sans cela, rien n'est noté sur lui."""
         entry = self.get(member_id)
-        return entry is None or entry["memory"]
-
-    def notified(self, member_id: int | str) -> bool:
-        """Le membre a reçu la présentation de la mémoire : avant, rien n'est noté sur lui."""
-        entry = self.get(member_id)
-        return entry is not None and entry["notified"]
+        return entry is not None and entry["memory"]
 
     async def see(self, member_id: int, username: str, global_name: str | None,
                   nickname: str | None = None, in_guild: bool = True) -> None:
@@ -68,7 +65,7 @@ class MemberRegistry:
         if entry is None:
             self._data[key] = {
                 **{name_key: None for name_key in NAME_KEYS}, **names,
-                "former_names": [], "notified": False, "memory": True,
+                "former_names": [], "memory": False,
                 "first_seen": datetime.now().strftime("%Y-%m-%d"),
             }
             logger.info("Nouveau membre dans le registre : %s (%s)", display_name(self._data[key]), key)
@@ -90,12 +87,6 @@ class MemberRegistry:
         entry["former_names"] = former[-MAX_FORMER_NAMES:]
         logger.info("Noms mis à jour dans le registre : %s (%s)", display_name(entry), key)
         await self._save()
-
-    async def set_notified(self, member_id: int | str) -> None:
-        """Le membre a été prévenu de la mémoire : il ne le sera plus."""
-        if (entry := self.get(member_id)) is not None and not entry["notified"]:
-            entry["notified"] = True
-            await self._save()
 
     async def set_memory(self, member_id: int | str, enabled: bool) -> bool:
         """Active ou désactive la mémoire pour ce membre. Renvoie False si le réglage n'a pas pu être
@@ -120,18 +111,42 @@ class MemberRegistry:
             raw = json.loads(self.file_path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict) or not isinstance(raw.get("members"), dict):
                 raise ValueError("« members » absent ou n'est pas un dictionnaire")
-            return {key: self._sanitize(key, value) for key, value in raw["members"].items()}
+            data = {key: self._sanitize(key, value) for key, value in raw["members"].items()}
         except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
             self.broken = str(exc)
             logger.error("Registre des membres illisible (%s) : mémoire des membres coupée jusqu'à sa "
                          "réparation. Corrige %s puis redémarre le bot ; le supprimer repartirait de zéro, "
-                         "en réactivant la mémoire de ceux qui l'avaient désactivée.", exc, self.file_path)
+                         "en désactivant la mémoire de tous ceux qui l'avaient activée.", exc, self.file_path)
             return {}
+        if raw.get("version", 1) < 2:
+            self._migrate(raw["members"], data)
+        return data
+
+    def _migrate(self, raw: dict, data: dict[str, dict]) -> None:
+        """Passage à la mémoire à activer soi-même : elle ne reste activée que pour les membres qui avaient
+        reçu le message de bienvenue, ne l'avaient pas désactivée et ont une fiche non vide (rangée à côté
+        du registre, dans membres/). Les autres l'activeront avec /memoire s'ils le souhaitent."""
+        kept = 0
+        for key, entry in data.items():
+            path = self.file_path.parent / "membres" / f"{key}.md"
+            try:
+                has_file = path.is_file() and path.stat().st_size > 0
+            except OSError:
+                has_file = False
+            entry["memory"] = entry["memory"] and raw[key].get("notified") is True and has_file
+            kept += entry["memory"]
+        logger.info("Registre des membres : la mémoire est désormais à activer avec /memoire. Gardée "
+                    "activée pour %d membre(s) qui ont une fiche, désactivée pour %d.", kept, len(data) - kept)
+        try:
+            write_atomic(self.file_path, json.dumps({"version": FILE_VERSION, "members": data},
+                                                    ensure_ascii=False, indent=2))
+        except OSError as exc:  # refait au prochain démarrage, ou à la prochaine sauvegarde réussie
+            logger.error("Impossible de sauvegarder le registre des membres : %s", exc)
 
     @staticmethod
     def _sanitize(key: str, value) -> dict:
         """Une entrée du fichier, complétée si besoin. ValueError si elle est illisible, ou si on ne sait
-        pas si la mémoire est activée : la croire activée reviendrait à noter sur qui l'a désactivée."""
+        pas si la mémoire est activée : mieux vaut que l'administrateur corrige le fichier."""
         if not isinstance(value, dict) or not isinstance(value.get("username"), str):
             raise ValueError(f"membre {key} : entrée illisible")
         if not isinstance(value.get("memory"), bool):
@@ -139,7 +154,6 @@ class MemberRegistry:
         entry = {name_key: value.get(name_key) if isinstance(value.get(name_key), str) else None for name_key in NAME_KEYS}
         former = value.get("former_names")
         entry["former_names"] = [n for n in former if isinstance(n, str)] if isinstance(former, list) else []
-        entry["notified"] = value.get("notified") is True
         entry["memory"] = value["memory"]
         entry["first_seen"] = value.get("first_seen") if isinstance(value.get("first_seen"), str) else None
         return entry

@@ -96,26 +96,76 @@ class SaveFailureTest(unittest.IsolatedAsyncioTestCase):
         return json.loads(self.path.read_text(encoding="utf-8"))["members"]["111"]["memory"]
 
     async def test_failure_reported_then_caught_up(self):
-        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")), \
-                self.assertLogs("chatbot.members", "ERROR"):
-            self.assertFalse(await self.registry.set_memory(111, False))
-        self.assertFalse(self.registry.memory_enabled(111))  # appliqué quand même
-        self.assertTrue(self.saved_memory())
-        # Même réglage redemandé : la sauvegarde est retentée.
-        self.assertTrue(await self.registry.set_memory(111, False))
+        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")),                 self.assertLogs("chatbot.members", "ERROR"):
+            self.assertFalse(await self.registry.set_memory(111, True))
+        self.assertTrue(self.registry.memory_enabled(111))  # appliqué quand même
         self.assertFalse(self.saved_memory())
+        # Même réglage redemandé : la sauvegarde est retentée.
+        self.assertTrue(await self.registry.set_memory(111, True))
+        self.assertTrue(self.saved_memory())
 
     async def test_any_later_save_catches_up(self):
-        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")), \
-                self.assertLogs("chatbot.members", "ERROR"):
-            await self.registry.set_memory(111, False)
+        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")),                 self.assertLogs("chatbot.members", "ERROR"):
+            await self.registry.set_memory(111, True)
         await self.registry.see(222, "alice", "Alice")
-        self.assertFalse(self.saved_memory())
+        self.assertTrue(self.saved_memory())
 
     async def test_unchanged_setting_not_rewritten(self):
         with mock.patch("bot.members.write_atomic") as write:
-            self.assertTrue(await self.registry.set_memory(111, True))
+            self.assertTrue(await self.registry.set_memory(111, False))
         write.assert_not_called()
+
+    async def test_disabled_by_default(self):
+        self.assertFalse(self.registry.memory_enabled(111))
+        self.assertFalse(self.registry.memory_enabled(999))  # membre inconnu
+        self.assertFalse(self.saved_memory())
+
+class OptInMigrationTest(unittest.TestCase):
+    """Registre en version 1 (mémoire activée par défaut) : elle ne reste activée que pour les membres
+    prévenus, qui ne l'avaient pas désactivée et ont une fiche."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "registre.json"
+        (self.path.parent / "membres").mkdir()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def load(self, version: int, members: dict, files: dict[str, str]) -> MemberRegistry:
+        for key, text in files.items():
+            (self.path.parent / "membres" / f"{key}.md").write_text(text, encoding="utf-8")
+        self.path.write_text(json.dumps({"version": version, "members": members}), encoding="utf-8")
+        return MemberRegistry(self.path)
+
+    def test_kept_only_with_file(self):
+        members = {
+            "1": {**ENTRY, "notified": True, "memory": True},   # prévenu, avec une fiche : gardé
+            "2": {**ENTRY, "notified": True, "memory": True},   # prévenu, sans fiche
+            "3": {**ENTRY, "notified": False, "memory": True},  # fiche écrite par un administrateur
+            "4": {**ENTRY, "notified": True, "memory": False},  # avait désactivé la mémoire
+            "5": {**ENTRY, "notified": True, "memory": True},   # fiche vide
+        }
+        with self.assertLogs("chatbot.members", "INFO") as logs:
+            registry = self.load(1, members, {"1": "habite à Lyon", "3": "habite à Rome", "4": "x", "5": ""})
+        self.assertEqual([key for key in members if registry.memory_enabled(key)], ["1"])
+        self.assertTrue(any("Gardée activée pour 1 membre(s)" in line for line in logs.output))
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["version"], 2)
+        self.assertEqual([key for key, entry in saved["members"].items() if entry["memory"]], ["1"])
+        self.assertNotIn("notified", saved["members"]["1"])
+
+    def test_version_2_untouched(self):
+        members = {"1": {**ENTRY, "memory": True}, "2": {**ENTRY, "memory": False}}
+        registry = self.load(2, members, {})
+        self.assertTrue(registry.memory_enabled("1"))  # activée par le membre, même sans fiche
+        self.assertFalse(registry.memory_enabled("2"))
+
+    def test_write_failure(self):
+        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")),                 self.assertLogs("chatbot.members", "ERROR"):
+            registry = self.load(1, {"1": {**ENTRY, "notified": True, "memory": True}}, {})
+        self.assertFalse(registry.memory_enabled("1"))  # appliqué quand même, réécrit à la prochaine sauvegarde
+        self.assertIsNone(registry.broken)
 
 
 if __name__ == "__main__":

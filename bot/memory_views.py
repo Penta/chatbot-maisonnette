@@ -62,10 +62,6 @@ class MemoryCard:
     def memory_enabled(self) -> bool:
         return self.target.member_id is None or self.store.members.memory_enabled(self.target.member_id)
 
-    @property
-    def notified(self) -> bool:
-        return self.target.member_id is None or self.store.members.notified(self.target.member_id)
-
     def about(self) -> str:
         """« sur toi », « sur Penta » ou « sur le serveur »."""
         if self.target.member_id is None:
@@ -81,19 +77,18 @@ class MemoryCard:
             title = "Ta fiche mémoire" if self.target.is_self else f"Fiche mémoire de {self.target.name}"
         content = self.store.read(self.target.file)
         if not self.memory_enabled:
-            who = "Tu as" if self.target.is_self else f"{self.target.name} a"
-            text = (f"{who} désactivé la mémoire : {self.bot_name} ne retient rien "
-                    f"{self.about()} et ne voit aucune fiche dans ses messages.")
+            if self.target.is_self:
+                text = (f"La mémoire n'est pas activée pour toi : {self.bot_name} ne retient rien sur toi. "
+                        f"Active-la pour que {self.bot_name} se souvienne de toi au fil des conversations.")
+            else:
+                text = (f"{self.target.name} n'a pas activé la mémoire : {self.bot_name} ne retient rien "
+                        f"sur ce membre.")
+            if content:  # fiche écrite avant que la mémoire soit à activer soi-même : ni lue ni complétée
+                text += (f"\n\nUne ancienne fiche ({len(content)} caractères) est gardée : elle ne sert pas "
+                         f"tant que la mémoire n'est pas activée.")
             return [discord.Embed(title=title, description=text, color=discord.Color.light_grey())]
-        if self.target.member_id is None:
-            note = ""
-        elif self.target.is_self:
-            note = ADMINS_NOTE  # le membre doit savoir que sa fiche n'est pas vue par lui seul
-        elif not self.notified:
-            note = (f"{self.target.name} n'a pas encore reçu la présentation de la mémoire : rien ne peut "
-                    f"être noté dans sa fiche avant son premier message.")
-        else:
-            note = ""
+        # Le membre doit savoir que sa fiche n'est pas vue par lui seul (voir /memoire membre:@…).
+        note = ADMINS_NOTE if self.target.member_id is not None and self.target.is_self else ""
         if not content:
             embed = discord.Embed(title=title, description=f"{self.bot_name} n'a encore rien retenu {self.about()}.",
                                   color=discord.Color.blurple())
@@ -113,17 +108,16 @@ class MemoryCard:
     def view(self) -> discord.ui.View:
         view = OwnerView(self.owner_id)
         content = self.store.read(self.target.file)
-        # Pas encore prévenu : la fiche ne peut qu'être effacée (voir MemoryStore.overwrite).
-        add_button(view, "Modifier", "✏️", discord.ButtonStyle.primary, self.edit,
-                   disabled=not self.memory_enabled or not self.notified)
+        # Mémoire pas activée : la fiche ne peut qu'être effacée (voir MemoryStore.overwrite).
+        add_button(view, "Modifier", "✏️", discord.ButtonStyle.primary, self.edit, disabled=not self.memory_enabled)
         add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
-                   discord.ButtonStyle.secondary, self.ask_erase, disabled=not content or not self.memory_enabled)
+                   discord.ButtonStyle.secondary, self.ask_erase, disabled=not content)
         # Seul le membre lui-même choisit d'activer ou non la mémoire.
         if self.target.member_id is not None and self.target.is_self:
             if self.memory_enabled:
                 add_button(view, "Désactiver la mémoire", "🚫", discord.ButtonStyle.danger, self.ask_disable)
             else:
-                add_button(view, "Réactiver la mémoire", "✅", discord.ButtonStyle.success, self.enable)
+                add_button(view, "Activer la mémoire", "✅", discord.ButtonStyle.success, self.ask_enable)
         return view
 
     async def send(self, interaction: discord.Interaction) -> None:
@@ -180,9 +174,18 @@ class MemoryCard:
         await self.refresh(interaction, error or "Mémoire désactivée : ta fiche et ce qui te citait dans le "
                                                  "fichier général ont été effacés, et ton nom retiré des sources.")
 
+    async def ask_enable(self, interaction: discord.Interaction) -> None:
+        # Seule présentation de la mémoire au membre : tout ce qu'il doit savoir avant d'accepter.
+        question = (f"Si tu actives la mémoire, {self.bot_name} retiendra des choses sur toi au fil des "
+                    f"conversations (tes goûts, tes projets…), y compris ce que d'autres membres lui racontent "
+                    f"sur toi. Ce qui est retenu sert dans la conversation, mais ta fiche n'est jamais récitée "
+                    f"aux autres ; à part toi, seuls les administrateurs du serveur peuvent la voir et la "
+                    f"corriger. Tu pourras la voir, la modifier ou désactiver la mémoire ici, avec /memoire.")
+        await confirm(interaction, self, question, self.enable)
+
     async def enable(self, interaction: discord.Interaction) -> None:
         saved = await self.store.members.set_memory(self.target.member_id, True)
-        await self.refresh(interaction, "Mémoire réactivée." if saved else NOT_SAVED.format(setting="la réactivation"))
+        await self.refresh(interaction, "Mémoire activée." if saved else NOT_SAVED.format(setting="l'activation"))
 
 
 class OwnerView(discord.ui.View):
