@@ -130,6 +130,8 @@ class ChatBot(commands.Bot):
         )
         self.settings = settings
         self.members = MemberRegistry(settings.memory_dir / "registre.json") if settings.memory else None
+        if self.members and self.members.broken:
+            self.members = None  # registre illisible : mémoire coupée comme avec MEMORY=off (voir MemberRegistry)
         self.memory = MemoryStore(settings.memory_dir, self.members, settings.memory_member_limit,
                                   settings.memory_server_limit) if self.members else None
         self.claude = ClaudeClient(settings, self.memory)
@@ -162,9 +164,10 @@ class ChatBot(commands.Bot):
             # Lecture de toutes les fiches, avant la connexion : elle ne bloque aucun message.
             await asyncio.to_thread(self.memory.index)
         s = self.settings
+        memory = "off" if not s.memory else f"on ({s.memory_dir})" if self.memory else "coupée (registre illisible)"
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
                     s.model, "on" if s.thinking else "off", s.effort or "par défaut",
-                    "on" if s.web_search else "off", f"on ({s.memory_dir})" if s.memory else "off")
+                    "on" if s.web_search else "off", memory)
         if not is_known(s.model):
             # Un nom mal écrit ne serait sinon découvert qu'au premier message (erreur 404).
             prices = ""
@@ -911,6 +914,13 @@ async def skip_command(interaction: discord.Interaction) -> None:
 
 
 MEMORY_OFF = "La mémoire des membres est désactivée sur ce bot (MEMORY=off)."
+MEMORY_BROKEN = ("La mémoire des membres est coupée pour l'instant, à cause d'une erreur du bot. "
+                 "Préviens l'administrateur du bot.")
+
+
+def memory_off(bot: ChatBot) -> str:
+    """Pourquoi /memoire est indisponible : MEMORY=off, ou registre des membres illisible."""
+    return MEMORY_BROKEN if bot.settings.memory else MEMORY_OFF
 
 
 def bot_name(interaction: discord.Interaction) -> str:
@@ -923,7 +933,7 @@ def bot_name(interaction: discord.Interaction) -> str:
 async def memory_command(interaction: discord.Interaction, membre: discord.Member | None = None) -> None:
     bot: ChatBot = interaction.client  # type: ignore[assignment]
     if bot.memory is None:
-        await interaction.response.send_message(MEMORY_OFF, ephemeral=True)
+        await interaction.response.send_message(memory_off(bot), ephemeral=True)
         return
     target = membre or interaction.user
     if target.bot:
@@ -950,6 +960,6 @@ async def server_memory_command(interaction: discord.Interaction) -> None:
         return
     bot: ChatBot = interaction.client  # type: ignore[assignment]
     if bot.memory is None:
-        await interaction.response.send_message(MEMORY_OFF, ephemeral=True)
+        await interaction.response.send_message(memory_off(bot), ephemeral=True)
         return
     await MemoryCard(bot.memory, server_target(), interaction.user.id, bot_name(interaction)).send(interaction)

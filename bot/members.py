@@ -26,6 +26,9 @@ class MemberRegistry:
 
     def __init__(self, file_path: Path):
         self.file_path = file_path
+        # Raison pour laquelle le fichier est illisible, ou None. Repartir d'un registre vide oublierait
+        # qui a désactivé la mémoire : la mémoire est alors coupée, et le fichier n'est jamais réécrit.
+        self.broken: str | None = None
         self._data: dict[str, dict] = self._load()
         self._save_lock = asyncio.Lock()
 
@@ -101,35 +104,33 @@ class MemberRegistry:
             raw = json.loads(self.file_path.read_text(encoding="utf-8"))
             if not isinstance(raw, dict) or not isinstance(raw.get("members"), dict):
                 raise ValueError("« members » absent ou n'est pas un dictionnaire")
+            return {key: self._sanitize(key, value) for key, value in raw["members"].items()}
         except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
-            self._set_aside(exc)
+            self.broken = str(exc)
+            logger.error("Registre des membres illisible (%s) : mémoire des membres coupée jusqu'à sa "
+                         "réparation. Corrige %s puis redémarre le bot ; le supprimer repartirait de zéro, "
+                         "en réactivant la mémoire de ceux qui l'avaient désactivée.", exc, self.file_path)
             return {}
-        return {key: entry for key, value in raw["members"].items() if (entry := self._sanitize(value))}
 
     @staticmethod
-    def _sanitize(value) -> dict | None:
-        """Une entrée du fichier, complétée si besoin, ou None si elle est illisible."""
+    def _sanitize(key: str, value) -> dict:
+        """Une entrée du fichier, complétée si besoin. ValueError si elle est illisible, ou si on ne sait
+        pas si la mémoire est activée : la croire activée reviendrait à noter sur qui l'a désactivée."""
         if not isinstance(value, dict) or not isinstance(value.get("username"), str):
-            return None
+            raise ValueError(f"membre {key} : entrée illisible")
+        if not isinstance(value.get("memory"), bool):
+            raise ValueError(f"membre {key} : « memory » doit valoir true ou false")
         entry = {name_key: value.get(name_key) if isinstance(value.get(name_key), str) else None for name_key in NAME_KEYS}
         former = value.get("former_names")
         entry["former_names"] = [n for n in former if isinstance(n, str)] if isinstance(former, list) else []
         entry["notified"] = value.get("notified") is True
-        entry["memory"] = value.get("memory") is not False
+        entry["memory"] = value["memory"]
         entry["first_seen"] = value.get("first_seen") if isinstance(value.get("first_seen"), str) else None
         return entry
 
-    def _set_aside(self, exc: Exception) -> None:
-        """Met de côté un fichier illisible, sous un nom daté, comme pour l'historique."""
-        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        backup = self.file_path.with_name(f"{self.file_path.name}.corrompu-{stamp}")
-        logger.error("Registre des membres illisible (%s). Copie de secours : %s", exc, backup)
-        try:
-            os.replace(self.file_path, backup)
-        except OSError as err:
-            logger.error("Copie de secours impossible : %s", err)
-
     async def _save(self) -> None:
+        if self.broken:
+            return  # le fichier illisible attend sa réparation : l'écraser perdrait les désactivations
         payload = {"version": FILE_VERSION, "members": self._data}
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         async with self._save_lock:
