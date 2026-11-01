@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -110,9 +110,9 @@ def _get_deezer_playlists() -> tuple[int, ...]:
 
 @dataclass(frozen=True)
 class Settings:
-    # Identifiants
-    discord_token: str
-    anthropic_api_key: str
+    # Identifiants (repr=False : jamais affichés si la configuration est journalisée)
+    discord_token: str = field(repr=False)
+    anthropic_api_key: str = field(repr=False)
     channel_id: int
 
     # Claude
@@ -149,7 +149,7 @@ class Settings:
     presence_weights: dict[str, int]
     presence_night: tuple[int, int] | None  # heures de début et de fin ; None = pas de nuit
     deezer_playlists: tuple[int, ...]
-    steam_api_key: str | None
+    steam_api_key: str | None = field(repr=False)
 
     # Divers
     timezone: ZoneInfo
