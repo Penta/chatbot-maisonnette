@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from bot.members import MemberRegistry, with_username
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
@@ -351,6 +352,15 @@ class ForgetTest(MemoryTestCase):
         self.assertIsNotNone(error)
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
         self.assertIsNone(await self.store.overwrite(f"membres/{MEMBER_ID}.md", "", by="bob"))
+
+    async def test_unsaved_disable_reported(self):
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")), \
+                self.assertLogs("chatbot.members", "ERROR"):
+            error = await self.store.forget(MEMBER_ID, by="bob")
+        self.assertIn("désactivation n'a pas pu être enregistrée", error)
+        self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
+        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
 
     async def test_removed_lines_not_logged(self):
         self.write(SERVER_FILE, "Bob : adore les lasagnes")

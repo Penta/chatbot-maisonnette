@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import discord
 
 from .members import MemberRegistry, display_name
-from .memory import SERVER_FILE, MemoryStore
+from .memory import NOT_SAVED, SERVER_FILE, MemoryStore
 from .text_utils import split_message
 
 logger = logging.getLogger("chatbot.memory")
@@ -144,8 +144,8 @@ class MemoryCard:
                                                  "dans le fichier général ont été effacés.")
 
     async def enable(self, interaction: discord.Interaction) -> None:
-        await self.store.members.set_memory(self.target.member_id, True)
-        await self.refresh(interaction, "Mémoire réactivée.")
+        saved = await self.store.members.set_memory(self.target.member_id, True)
+        await self.refresh(interaction, "Mémoire réactivée." if saved else NOT_SAVED.format(setting="la réactivation"))
 
 
 class OwnerView(discord.ui.View):

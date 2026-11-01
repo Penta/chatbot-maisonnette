@@ -42,6 +42,9 @@ MAX_FORGOTTEN_LINES = 3
 # Signes « = » en début de ligne, retirés du contenu des fiches jointes : une fiche ne peut pas imiter
 # l'en-tête d'une autre (« === Alice : membres/222.md, auteur du message === »).
 NOTE_HEADER = re.compile(r"^[ \t]*[=＝]+", re.MULTILINE)
+# Réglage de la mémoire appliqué mais pas enregistré dans le registre (voir MemberRegistry.set_memory).
+NOT_SAVED = ("C'est fait, mais {setting} n'a pas pu être enregistrée, à cause d'une erreur du bot : elle "
+             "serait perdue si le bot redémarrait avant qu'il puisse l'enregistrer. Préviens un administrateur.")
 # Fiches jointes au plus à un message : un message qui mentionne 90 membres n'en joint pas 90.
 MAX_ATTACHED_NOTES = 5
 
@@ -359,10 +362,13 @@ class MemoryStore:
             except OSError as exc:
                 logger.error("Mémoire : impossible d'effacer ce qui concerne %s : %s", name, exc)
                 return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
-            await self.members.set_memory(member_id, False)
+            saved = await self.members.set_memory(member_id, False)
         # Le nombre seulement : recopier les lignes retirées garderait ce que le membre veut voir effacé.
         logger.info("Mémoire : %s effacé par %s, %d ligne(s) retirée(s) de %s",
                     name, by, len(server) - len(kept), SERVER_FILE)
+        if not saved:
+            # Effacement fait, désactivation appliquée : seul son enregistrement manque.
+            return NOT_SAVED.format(setting="la désactivation")
         return None
 
     # ------------------------------------------------------------ internes

@@ -32,6 +32,9 @@ class MemberRegistry:
         self.broken: str | None = None
         self._data: dict[str, dict] = self._load()
         self._save_lock = asyncio.Lock()
+        # Dernière sauvegarde ratée (disque plein, droits) : le fichier est en retard sur _data. La
+        # suivante, quelle qu'elle soit, réécrit tout et rattrape ce retard.
+        self._unsaved = False
 
     # ------------------------------------------------------------------ accès
 
@@ -89,12 +92,18 @@ class MemberRegistry:
             entry["notified"] = True
             await self._save()
 
-    async def set_memory(self, member_id: int | str, enabled: bool) -> None:
-        """Active ou désactive la mémoire pour ce membre."""
-        if (entry := self.get(member_id)) is not None and entry["memory"] != enabled:
+    async def set_memory(self, member_id: int | str, enabled: bool) -> bool:
+        """Active ou désactive la mémoire pour ce membre. Renvoie False si le réglage n'a pas pu être
+        enregistré : il s'applique quand même, mais serait perdu à un redémarrage avant la prochaine
+        sauvegarde réussie."""
+        if (entry := self.get(member_id)) is None:
+            return True
+        if entry["memory"] != enabled:
             entry["memory"] = enabled
             logger.info("Mémoire %s pour %s (%s)", "activée" if enabled else "désactivée", display_name(entry), member_id)
-            await self._save()
+        elif not self._unsaved:
+            return True
+        return await self._save()
 
     # ------------------------------------------------------------ internes
 
@@ -130,9 +139,10 @@ class MemberRegistry:
         entry["first_seen"] = value.get("first_seen") if isinstance(value.get("first_seen"), str) else None
         return entry
 
-    async def _save(self) -> None:
+    async def _save(self) -> bool:
+        """Écrit le registre ; renvoie False s'il n'a pas pu l'être."""
         if self.broken:
-            return  # le fichier illisible attend sa réparation : l'écraser perdrait les désactivations
+            return False  # le fichier illisible attend sa réparation : l'écraser perdrait les désactivations
         payload = {"version": FILE_VERSION, "members": self._data}
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         async with self._save_lock:
@@ -140,6 +150,10 @@ class MemberRegistry:
                 await asyncio.to_thread(write_atomic, self.file_path, text)
             except OSError as exc:
                 logger.error("Impossible de sauvegarder le registre des membres : %s", exc)
+                self._unsaved = True
+                return False
+            self._unsaved = False
+            return True
 
 
 def display_name(entry: dict) -> str:

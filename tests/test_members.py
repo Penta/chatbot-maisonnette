@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from bot.members import MemberRegistry
 
@@ -77,6 +78,44 @@ class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
         registry = MemberRegistry(self.path)
         self.assertIsNone(registry.broken)
         self.assertEqual(registry.members(), {})
+
+
+class SaveFailureTest(unittest.IsolatedAsyncioTestCase):
+    """Registre impossible à écrire (disque plein, droits) : set_memory le signale."""
+
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "registre.json"
+        self.registry = MemberRegistry(self.path)
+        await self.registry.see(111, "bob", "Bob")
+
+    async def asyncTearDown(self):
+        self._tmp.cleanup()
+
+    def saved_memory(self) -> bool:
+        return json.loads(self.path.read_text(encoding="utf-8"))["members"]["111"]["memory"]
+
+    async def test_failure_reported_then_caught_up(self):
+        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")), \
+                self.assertLogs("chatbot.members", "ERROR"):
+            self.assertFalse(await self.registry.set_memory(111, False))
+        self.assertFalse(self.registry.memory_enabled(111))  # appliqué quand même
+        self.assertTrue(self.saved_memory())
+        # Même réglage redemandé : la sauvegarde est retentée.
+        self.assertTrue(await self.registry.set_memory(111, False))
+        self.assertFalse(self.saved_memory())
+
+    async def test_any_later_save_catches_up(self):
+        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")), \
+                self.assertLogs("chatbot.members", "ERROR"):
+            await self.registry.set_memory(111, False)
+        await self.registry.see(222, "alice", "Alice")
+        self.assertFalse(self.saved_memory())
+
+    async def test_unchanged_setting_not_rewritten(self):
+        with mock.patch("bot.members.write_atomic") as write:
+            self.assertTrue(await self.registry.set_memory(111, True))
+        write.assert_not_called()
 
 
 if __name__ == "__main__":
