@@ -59,16 +59,20 @@ Il te faut :
 ## Créer le bot sur Discord
 
 1. Sur https://discord.com/developers/applications, crée une application (**New Application**) et donne-lui le nom du bot.
-2. Onglet **Bot** :
+2. Onglet **Installation** : dans **Installation Contexts**, décoche **User Install** (garde **Guild Install**), et choisis **None** comme **Install Link**.
+3. Onglet **Bot** :
+   - décoche **Public Bot** : sinon n'importe qui peut inviter le bot sur son serveur (Discord le refuse tant que l'Install Link de l'étape 2 n'est pas sur **None**) ;
    - clique sur **Reset Token** et copie le token : c'est le `DISCORD_TOKEN` (à garder secret) ;
    - dans **Privileged Gateway Intents**, active **Message Content Intent**. Les intents « Presence » et « Server Members » ne servent pas.
-3. Onglet **OAuth2 > URL Generator** :
+4. Onglet **OAuth2 > URL Generator** :
    - coche les scopes **bot** et **applications.commands** (ce dernier pour les commandes comme `/reset` et `/memoire`) ;
    - dans les permissions, coche **View Channels**, **Send Messages** et **Read Message History** ;
    - ouvre l'adresse générée et invite le bot sur ton serveur.
-4. Dans Discord, active le mode développeur (**Paramètres utilisateur > Avancés > Mode développeur**), puis fais un clic droit sur le salon du bot > **Copier l'identifiant du salon** : c'est le `CHANNEL_ID`.
+5. Dans Discord, active le mode développeur (**Paramètres utilisateur > Avancés > Mode développeur**), puis fais un clic droit sur le salon du bot > **Copier l'identifiant du salon** : c'est le `CHANNEL_ID`.
 
 Le bot n'a besoin d'aucune autre permission : il n'utilise que les emojis et stickers du serveur.
+
+Le bot ne sert qu'un serveur, celui du salon `CHANNEL_ID` : ailleurs (autre serveur, messages privés), il ignore les messages et refuse les commandes, puisque sa mémoire est commune. S'il a été ajouté à un autre serveur, le log le signale au démarrage.
 
 ## Installation
 

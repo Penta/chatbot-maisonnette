@@ -117,6 +117,22 @@ class PendingMessage:
         return render_line(line) + self.extra
 
 
+class HomeTree(app_commands.CommandTree):
+    """Commandes slash acceptées seulement sur le serveur du bot (voir ChatBot.home_guild_id) : un
+    administrateur d'un autre serveur où le bot a été invité ne peut ni lire ni modifier la mémoire."""
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        bot: ChatBot = self.client  # type: ignore[assignment]
+        if interaction.guild_id is not None and interaction.guild_id == bot.home_guild_id():
+            return True
+        logger.warning("/%s refusée pour %s : serveur %s, hors du serveur du bot",
+                       (interaction.data or {}).get("name", "?"), interaction.user, interaction.guild_id)
+        if interaction.type is discord.InteractionType.application_command:
+            await interaction.response.send_message("Ce bot ne fonctionne que sur son propre serveur.",
+                                                    ephemeral=True)
+        return False
+
+
 class ChatBot(commands.Bot):
     def __init__(self, settings: Settings):
         intents = discord.Intents.default()
@@ -125,6 +141,7 @@ class ChatBot(commands.Bot):
             command_prefix=commands.when_mentioned,  # aucune commande textuelle utilisée
             intents=intents,
             help_command=None,
+            tree_cls=HomeTree,
             # Le bot ne peut jamais pinger @everyone, @here, des rôles ou des membres.
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -212,9 +229,13 @@ class ChatBot(commands.Bot):
 
         channel = self.get_channel(self.settings.channel_id)
         if channel is None:
-            logger.error("Salon %s introuvable : vérifie CHANNEL_ID et les permissions du bot.",
-                         self.settings.channel_id)
+            logger.error("Salon %s introuvable : vérifie CHANNEL_ID et les permissions du bot. "
+                         "En attendant, le bot ne répond nulle part.", self.settings.channel_id)
             return
+        if others := [guild for guild in self.guilds if guild.id != self.home_guild_id()]:
+            logger.warning("Le bot est aussi sur %d autre(s) serveur(s), où il ne répond pas : %s. Retire-le de ces "
+                           "serveurs, et décoche Public Bot dans le portail Discord (voir le README).", len(others),
+                           ", ".join(f"{guild.name} ({guild.id})" for guild in others))
         name = channel.guild.me.display_name if getattr(channel, "guild", None) else self.user.name
         logger.info("%d emoji(s) du serveur utilisable(s) dans les réponses.",
                     len(usable_emojis(getattr(channel, "guild", None))))
@@ -236,11 +257,24 @@ class ChatBot(commands.Bot):
         await self.claude.close()
         await super().close()
 
+    def home_guild_id(self) -> int | None:
+        """Le serveur du salon dédié (CHANNEL_ID), le seul où le bot répond : la mémoire n'existe qu'en
+        un exemplaire. None tant que le salon est introuvable (avant la connexion, CHANNEL_ID faux)."""
+        guild = getattr(self.get_channel(self.settings.channel_id), "guild", None)
+        return guild.id if guild else None
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        logger.warning("Bot ajouté au serveur %s (%s), où il ne répond pas : retire-le de ce serveur, et "
+                       "décoche Public Bot dans le portail Discord (voir le README).", guild.name, guild.id)
+
     # ------------------------------------------------------------- messages
 
     async def on_message(self, message: discord.Message) -> None:
         # Ignore ses propres messages et les webhooks : évite les boucles infinies.
         if message.author == self.user or message.webhook_id is not None:
+            return
+        # Ni autre serveur ni message privé : réponses payées par le propriétaire, mémoire du serveur.
+        if message.guild is None or message.guild.id != self.home_guild_id():
             return
         if message.type not in USER_MESSAGE_TYPES:
             return  # message système
