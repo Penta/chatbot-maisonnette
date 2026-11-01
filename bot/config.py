@@ -218,7 +218,9 @@ def load_settings() -> Settings:
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY", required=True),
         channel_id=_get_int("CHANNEL_ID", required=True),
         model=model,
-        max_tokens=_get_int("MAX_TOKENS", default=1500, minimum=1),
+        # Une limite haute ne coûte que si elle est atteinte ; trop basse, elle coupe la réécriture
+        # d'un fichier de mémoire plein (voir la vérification au démarrage, dans discord_bot.py).
+        max_tokens=_get_int("MAX_TOKENS", default=4000, minimum=1),
         thinking=thinking,
         effort=effort,
         api_timeout=_get_float("API_TIMEOUT", default=60.0, minimum=1),

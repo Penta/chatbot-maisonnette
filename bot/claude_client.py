@@ -150,6 +150,8 @@ CUSTOM_STATUS_PROMPT = (
 
 # Erreur due à la configuration (clé, crédit, modèle, réglages) : seul l'administrateur peut la corriger.
 CONFIG_ERROR = "Je suis mal configuré, préviens l'administrateur du bot."
+TRUNCATED_ERROR = ("Ma réponse a été coupée avant que j'aie pu l'écrire. Si cela se répète, "
+                   "préviens l'administrateur du bot.")
 
 # Nombre maximal de relances quand l'API met la réponse en pause pendant les recherches.
 MAX_CONTINUATIONS = 3
@@ -343,8 +345,18 @@ class ClaudeClient:
 
         stop_reason = responses[-1].stop_reason
         if stop_reason == "max_tokens":
-            logger.warning("Réponse coupée par MAX_TOKENS (%s) : augmente MAX_TOKENS dans le .env "
-                           "si cela arrive souvent.", self.settings.max_tokens)
+            # Un appel d'outil coupé n'est pas exécuté : sans ce message, la note perdue passerait inaperçue.
+            cut = [block.name for block in responses[-1].content if block.type in ("tool_use", "server_tool_use")]
+            if cut:
+                logger.warning("Appel à l'outil « %s » coupé par MAX_TOKENS (%s), donc pas exécuté : augmente "
+                               "MAX_TOKENS dans le .env.", ", ".join(cut), self.settings.max_tokens)
+            else:
+                logger.warning("Réponse coupée par MAX_TOKENS (%s) : augmente MAX_TOKENS dans le .env "
+                               "si cela arrive souvent.", self.settings.max_tokens)
+            # Coupée avant son premier mot (réflexion ou appel d'outil trop long) : « […] » seul
+            # n'aurait aucun sens sur Discord ni dans l'historique.
+            if not text:
+                raise ClaudeError(TRUNCATED_ERROR)
             text += " […]"
         elif stop_reason == "pause_turn":
             logger.warning("Recherche web toujours en cours après %s relances : réponse partielle.", MAX_CONTINUATIONS)

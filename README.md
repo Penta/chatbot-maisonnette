@@ -104,7 +104,7 @@ Tous les réglages se trouvent dans le `.env`, et chacun est expliqué dans `.en
 | `CLAUDE_MODEL` | Modèle utilisé : `claude-sonnet-5-5` (recommandé), `claude-haiku-5-5` (bien moins cher) ou `claude-opus-5-5` (plus capable, plus cher) | `claude-sonnet-5-5` |
 | `THINKING` | Réflexion avant de répondre : `on` (plus réfléchi, plus lent et plus cher) ou `off` | `on` |
 | `EFFORT` | Niveau d'effort : `low`, `medium`, `high`, `xhigh` ou `max` ; vide = valeur du modèle | `medium` |
-| `MAX_TOKENS` | Longueur maximale d'une réponse (réflexion comprise), en tokens | `3000` |
+| `MAX_TOKENS` | Longueur maximale d'une réponse (réflexion et notes de mémoire comprises), en tokens ; ne coûte que si elle est atteinte. Avec la mémoire, au moins 4000 : le bot prévient au démarrage si c'est trop peu | `4000` |
 | `MAX_HISTORY_LENGTH` | Messages gardés en mémoire dans le salon dédié (jusqu'à la moitié de plus avant d'y revenir d'un coup, ce qui garde la mémoire en cache) | `10` |
 | `CONTEXT_MESSAGE_LIMIT` | Messages lus autour d'une mention | `20` |
 | `WEB_SEARCH` | Recherche web et lecture de liens (`on` ou `off`) ; prévois alors un `API_TIMEOUT` d'au moins 90 secondes | `off` |

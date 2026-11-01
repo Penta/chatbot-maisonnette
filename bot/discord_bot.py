@@ -189,6 +189,16 @@ class ChatBot(commands.Bot):
                 prices = (" S'il existe bien, renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK "
                           "pour estimer les coûts.")
             logger.warning("Modèle %s inconnu du bot : vérifie CLAUDE_MODEL dans le .env.%s", s.model, prices)
+        if self.memory:
+            # Un fichier plein se réécrit d'un seul appel d'outil, qui doit tenir dans MAX_TOKENS avec
+            # la réflexion : environ 2,5 caractères par token en français (estimation prudente),
+            # plus une marge pour la réflexion et la réponse.
+            needed = max(self.memory.member_limit, self.memory.server_limit) * 2 // 5 + 2000
+            if s.max_tokens < needed:
+                logger.warning("MAX_TOKENS (%s) est trop petit pour la mémoire des membres : la réécriture "
+                               "d'un fichier plein serait coupée et la note perdue. Mets au moins %s dans "
+                               "le .env, ou baisse MEMORY_SERVER_LIMIT et MEMORY_MEMBER_LIMIT.",
+                               s.max_tokens, needed)
         if self.presence:
             self.presence.start()
 
