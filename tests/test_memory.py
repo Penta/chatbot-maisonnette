@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from bot.members import MemberRegistry, with_username
+from bot.memory_views import MemoryCard, Target
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
@@ -362,12 +363,71 @@ class ForgetTest(MemoryTestCase):
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
 
+    async def test_name_removed_from_sources(self):
+        # Bob ne doit plus apparaître comme source dans les fiches des autres ; l'info sur eux reste.
+        await self.members.see(MEMBER_ID, "bob", "Bobby")
+        self.write("membres/222.md", "\n".join([
+            "part à Rome en mai (d'après Bob)",
+            "joue à Zelda, selon Bobby (bob)",
+            "D’après BOB : adore le chocolat",
+            "d'après Bobine : fan de couture",
+            "a battu Bob aux échecs",
+        ]))
+        self.write("membres/333.md", "habite à Lyon")
+        self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
+        self.assertEqual(self.store.read("membres/222.md"), "\n".join([
+            "part à Rome en mai (d'après un membre)",
+            "joue à Zelda, selon un membre",
+            "D’après un membre : adore le chocolat",
+            "d'après Bobine : fan de couture",
+            "a battu Bob aux échecs",
+        ]))
+        self.assertEqual(self.store.read("membres/333.md"), "habite à Lyon")
+
+    async def test_unreadable_file_does_not_block_sources(self):
+        self.write("membres/222.md", "part à Rome (d'après Bob)")
+        (self.root / "memories" / "membres" / "333.md").write_bytes("d'après Bob \xe0 Lyon".encode("latin-1"))
+        with self.assertLogs("chatbot.memory", "WARNING") as logs:
+            self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
+        self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
+        self.assertTrue(any("membres/333.md" in line and "sources" in line for line in logs.output))
+        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
+
     async def test_removed_lines_not_logged(self):
         self.write(SERVER_FILE, "Bob : adore les lasagnes")
         with self.assertLogs("chatbot.memory", "INFO") as logs:
             await self.store.forget(MEMBER_ID, by="bob")
         self.assertFalse(any("lasagnes" in line for line in logs.output))
         self.assertTrue(any("1 ligne(s) retirée(s)" in line for line in logs.output))
+
+
+class ConfirmationTextsTest(MemoryTestCase):
+    """Les questions de confirmation de /memoire ne promettent pas plus que ce qui est effacé."""
+
+    async def question(self, target: Target, ask: str) -> str:
+        interaction = mock.Mock()
+        interaction.response.edit_message = mock.AsyncMock()
+        card = MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika")
+        await getattr(card, ask)(interaction)
+        return interaction.response.edit_message.call_args.kwargs["embeds"][0].description
+
+    async def test_erase_own_file(self):
+        text = await self.question(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True), "ask_erase")
+        self.assertIn("Effacer ta fiche ?", text)
+        self.assertIn("reste dans la conversation", text)
+
+    async def test_erase_other_file(self):
+        text = await self.question(Target("membres/222.md", 222, "Alice"), "ask_erase")
+        self.assertIn("la fiche de Alice", text)
+
+    async def test_erase_server_file(self):
+        text = await self.question(Target(SERVER_FILE, None), "ask_erase")
+        self.assertIn("fichier général", text)
+
+    async def test_disable(self):
+        text = await self.question(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True), "ask_disable")
+        self.assertIn("retiré des sources", text)
+        self.assertNotIn("plus rien ne sera retenu", text)
 
 
 if __name__ == "__main__":

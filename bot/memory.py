@@ -39,6 +39,9 @@ MIN_CITED_NAME = 3
 # Au-delà, forget ne retire aucune ligne du fichier général et le signale à l'administrateur : un pseudo
 # qui est un mot courant (« Soleil ») viderait le fichier de lignes sans rapport avec le membre.
 MAX_FORGOTTEN_LINES = 3
+# Mots qui introduisent la source d'une information (« d'après Toto », voir la consigne), suivis du nom
+# que forget remplace par « un membre » dans les fiches des autres.
+SOURCE_WORDS = r"\b(?:d['’]\s*après|selon)"
 # Signes « = » en début de ligne, retirés du contenu des fiches jointes : une fiche ne peut pas imiter
 # l'en-tête d'une autre (« === Alice : membres/222.md, auteur du message === »).
 NOTE_HEADER = re.compile(r"^[ \t]*[=＝]+", re.MULTILINE)
@@ -322,8 +325,9 @@ class MemoryStore:
 
     async def forget(self, member_id: int | str, by: str) -> str | None:
         """Membre qui désactive la mémoire : efface sa fiche et les lignes du fichier général qui citent
-        un de ses noms Discord, puis désactive la mémoire (by : son nom, pour les logs). Renvoie un
-        message d'erreur, ou None.
+        un de ses noms Discord, remplace ce nom par « un membre » là où il est cité comme source dans
+        les autres fiches (« d'après Bob »), puis désactive la mémoire (by : son nom, pour les logs).
+        Renvoie un message d'erreur, ou None.
 
         Les surnoms de la fiche ne comptent pas : le membre les écrit lui-même avec /memoire, sans que
         personne le voie (« Surnoms : les, est, une » viderait le fichier). Plus de MAX_FORGOTTEN_LINES
@@ -335,9 +339,12 @@ class MemoryStore:
             entry = self.members.get(member_id)
             names = [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"] if entry is not None else []
             names = sorted({n for n in names if len(n) >= MIN_CITED_NAME}, key=len, reverse=True)
+            alternatives = "|".join(map(re.escape, names))
             # Mot entier : « Bob » ne retire pas une ligne sur « Bobine ».
-            cites = (re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, names)) + r")(?!\w)", re.IGNORECASE)
-                     if names else None)
+            cites = re.compile(rf"(?<!\w)(?:{alternatives})(?!\w)", re.IGNORECASE) if names else None
+            # Nom d'utilisateur entre parenthèses compris, comme Claude voit les auteurs (« Bob (bob) »).
+            sources = re.compile(rf"({SOURCE_WORDS}\s+)(?:{alternatives})(?!\w)(?:\s*\((?:{alternatives})\))?",
+                                 re.IGNORECASE) if names else None
             try:
                 server = self._read_for_update(SERVER_FILE).splitlines()
             except (OSError, UnicodeDecodeError) as exc:
@@ -359,13 +366,21 @@ class MemoryStore:
                         await asyncio.to_thread(self._write_atomic, self.root / SERVER_FILE, "\n".join(kept))
                     else:
                         (self.root / SERVER_FILE).unlink(missing_ok=True)
+                # Dans un thread : toutes les fiches sont relues, ce qui bloquerait le bot sur un grand serveur.
+                changed, unreadable = (await asyncio.to_thread(self._anonymize_sources, sources)
+                                       if sources else ({}, []))
             except OSError as exc:
                 logger.error("Mémoire : impossible d'effacer ce qui concerne %s : %s", name, exc)
                 return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
+            for other, text in changed.items():
+                self._indexed(other, text)
+            for other, exc in unreadable:
+                self._report(other, exc)
+                logger.warning("Mémoire : %s n'a pas pu être retiré des sources de %s, illisible.", name, other)
             saved = await self.members.set_memory(member_id, False)
         # Le nombre seulement : recopier les lignes retirées garderait ce que le membre veut voir effacé.
-        logger.info("Mémoire : %s effacé par %s, %d ligne(s) retirée(s) de %s",
-                    name, by, len(server) - len(kept), SERVER_FILE)
+        logger.info("Mémoire : %s effacé par %s, %d ligne(s) retirée(s) de %s, nom retiré des sources de "
+                    "%d fiche(s)", name, by, len(server) - len(kept), SERVER_FILE, len(changed))
         if not saved:
             # Effacement fait, désactivation appliquée : seul son enregistrement manque.
             return NOT_SAVED.format(setting="la désactivation")
@@ -380,6 +395,26 @@ class MemoryStore:
             return (self.root / name).read_text(encoding="utf-8-sig").strip()
         except FileNotFoundError:
             return ""
+
+    def _anonymize_sources(self, sources: re.Pattern) -> tuple[dict[str, str], list[tuple[str, Exception]]]:
+        """Remplace par « un membre » le nom cité comme source dans les fiches (voir forget). Renvoie les
+        fiches modifiées avec leur nouveau texte, et les fiches illisibles, laissées telles quelles."""
+        changed: dict[str, str] = {}
+        unreadable: list[tuple[str, Exception]] = []
+        directory = self.root / "membres"
+        for path in sorted(directory.glob("*.md")) if directory.is_dir() else []:
+            name = f"membres/{path.name}"
+            if not MEMBER_FILE.match(name):
+                continue
+            try:
+                text = self._read_for_update(name)
+            except (OSError, UnicodeDecodeError) as exc:
+                unreadable.append((name, exc))
+                continue
+            if (new := sources.sub(r"\1un membre", text)) != text:
+                self._write_atomic(path, new)
+                changed[name] = new
+        return changed, unreadable
 
     def _indexed(self, name: str, text: str) -> None:
         """Met à jour l'index après l'écriture (text) ou la suppression (text vide) d'un fichier."""

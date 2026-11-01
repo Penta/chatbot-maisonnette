@@ -94,8 +94,8 @@ class MemoryCard:
         view = OwnerView(self.owner_id)
         content = self.store.read(self.target.file)
         add_button(view, "Modifier", "✏️", discord.ButtonStyle.primary, self.edit, disabled=not self.memory_enabled)
-        add_button(view, "Tout effacer", "🗑️", discord.ButtonStyle.secondary, self.ask_erase,
-                   disabled=not content or not self.memory_enabled)
+        add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
+                   discord.ButtonStyle.secondary, self.ask_erase, disabled=not content or not self.memory_enabled)
         # Seul le membre lui-même choisit d'activer ou non la mémoire.
         if self.target.member_id is not None and self.target.is_self:
             if self.memory_enabled:
@@ -125,7 +125,14 @@ class MemoryCard:
         await self.refresh(interaction, "C'est enregistré." if text.strip() else "C'est effacé.")
 
     async def ask_erase(self, interaction: discord.Interaction) -> None:
-        question = f"Effacer tout ce que {self.bot_name} a retenu {self.about()} ? C'est définitif."
+        # Seule la fiche est effacée (pas le fichier général, ni la conversation) : la question ne promet pas plus.
+        if self.target.member_id is None:
+            question = "Effacer tout le fichier général du serveur ? C'est définitif."
+        else:
+            whose = "ta fiche" if self.target.is_self else f"la fiche de {self.target.name}"
+            said = "tu as dit" if self.target.is_self else f"{self.target.name} a dit"
+            question = (f"Effacer {whose} ? C'est définitif. Seule la fiche est effacée : ce que {said} "
+                        f"récemment reste dans la conversation, et {self.bot_name} peut encore s'en souvenir.")
         await confirm(interaction, self, question, self.erase)
 
     async def erase(self, interaction: discord.Interaction) -> None:
@@ -134,14 +141,16 @@ class MemoryCard:
 
     async def ask_disable(self, interaction: discord.Interaction) -> None:
         question = (f"Si tu désactives la mémoire, ta fiche et les lignes du fichier général de "
-                    f"{self.bot_name} qui te citent seront définitivement effacées, et plus rien ne sera "
-                    f"retenu sur toi. Tu pourras la réactiver plus tard avec /memoire.")
+                    f"{self.bot_name} qui te citent seront définitivement effacées, et ton nom sera retiré "
+                    f"des sources (« d'après … ») dans les fiches des autres. {self.bot_name} ne notera plus "
+                    f"rien sur toi, mais ce que tu as dit récemment reste dans la conversation. "
+                    f"Tu pourras la réactiver plus tard avec /memoire.")
         await confirm(interaction, self, question, self.disable)
 
     async def disable(self, interaction: discord.Interaction) -> None:
         error = await self.store.forget(self.target.member_id, by=str(interaction.user))
-        await self.refresh(interaction, error or "Mémoire désactivée : ta fiche et ce qui te citait "
-                                                 "dans le fichier général ont été effacés.")
+        await self.refresh(interaction, error or "Mémoire désactivée : ta fiche et ce qui te citait dans le "
+                                                 "fichier général ont été effacés, et ton nom retiré des sources.")
 
     async def enable(self, interaction: discord.Interaction) -> None:
         saved = await self.store.members.set_memory(self.target.member_id, True)
