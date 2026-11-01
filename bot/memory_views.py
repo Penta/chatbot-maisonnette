@@ -24,6 +24,8 @@ EMBED_MAX = 4000
 EMBEDS_TOTAL_MAX = 5500
 # Durée pendant laquelle les boutons répondent (ensuite, il suffit de relancer la commande).
 VIEW_TIMEOUT = 600
+# Sous la fiche d'un membre, quand il la consulte lui-même.
+ADMINS_NOTE = "Les administrateurs du serveur peuvent aussi voir et corriger ta fiche."
 
 Callback = Callable[[discord.Interaction], Awaitable[None]]
 
@@ -78,16 +80,22 @@ class MemoryCard:
             text = (f"{who} désactivé la mémoire : {self.bot_name} ne retient rien "
                     f"{self.about()} et ne voit aucune fiche dans ses messages.")
             return [discord.Embed(title=title, description=text, color=discord.Color.light_grey())]
+        # Le membre doit savoir que sa fiche n'est pas vue par lui seul (voir /memoire membre:@…).
+        admins = ADMINS_NOTE if self.target.member_id is not None and self.target.is_self else ""
         if not content:
-            return [discord.Embed(title=title, description=f"{self.bot_name} n'a encore rien retenu {self.about()}.",
-                                  color=discord.Color.blurple())]
+            embed = discord.Embed(title=title, description=f"{self.bot_name} n'a encore rien retenu {self.about()}.",
+                                  color=discord.Color.blurple())
+            if admins:
+                embed.set_footer(text=admins)
+            return [embed]
         size = len(content)
         if size > EMBEDS_TOTAL_MAX:  # seulement si MEMORY_*_LIMIT dépasse ce que Discord affiche
             content = content[:EMBEDS_TOTAL_MAX] + "\n[…] (la suite est visible dans « Modifier »)"
         embeds = [discord.Embed(description=chunk, color=discord.Color.blurple())
                   for chunk in split_message(content, EMBED_MAX)]
         embeds[0].title = title
-        embeds[-1].set_footer(text=f"{size}/{self.store.limit(self.target.file)} caractères")
+        footer = f"{size}/{self.store.limit(self.target.file)} caractères"
+        embeds[-1].set_footer(text=f"{footer} · {admins}" if admins else footer)
         return embeds
 
     def view(self) -> discord.ui.View:

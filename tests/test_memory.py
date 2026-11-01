@@ -1,13 +1,15 @@
 """Tests de la mémoire des membres. Lancer depuis la racine du projet : python -m unittest"""
 
 import asyncio
+import logging
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from bot.members import MemberRegistry, with_username
-from bot.memory_views import MemoryCard, Target
+from bot.discord_bot import memory_command
+from bot.memory_views import ADMINS_NOTE, MemoryCard, Target
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
@@ -428,6 +430,51 @@ class ConfirmationTextsTest(MemoryTestCase):
         text = await self.question(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True), "ask_disable")
         self.assertIn("retiré des sources", text)
         self.assertNotIn("plus rien ne sera retenu", text)
+
+
+class AdminAccessTest(MemoryTestCase):
+    """Les membres savent que les administrateurs voient leur fiche, et chaque consultation est tracée."""
+
+    def footer(self, target: Target) -> str | None:
+        return MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika").embeds()[-1].footer.text
+
+    def test_own_file_mentions_admins(self):
+        own = Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True)
+        self.assertIn("administrateurs", self.footer(own))  # fiche vide
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        self.assertEqual(self.footer(own), f"13/3000 caractères · {ADMINS_NOTE}")
+
+    def test_other_files_without_note(self):
+        self.write("membres/222.md", "habite à Rome")
+        self.assertEqual(self.footer(Target("membres/222.md", 222, "Alice")), "13/3000 caractères")
+        self.assertIsNone(self.footer(Target(SERVER_FILE, None)))
+
+    async def open_file(self, user_id: int, target_id: int) -> list[str]:
+        bot = mock.Mock(memory=self.store, members=self.members)
+        interaction = mock.Mock(client=bot)
+        interaction.user = mock.Mock(id=user_id, bot=False, display_name="Admin")
+        interaction.user.name = "admin"
+        interaction.permissions.administrator = True
+        interaction.guild.me.display_name = "Rika"
+        interaction.response.send_message = mock.AsyncMock()
+        target = mock.Mock(id=target_id, bot=False, display_name="Bob", global_name="Bob")
+        target.name = "bob"
+        target.__str__ = lambda self: "bob"
+        with self.assertLogs("chatbot", "INFO") as logs:
+            logging.getLogger("chatbot").info("début")
+            await memory_command.callback(interaction, target)
+        interaction.response.send_message.assert_awaited_once()
+        return logs.output
+
+    async def test_other_file_opening_logged(self):
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        logs = await self.open_file(user_id=999, target_id=MEMBER_ID)
+        self.assertTrue(any("fiche de bob ouverte par" in line for line in logs))
+        self.assertFalse(any("Lyon" in line for line in logs))
+
+    async def test_own_file_not_logged(self):
+        logs = await self.open_file(user_id=MEMBER_ID, target_id=MEMBER_ID)
+        self.assertFalse(any("ouverte par" in line for line in logs))
 
 
 if __name__ == "__main__":

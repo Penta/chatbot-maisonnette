@@ -46,7 +46,8 @@ DEPARTURE_WINDOW = timedelta(minutes=3)
 # Envoyé une seule fois à chaque membre, à son premier message, avec MEMORY=on.
 WELCOME = ("{name} peut retenir des choses sur toi au fil des conversations (tes goûts, tes projets…), "
            "y compris ce que d'autres membres lui racontent, pour mieux te connaître. Ce qui est retenu "
-           "sert dans la conversation, mais ta fiche n'est jamais récitée aux autres. Tape /memoire sur le serveur pour voir ce qui a été retenu, le modifier "
+           "sert dans la conversation, mais ta fiche n'est jamais récitée aux autres ; à part toi, seuls "
+           "les administrateurs du serveur peuvent la voir et la corriger. Tape /memoire sur le serveur pour voir ce qui a été retenu, le modifier "
            "ou désactiver la fonction.")
 # Durée d'affichage, en secondes, de ce message quand il est posté dans le salon.
 WELCOME_PUBLIC_DURATION = 60
@@ -981,6 +982,9 @@ async def memory_command(interaction: discord.Interaction, membre: discord.Membe
     await see_user(bot.members, target)  # un membre qui n'a encore jamais écrit peut déjà désactiver la mémoire
     if target.id == interaction.user.id:
         await bot.members.set_notified(target.id)  # il connaît /memoire : inutile de le lui présenter
+    else:
+        # Lecture tracée, sans le contenu : un administrateur ne peut pas lire les fiches sans laisser de trace.
+        logger.info("/memoire : fiche de %s ouverte par %s", target, interaction.user)
     card = MemoryCard(bot.memory, member_target(bot.memory, target, interaction.user.id),
                       interaction.user.id, bot_name(interaction))
     await card.send(interaction)

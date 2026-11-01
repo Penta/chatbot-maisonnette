@@ -14,7 +14,9 @@ class PromptsTest(unittest.TestCase):
         self.assertIn("ne récite jamais la fiche", note)
 
     def test_welcome_formats(self):
-        self.assertIn("jamais récitée aux autres", WELCOME.format(name="Rika"))
+        text = WELCOME.format(name="Rika")
+        self.assertIn("jamais récitée aux autres", text)
+        self.assertIn("administrateurs du serveur peuvent la voir", text)
 
 
 if __name__ == "__main__":
