@@ -162,15 +162,25 @@ class MemoryStore:
         ce qui est noté. Tout changement de ce texte (fiche créée, pseudo, fichier général) fait
         réécrire en cache tout le prompt, historique compris : voir ClaudeClient.ask."""
         lines = []
+        # Noms Discord, anciens compris, de tous les membres du registre (fiche ou non), avec leurs
+        # propriétaires : un surnom qui est le nom d'un autre est ignoré (voir plus bas).
+        owners: dict[str, set[str]] = {}
+        for member_id, entry in self.members.members().items():
+            for discord_name in [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"]:
+                owners.setdefault(discord_name.casefold(), set()).add(member_id)
         for member_id, entry in self.members.members().items():
             # Mémoire désactivée : Rika ne doit rien noter sur ce membre. Pas encore prévenu (membre
             # seulement mentionné) : pas de fiche.
             if not entry["memory"] or not entry["notified"] or member_id not in self.index():
                 continue
             name = display_name(entry)
+            # Le membre écrit ses surnoms lui-même avec /memoire : « Surnoms : Alice » ferait noter dans
+            # sa fiche ce qu'on dit d'Alice. Un surnom égal au surnom d'un autre reste : l'ignorer
+            # permettrait de faire disparaître celui de l'autre ; Claude voit alors les deux.
+            nicknames = [n for n in self.index()[member_id] if not owners.get(n.casefold(), set()) - {member_id}]
             # Sans doublon, majuscules comprises (« penta » et « Penta » : un seul nom).
             others: dict[str, str] = {name.casefold(): name}
-            for other in [entry[key] for key in NAME_KEYS] + self.index()[member_id]:
+            for other in [entry[key] for key in NAME_KEYS] + nicknames:
                 if other:
                     others.setdefault(other.casefold(), other)
             others = list(others.values())[1:]

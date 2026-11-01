@@ -79,6 +79,26 @@ class NicknamesTest(MemoryTestCase):
         self.write(f"membres/{MEMBER_ID}.md", f"Surnoms : {name}")
         self.assertEqual(self.store.nicknames(MEMBER_ID), [name])
 
+    def member_line(self, member_id: int) -> str:
+        return next(line for line in self.store.system_context().splitlines() if f"membres/{member_id}.md" in line)
+
+    async def test_other_member_name_ignored(self):
+        # Scénario de l'audit : Bob s'attribue le nom d'Alice, qui n'a pas encore de fiche.
+        await self.members.see(222, "alice", "Alice")
+        await self.members.see(333, "carl", "Carl", nickname="Carlito")
+        await self.members.see(333, "carl", "Carl", nickname="Charly")  # Carlito devient un ancien pseudo
+        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : ALICE, Toto, alice, carlito, Bob")
+        self.assertEqual(self.member_line(MEMBER_ID), f"- Bob (aussi : Toto) → membres/{MEMBER_ID}.md")
+
+    async def test_nickname_of_another_kept(self):
+        # Un surnom écrit dans deux fiches reste dans les deux : Claude voit l'ambiguïté.
+        await self.members.see(222, "alice", "Alice")
+        await self.members.set_notified(222)
+        self.write("membres/222.md", "Surnoms : Lili")
+        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : Lili")
+        self.assertIn("Lili", self.member_line(222))
+        self.assertIn("Lili", self.member_line(MEMBER_ID))
+
 
 class SystemContextTest(MemoryTestCase):
     async def test_server_file_inside_tags(self):
