@@ -161,6 +161,14 @@ Corrections
   MEMORY_SERVER_LIMIT, et le log signale un appel d'outil coupé.
 - Une réponse coupée avant son premier mot n'envoie plus « […] » seul
   sur Discord (ni dans l'historique), mais un message d'explication.
+- Mémoire : ce qu'un membre retire de sa fiche avec /memoire n'y est
+  plus noté de nouveau au message suivant. Avant, Rika le retrouvait
+  dans la conversation et le notait encore. Une fiche ou le fichier
+  général modifié (ou effacé) avec /memoire est montré à Rika avec la
+  date de la modification, et elle ne note plus ce qui a été dit avant
+  et n'y figure pas ; ce qu'on lui redit ensuite se note normalement.
+  De même après « Désactiver la mémoire », si le membre la réactive.
+  Les dates sont gardées dans memories/modifications.json.
 
 Divers
 - Le token Discord et les clés Anthropic et Steam n'apparaissent plus

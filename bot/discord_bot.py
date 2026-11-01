@@ -23,7 +23,7 @@ from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
 from .members import MemberRegistry, with_username
-from .memory import MemoryStore
+from .memory import DATE_FORMAT, MemoryStore
 from .memory_views import MemoryCard, member_target, reply_error, see_user, server_target
 from .models import is_known
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
@@ -147,7 +147,7 @@ class ChatBot(commands.Bot):
         if self.members and self.members.broken:
             self.members = None  # registre illisible : mémoire coupée comme avec MEMORY=off (voir MemberRegistry)
         self.memory = MemoryStore(settings.memory_dir, self.members, settings.memory_member_limit,
-                                  settings.memory_server_limit) if self.members else None
+                                  settings.memory_server_limit, settings.timezone) if self.members else None
         self.claude = ClaudeClient(settings, self.memory)
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
@@ -847,7 +847,7 @@ class ChatBot(commands.Bot):
         return text or "(message sans texte)"
 
     def timestamp(self, message: discord.Message | discord.MessageSnapshot) -> str:
-        return message.created_at.astimezone(self.settings.timezone).strftime("%d/%m/%Y %H:%M")
+        return message.created_at.astimezone(self.settings.timezone).strftime(DATE_FORMAT)
 
     async def send_answer(self, message: discord.Message, answer: str, reply: bool = False) -> None:
         # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre »

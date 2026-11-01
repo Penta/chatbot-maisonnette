@@ -4,6 +4,7 @@ import asyncio
 import logging
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -13,7 +14,8 @@ from bot.members import MemberRegistry, with_username
 from bot.discord_bot import memory_command
 from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, MODAL_TIMEOUT, EditModal, MemoryCard, Target, input_sizes,
                               member_target, reply_error, split_for_inputs)
-from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
+from bot import memory
+from bot.memory import (EDITS_FILE, MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
 MEMBER_ID = 111
@@ -515,6 +517,80 @@ class EditWindowTest(MemoryTestCase):
         await window.on_submit(interaction)
         self.assertEqual(self.store.read(f"membres/{MEMBER_ID}.md"), "habite à Paris")
         interaction.response.edit_message.assert_awaited_once()
+
+
+class ManualEditDateTest(MemoryTestCase):
+    """Un fichier corrigé avec /memoire porte la date de la correction : Claude ne renote pas, d'après la
+    conversation, ce qui en a été retiré."""
+
+    FICHE = f"membres/{MEMBER_ID}.md"
+
+    def setUp(self):
+        now = mock.patch("bot.memory.datetime", wraps=datetime)
+        now.start().now.return_value = datetime(2026, 11, 1, 18, 42)
+        self.addCleanup(now.stop)
+
+    async def test_member_edit_shown_with_file(self):
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
+        self.assertNotIn("à la main", self.store.notes_for([MEMBER_ID]))
+        self.assertIsNone(await self.store.overwrite(self.FICHE, "habite à Lyon", by="bob"))
+        self.assertIn(f"{self.FICHE}, modifiée à la main le 01/11/2026 18:42 ===", self.store.notes_for([MEMBER_ID]))
+        result = await self.tool(commande="lire", fichier=self.FICHE)
+        self.assertIn("modifié à la main le 01/11/2026 18:42", result.content)
+
+    async def test_erased_file_still_dated(self):
+        self.write(self.FICHE, "joue à Zelda")
+        await self.store.overwrite(self.FICHE, "", by="bob")
+        notes = self.store.notes_for([MEMBER_ID])
+        self.assertIn("modifiée à la main le 01/11/2026 18:42", notes)
+        self.assertIn("(rien de noté pour l'instant)", notes)
+
+    async def test_unchanged_save_not_dated(self):
+        self.write(self.FICHE, "habite à Lyon")
+        await self.store.overwrite(self.FICHE, "habite à Lyon", by="bob")
+        self.assertIsNone(self.store.edited(self.FICHE))
+
+    async def test_tool_writes_not_dated(self):
+        await self.tool(fichier=self.FICHE, texte="joue à Zelda")
+        self.assertIsNone(self.store.edited(self.FICHE))
+
+    async def test_server_file_dated(self):
+        self.write(SERVER_FILE, "soirée jeux le vendredi\ntournoi en mai")
+        await self.store.overwrite(SERVER_FILE, "soirée jeux le vendredi", by="admin")
+        self.assertIn(f"({SERVER_FILE}, modifié à la main le 01/11/2026 18:42)", self.store.system_context())
+
+    async def test_forget_dated(self):
+        # Réactivée plus tard, la mémoire ne renote pas ce qui a été dit avant la désactivation.
+        self.write(self.FICHE, "joue à Zelda")
+        await self.store.forget(MEMBER_ID, by="bob")
+        await self.members.set_memory(MEMBER_ID, True)
+        self.assertIn("modifiée à la main le 01/11/2026 18:42", self.store.notes_for([MEMBER_ID]))
+
+    async def test_kept_after_restart(self):
+        await self.store.overwrite(self.FICHE, "habite à Lyon", by="bob")
+        store = MemoryStore(self.root / "memories", self.members, member_limit=3000, server_limit=4000)
+        self.assertEqual(store.edited(self.FICHE), "01/11/2026 18:42")
+
+    async def test_unreadable_dates_do_not_block(self):
+        self.write(EDITS_FILE, "{pas du json")
+        with self.assertLogs("chatbot.memory", "ERROR"):
+            store = MemoryStore(self.root / "memories", self.members, member_limit=3000, server_limit=4000)
+        self.assertIsNone(store.edited(self.FICHE))
+        self.assertIsNone(await store.overwrite(self.FICHE, "habite à Lyon", by="bob"))
+        self.assertEqual(store.edited(self.FICHE), "01/11/2026 18:42")
+
+    async def test_unsaved_date_still_known(self):
+        def write(path, text):
+            if path.name == EDITS_FILE:
+                raise OSError("disque plein")
+            real_write(path, text)
+
+        real_write = memory.write_atomic
+        with mock.patch("bot.memory.write_atomic", side_effect=write), \
+                self.assertLogs("chatbot.memory", "ERROR"):
+            await self.store.overwrite(SERVER_FILE, "soirée jeux le vendredi", by="admin")
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        self.assertEqual(self.store.edited(SERVER_FILE), "01/11/2026 18:42")
 
 
 class NotEnabledWriteTest(MemoryTestCase):
