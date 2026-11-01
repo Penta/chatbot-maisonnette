@@ -121,6 +121,10 @@ Corrections
   (pseudo, nom d'utilisateur ou ancien pseudo) comme surnom dans sa
   fiche. Ce surnom est ignoré dans la liste des membres : Rika ne note
   plus dans sa fiche ce qu'on raconte sur l'autre.
+- Mémoire : un administrateur ne peut plus écrire la fiche d'un membre
+  qui n'a pas encore reçu la présentation de la mémoire (« Modifier »
+  grisé, avec une explication) ; il peut toujours l'effacer. Comme pour
+  Rika, rien n'est noté sur un membre avant son premier message.
 
 Divers
 - Le token Discord et les clés Anthropic et Steam n'apparaissent plus

@@ -50,6 +50,11 @@ class MemberRegistry:
         entry = self.get(member_id)
         return entry is None or entry["memory"]
 
+    def notified(self, member_id: int | str) -> bool:
+        """Le membre a reçu la présentation de la mémoire : avant, rien n'est noté sur lui."""
+        entry = self.get(member_id)
+        return entry is not None and entry["notified"]
+
     async def see(self, member_id: int, username: str, global_name: str | None,
                   nickname: str | None = None, in_guild: bool = True) -> None:
         """Enregistre un membre ou met ses noms à jour ; un nom remplacé rejoint les anciens pseudos.

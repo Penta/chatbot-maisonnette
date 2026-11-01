@@ -62,6 +62,10 @@ class MemoryCard:
     def memory_enabled(self) -> bool:
         return self.target.member_id is None or self.store.members.memory_enabled(self.target.member_id)
 
+    @property
+    def notified(self) -> bool:
+        return self.target.member_id is None or self.store.members.notified(self.target.member_id)
+
     def about(self) -> str:
         """« sur toi », « sur Penta » ou « sur le serveur »."""
         if self.target.member_id is None:
@@ -81,13 +85,20 @@ class MemoryCard:
             text = (f"{who} désactivé la mémoire : {self.bot_name} ne retient rien "
                     f"{self.about()} et ne voit aucune fiche dans ses messages.")
             return [discord.Embed(title=title, description=text, color=discord.Color.light_grey())]
-        # Le membre doit savoir que sa fiche n'est pas vue par lui seul (voir /memoire membre:@…).
-        admins = ADMINS_NOTE if self.target.member_id is not None and self.target.is_self else ""
+        if self.target.member_id is None:
+            note = ""
+        elif self.target.is_self:
+            note = ADMINS_NOTE  # le membre doit savoir que sa fiche n'est pas vue par lui seul
+        elif not self.notified:
+            note = (f"{self.target.name} n'a pas encore reçu la présentation de la mémoire : rien ne peut "
+                    f"être noté dans sa fiche avant son premier message.")
+        else:
+            note = ""
         if not content:
             embed = discord.Embed(title=title, description=f"{self.bot_name} n'a encore rien retenu {self.about()}.",
                                   color=discord.Color.blurple())
-            if admins:
-                embed.set_footer(text=admins)
+            if note:
+                embed.set_footer(text=note)
             return [embed]
         size = len(content)
         if size > EMBEDS_TOTAL_MAX:  # seulement si MEMORY_*_LIMIT dépasse ce que Discord affiche
@@ -96,13 +107,15 @@ class MemoryCard:
                   for chunk in split_message(content, EMBED_MAX)]
         embeds[0].title = title
         footer = f"{size}/{self.store.limit(self.target.file)} caractères"
-        embeds[-1].set_footer(text=f"{footer} · {admins}" if admins else footer)
+        embeds[-1].set_footer(text=f"{footer} · {note}" if note else footer)
         return embeds
 
     def view(self) -> discord.ui.View:
         view = OwnerView(self.owner_id)
         content = self.store.read(self.target.file)
-        add_button(view, "Modifier", "✏️", discord.ButtonStyle.primary, self.edit, disabled=not self.memory_enabled)
+        # Pas encore prévenu : la fiche ne peut qu'être effacée (voir MemoryStore.overwrite).
+        add_button(view, "Modifier", "✏️", discord.ButtonStyle.primary, self.edit,
+                   disabled=not self.memory_enabled or not self.notified)
         add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
                    discord.ButtonStyle.secondary, self.ask_erase, disabled=not content or not self.memory_enabled)
         # Seul le membre lui-même choisit d'activer ou non la mémoire.

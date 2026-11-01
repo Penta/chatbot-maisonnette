@@ -497,6 +497,37 @@ class EditWindowTest(MemoryTestCase):
         interaction.response.edit_message.assert_awaited_once()
 
 
+class NotNotifiedWriteTest(MemoryTestCase):
+    """Un administrateur ne peut pas écrire la fiche d'un membre pas encore prévenu, seulement l'effacer."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        await self.members.see(333, "carl", "Carl")  # inscrit par /memoire membre:@Carl, jamais prévenu
+        self.card = MemoryCard(self.store, Target("membres/333.md", 333, "Carl"), owner_id=999, bot_name="Rika")
+
+    async def test_write_refused(self):
+        error = await self.store.overwrite("membres/333.md", "Carl est nul", by="admin")
+        self.assertIn("pas encore reçu la présentation", error)
+        self.assertFalse((self.root / "memories" / "membres" / "333.md").exists())
+
+    async def test_erase_allowed(self):
+        self.write("membres/333.md", "habite à Lyon")  # fiche écrite avant la correction
+        self.assertIsNone(await self.store.overwrite("membres/333.md", "", by="admin"))
+        self.assertFalse((self.root / "memories" / "membres" / "333.md").exists())
+
+    async def test_edit_button_disabled(self):
+        self.write("membres/333.md", "habite à Lyon")
+        buttons = {item.label: item.disabled for item in self.card.view().children}
+        self.assertTrue(buttons["Modifier"])
+        self.assertFalse(buttons["Effacer la fiche"])
+        self.assertIn("pas encore reçu la présentation", self.card.embeds()[-1].footer.text)
+
+    async def test_write_allowed_once_notified(self):
+        await self.members.set_notified(333)
+        self.assertIsNone(await self.store.overwrite("membres/333.md", "habite à Lyon", by="admin"))
+        self.assertFalse({item.label: item.disabled for item in self.card.view().children}["Modifier"])
+
+
 class AdminAccessTest(MemoryTestCase):
     """Les membres savent que les administrateurs voient leur fiche, et chaque consultation est tracée."""
 
@@ -509,7 +540,9 @@ class AdminAccessTest(MemoryTestCase):
         self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
         self.assertEqual(self.footer(own), f"13/3000 caractères · {ADMINS_NOTE}")
 
-    def test_other_files_without_note(self):
+    async def test_other_files_without_note(self):
+        await self.members.see(222, "alice", "Alice")
+        await self.members.set_notified(222)
         self.write("membres/222.md", "habite à Rome")
         self.assertEqual(self.footer(Target("membres/222.md", 222, "Alice")), "13/3000 caractères")
         self.assertIsNone(self.footer(Target(SERVER_FILE, None)))

@@ -322,9 +322,15 @@ class MemoryStore:
             return f"Trop long : {len(text)} caractères pour {limit} au plus. Rien n'a été modifié."
         path = self.root / name
         async with self._lock:
-            # Fenêtre /memoire ouverte avant la désactivation : la fiche ne peut plus qu'être effacée.
-            if text and (match := MEMBER_FILE.match(name)) and not self.members.memory_enabled(match.group(1)):
-                return "La mémoire est désactivée pour ce membre : rien n'a été enregistré."
+            if text and (match := MEMBER_FILE.match(name)):
+                # Fenêtre /memoire ouverte avant la désactivation : la fiche ne peut plus qu'être effacée.
+                if not self.members.memory_enabled(match.group(1)):
+                    return "La mémoire est désactivée pour ce membre : rien n'a été enregistré."
+                # Comme pour l'outil (_check) : rien n'est noté sur un membre avant sa présentation,
+                # même par un administrateur. Une fiche existante peut toujours être effacée.
+                if not self.members.notified(match.group(1)):
+                    return ("Ce membre n'a pas encore reçu la présentation de la mémoire : rien n'a été "
+                            "enregistré. Rien ne peut être noté dans sa fiche avant son premier message.")
             if expected is not None and self.read(name) != expected:
                 return ("Le fichier a changé pendant ta modification (nouvelle note, ou autre modification) : "
                         "rien n'a été enregistré. Recommence avec « Modifier ».")
