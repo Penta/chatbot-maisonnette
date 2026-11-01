@@ -169,7 +169,7 @@ Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque app
 | `memories/modifications.json` | Avec `MEMORY=on` : date de la dernière modification faite avec `/memoire` ou `/memoire-serveur` sur chaque fichier, montrée à Claude pour qu'il ne renote pas d'après la conversation ce qui a été retiré. S'il est illisible ou supprimé, ces dates sont oubliées, sans rien bloquer |
 | `bot.log` | Logs (5 Mo par fichier, 2 anciens fichiers gardés) |
 
-Le détail de chaque version est dans `changelog.txt`.
+Le détail de chaque version est dans [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Organisation du code
 
