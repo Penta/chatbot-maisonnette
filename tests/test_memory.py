@@ -463,6 +463,7 @@ class ConfirmationTextsTest(MemoryTestCase):
         self.assertIn("Activer la mémoire", [item.label for item in card.view().children])
         text = await self.question(target, "ask_enable")
         self.assertIn("ce que d'autres membres lui racontent", text)
+        self.assertIn("noté dans sa fiche avec ton nom", text)  # ses propres propos, montrés aux autres
         self.assertIn("administrateurs du serveur peuvent la voir", text)
         interaction = mock.Mock()
         interaction.response.edit_message = mock.AsyncMock()

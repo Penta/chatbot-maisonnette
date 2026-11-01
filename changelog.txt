@@ -143,6 +143,10 @@ Corrections
   commande échouait, et lui-même ne pouvait plus la lancer : sa fiche
   restait pour toujours. Un administrateur peut aussi désactiver sa
   mémoire à sa place, ce qui efface tout comme s'il l'avait fait.
+- Mémoire : avant d'activer la mémoire, chacun est prévenu que les
+  sources sont notées avec leur nom (« d'après Toto ») et visibles par
+  la personne concernée : ce qu'on raconte sur un autre membre peut
+  lui être montré dans sa fiche.
 - Mémoire : un membre ne peut plus prendre le nom Discord d'un autre
   (pseudo, nom d'utilisateur ou ancien pseudo) comme surnom dans sa
   fiche. Ce surnom est ignoré dans la liste des membres : Rika ne note

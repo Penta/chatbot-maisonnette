@@ -228,7 +228,9 @@ class MemoryCard:
         # Seule présentation de la mémoire au membre : tout ce qu'il doit savoir avant d'accepter.
         question = (f"Si tu actives la mémoire, {self.bot_name} retiendra des choses sur toi au fil des "
                     f"conversations (tes goûts, tes projets…), y compris ce que d'autres membres lui racontent "
-                    f"sur toi. Ce qui est retenu sert dans la conversation, mais ta fiche n'est jamais récitée "
+                    f"sur toi, avec leur nom comme source (« d'après … »). De même, ce que tu lui racontes sur "
+                    f"un autre membre qui a activé la mémoire peut être noté dans sa fiche avec ton nom, et il "
+                    f"la voit. Ce qui est retenu sert dans la conversation, mais ta fiche n'est jamais récitée "
                     f"aux autres ; à part toi, seuls les administrateurs du serveur peuvent la voir et la "
                     f"corriger. Tu pourras la voir, la modifier ou désactiver la mémoire ici, avec /memoire.")
         await confirm(interaction, self, question, self.enable)
