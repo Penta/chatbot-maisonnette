@@ -7,9 +7,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import discord
+
 from bot.members import MemberRegistry, with_username
 from bot.discord_bot import memory_command
-from bot.memory_views import ADMINS_NOTE, EditModal, MemoryCard, Target, input_sizes, split_for_inputs
+from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, MODAL_TIMEOUT, EditModal, MemoryCard, Target, input_sizes,
+                              reply_error, split_for_inputs)
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
@@ -624,6 +627,63 @@ class TooLongFileTest(MemoryTestCase):
         message = interaction.response.send_message.call_args
         self.assertIn("25139 caractères", message.args[0])
         self.assertEqual(len(message.kwargs["file"].fp.getvalue()), 25139)
+
+
+class ExpiryAndErrorsTest(MemoryTestCase):
+    """Boutons grisés à l'expiration, message en cas d'erreur, fenêtre « Modifier » plus longue."""
+
+    @staticmethod
+    def interaction(done: bool = False) -> mock.Mock:
+        interaction = mock.Mock()
+        interaction.response.is_done.return_value = done
+        interaction.response.send_message = mock.AsyncMock()
+        interaction.response.edit_message = mock.AsyncMock()
+        interaction.followup.send = mock.AsyncMock()
+        interaction.edit_original_response = mock.AsyncMock()
+        return interaction
+
+    def card(self) -> MemoryCard:
+        return MemoryCard(self.store, Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True),
+                          owner_id=MEMBER_ID, bot_name="Rika")
+
+    async def test_buttons_disabled_on_timeout(self):
+        card, interaction = self.card(), self.interaction()
+        await card.send(interaction)
+        view = interaction.response.send_message.call_args.kwargs["view"]
+        await view.on_timeout()
+        edit = interaction.edit_original_response.call_args.kwargs
+        self.assertIn("expiré", edit["content"])
+        self.assertTrue(all(item.disabled for item in edit["view"].children))
+
+    async def test_replaced_buttons_stopped(self):
+        # Sans cela, l'expiration des anciens boutons griserait ceux qui les ont remplacés.
+        card = self.card()
+        await card.send(self.interaction())
+        first = card._view
+        await card.refresh(self.interaction())
+        self.assertTrue(first.is_finished())
+        self.assertFalse(card._view.is_finished())
+
+    async def test_timeout_after_message_closed(self):
+        card, interaction = self.card(), self.interaction()
+        await card.send(interaction)
+        interaction.edit_original_response.side_effect = discord.NotFound(mock.Mock(status=404), "inconnu")
+        await card._view.on_timeout()  # aucune exception
+
+    async def test_button_error_reported(self):
+        card, interaction = self.card(), self.interaction()
+        await card.send(self.interaction())
+        with self.assertLogs("chatbot.memory", "ERROR"):
+            await card._view.on_error(interaction, RuntimeError("panne"), card._view.children[0])
+        self.assertEqual(interaction.response.send_message.call_args.args[0], ERROR_MESSAGE)
+
+    async def test_error_after_response_uses_followup(self):
+        interaction = self.interaction(done=True)
+        await reply_error(interaction)
+        interaction.followup.send.assert_awaited_once_with(ERROR_MESSAGE, ephemeral=True)
+
+    async def test_modal_lasts_longer(self):
+        self.assertEqual(EditModal(self.card()).timeout, MODAL_TIMEOUT)
 
 
 class AdminAccessTest(MemoryTestCase):

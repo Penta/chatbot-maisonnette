@@ -4,8 +4,10 @@ import unittest
 from unittest import mock
 
 import discord
+from discord import app_commands
 
 from bot.discord_bot import ChatBot, HomeTree
+from bot.memory_views import ERROR_MESSAGE
 
 HOME, OTHER = 1000, 2000
 CHANNEL_ID = 10
@@ -51,6 +53,15 @@ class CommandsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_refused_while_channel_unknown(self):
         self.assertFalse(await self.check(fake_interaction(HOME), channel_found=False))
+
+    async def test_command_error_reported(self):
+        # Une exception dans une commande : un message à la personne, plus le seul « Échec de l'interaction ».
+        interaction = fake_interaction(HOME)
+        interaction.response.is_done.return_value = False
+        tree = object.__new__(HomeTree)
+        with self.assertLogs("chatbot.discord", "ERROR"):
+            await tree.on_error(interaction, app_commands.AppCommandError("panne"))
+        self.assertEqual(interaction.response.send_message.call_args.args[0], ERROR_MESSAGE)
 
 
 class MessagesTest(unittest.IsolatedAsyncioTestCase):

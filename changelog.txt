@@ -132,6 +132,12 @@ Corrections
   fenêtre ne s'ouvrait pas (« Échec de l'interaction »). Au-delà de
   20000 caractères, trop pour une fenêtre Discord, son contenu est
   envoyé en fichier joint.
+- Commandes et boutons : une erreur affiche « Une erreur est survenue »
+  au lieu du seul « Échec de l'interaction » de Discord. Les boutons de
+  /memoire se grisent au bout de 10 minutes, avec un message qui invite
+  à relancer la commande, au lieu de rester affichés sans répondre. La
+  fenêtre « Modifier » peut être validée pendant une heure, au lieu de
+  10 minutes.
 - Mémoire : un membre ne peut plus prendre le nom Discord d'un autre
   (pseudo, nom d'utilisateur ou ancien pseudo) comme surnom dans sa
   fiche. Ce surnom est ignoré dans la liste des membres : Rika ne note

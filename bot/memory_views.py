@@ -25,10 +25,26 @@ EMBED_MAX = 4000
 EMBEDS_TOTAL_MAX = 5500
 # Durée pendant laquelle les boutons répondent (ensuite, il suffit de relancer la commande).
 VIEW_TIMEOUT = 600
+# Durée pendant laquelle la fenêtre « Modifier » peut être validée : Discord la laisse ouverte sans
+# limite, mais discord.py l'oublie ensuite et ignore sa validation. Assez pour réécrire le fichier général.
+MODAL_TIMEOUT = 3600
 # Sous la fiche d'un membre, quand il la consulte lui-même.
 ADMINS_NOTE = "Les administrateurs du serveur peuvent aussi voir et corriger ta fiche."
+ERROR_MESSAGE = "Une erreur est survenue. Si ça se reproduit, préviens l'administrateur du bot."
 
 Callback = Callable[[discord.Interaction], Awaitable[None]]
+
+
+async def reply_error(interaction: discord.Interaction) -> None:
+    """Prévient la personne qu'une commande, un bouton ou une fenêtre a échoué (le détail est dans le log),
+    au lieu du seul « Échec de l'interaction » de Discord."""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(ERROR_MESSAGE, ephemeral=True)
+        else:
+            await interaction.response.send_message(ERROR_MESSAGE, ephemeral=True)
+    except discord.HTTPException as exc:
+        logger.warning("Impossible de signaler l'erreur à %s : %s", interaction.user, exc)
 
 
 async def see_user(registry: MemberRegistry, user: discord.User | discord.Member) -> None:
@@ -55,6 +71,7 @@ class MemoryCard:
         self.target = target
         self.owner_id = owner_id
         self.bot_name = bot_name
+        self._view: OwnerView | None = None  # boutons affichés en ce moment
 
     # ---------------------------------------------------------------- état
 
@@ -121,11 +138,22 @@ class MemoryCard:
         return view
 
     async def send(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(embeds=self.embeds(), view=self.view(), ephemeral=True)
+        await self.show(interaction, self.view(), self.embeds(), new=True)
 
     async def refresh(self, interaction: discord.Interaction, note: str | None = None) -> None:
         """Réaffiche le fichier à jour dans le même message, avec une courte phrase au-dessus."""
-        await interaction.response.edit_message(content=note, embeds=self.embeds(), view=self.view())
+        await self.show(interaction, self.view(), self.embeds(), note)
+
+    async def show(self, interaction: discord.Interaction, view: OwnerView, embeds: list[discord.Embed],
+                   note: str | None = None, new: bool = False) -> None:
+        """Affiche ces boutons dans un nouveau message éphémère (new), ou à la place des précédents."""
+        if self._view is not None:
+            self._view.stop()  # sans quoi son expiration griserait les nouveaux boutons
+        self._view, view.interaction = view, interaction
+        if new:
+            await interaction.response.send_message(embeds=embeds, view=view, ephemeral=True)
+        else:
+            await interaction.response.edit_message(content=note, embeds=embeds, view=view)
 
     # -------------------------------------------------------------- actions
 
@@ -203,9 +231,27 @@ class OwnerView(discord.ui.View):
     def __init__(self, owner_id: int):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.owner_id = owner_id
+        self.interaction: discord.Interaction | None = None  # celle qui a affiché ces boutons (voir show)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.owner_id
+
+    async def on_timeout(self) -> None:
+        """Boutons grisés : ils ne répondent plus. Le message éphémère reste modifiable 15 minutes après
+        l'interaction qui l'a affiché, plus que VIEW_TIMEOUT."""
+        if self.interaction is None:
+            return
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.interaction.edit_original_response(
+                content="Ces boutons ont expiré : relance la commande pour continuer.", view=self)
+        except discord.HTTPException:
+            pass  # message fermé par la personne, ou trop ancien
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+        logger.exception("Erreur sur le bouton « %s »", getattr(item, "label", "?"), exc_info=error)
+        await reply_error(interaction)
 
 
 def add_button(view: discord.ui.View, label: str, emoji: str, style: discord.ButtonStyle,
@@ -221,7 +267,7 @@ async def confirm(interaction: discord.Interaction, card: MemoryCard, question: 
     add_button(view, "Confirmer", "⚠️", discord.ButtonStyle.danger, action)
     add_button(view, "Annuler", "↩️", discord.ButtonStyle.secondary, card.refresh)
     embed = discord.Embed(description=question, color=discord.Color.orange())
-    await interaction.response.edit_message(content=None, embeds=[embed], view=view)
+    await card.show(interaction, view, [embed])
 
 
 class EditModal(discord.ui.Modal):
@@ -231,7 +277,7 @@ class EditModal(discord.ui.Modal):
     def __init__(self, card: MemoryCard):
         title = "Modifier ta fiche" if card.target.is_self else (
             "Modifier le fichier général" if card.target.member_id is None else f"Fiche de {card.target.name}")
-        super().__init__(title=title[:45], timeout=VIEW_TIMEOUT)
+        super().__init__(title=title[:45], timeout=MODAL_TIMEOUT)
         self.card = card
         limit = card.store.limit(card.target.file)
         self.original = card.store.read(card.target.file)  # comparé à l'enregistrement (voir overwrite)
@@ -261,8 +307,7 @@ class EditModal(discord.ui.Modal):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         logger.exception("Erreur pendant la modification de %s", self.card.target.file, exc_info=error)
-        if not interaction.response.is_done():
-            await interaction.response.send_message("La modification a échoué, regarde les logs.", ephemeral=True)
+        await reply_error(interaction)
 
 
 def input_sizes(limit: int) -> list[int]:

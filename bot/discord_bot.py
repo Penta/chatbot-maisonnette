@@ -24,7 +24,7 @@ from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
 from .members import MemberRegistry, with_username
 from .memory import MemoryStore
-from .memory_views import MemoryCard, member_target, see_user, server_target
+from .memory_views import MemoryCard, member_target, reply_error, see_user, server_target
 from .models import is_known
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
@@ -124,6 +124,10 @@ class HomeTree(app_commands.CommandTree):
             await interaction.response.send_message("Ce bot ne fonctionne que sur son propre serveur.",
                                                     ephemeral=True)
         return False
+
+    async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        logger.error("Erreur pendant /%s", (interaction.data or {}).get("name", "?"), exc_info=error)
+        await reply_error(interaction)
 
 
 class ChatBot(commands.Bot):
