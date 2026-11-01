@@ -139,6 +139,53 @@ class SizeLimitsTest(MemoryTestCase):
         self.assertIn("membre210 : membres/210.md", notes)
 
 
+class UnreadableFileTest(MemoryTestCase):
+    """Un fichier illisible ne bloque pas les réponses, et n'est pas écrasé par une note."""
+
+    def fiche(self) -> Path:
+        return self.root / "memories" / "membres" / f"{MEMBER_ID}.md"
+
+    def write_latin1(self, name: str, text: str) -> bytes:
+        path = self.root / "memories" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(text.encode("latin-1"))
+        return path.read_bytes()
+
+    async def test_other_encoding_still_shown(self):
+        self.write_latin1(f"membres/{MEMBER_ID}.md", "Surnoms : Bébert\nhabite à Lyon")
+        with self.assertLogs("chatbot.memory", "ERROR") as logs:
+            context = self.store.system_context()
+            self.store.system_context()
+        self.assertIn("B�bert", context)
+        self.assertIn("habite � Lyon", self.store.notes_for([MEMBER_ID]))
+        self.assertEqual(len(logs.output), 1)  # signalé une seule fois
+
+    async def test_unreadable_file_not_overwritten(self):
+        before = self.write_latin1(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        result = await self.tool(expect_error=True, fichier=f"membres/{MEMBER_ID}.md", texte="aime Zelda")
+        self.assertIn("illisible", result.content)
+        self.assertEqual(self.fiche().read_bytes(), before)
+
+    async def test_directory_instead_of_file(self):
+        self.fiche().mkdir(parents=True)
+        self.assertNotIn("membres/111.md", self.store.system_context())
+        self.assertIn("(rien de noté pour l'instant)", self.store.notes_for([MEMBER_ID]))
+
+    async def test_bom_nicknames_recognized(self):
+        self.fiche().parent.mkdir(parents=True)
+        self.fiche().write_text("Surnoms : Bobby\nhabite à Lyon", encoding="utf-8-sig")
+        self.assertEqual(self.store.nicknames(MEMBER_ID), ["Bobby"])
+
+    async def test_forget_with_unreadable_server_file(self):
+        before = self.write_latin1(SERVER_FILE, "Bob a gagné le tournoi")
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        with self.assertLogs("chatbot.memory", "ERROR"):
+            self.assertIsNotNone(await self.store.forget(MEMBER_ID, by="bob"))
+        self.assertTrue(self.members.memory_enabled(MEMBER_ID))
+        self.assertTrue(self.fiche().exists())
+        self.assertEqual((self.root / "memories" / SERVER_FILE).read_bytes(), before)
+
+
 class NotNotifiedTest(MemoryTestCase):
     """Membre seulement mentionné, jamais prévenu de la mémoire : rien ne se note sur lui."""
 

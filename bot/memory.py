@@ -75,15 +75,32 @@ class MemoryStore:
         self.member_limit = member_limit
         self.server_limit = server_limit
         self._lock = asyncio.Lock()  # deux réponses en parallèle ne modifient pas un fichier en même temps
+        self._unreadable: set[str] = set()  # fichiers illisibles déjà signalés dans le log
 
     # ------------------------------------------------------------------ accès
 
     def read(self, name: str) -> str:
-        """Contenu d'un fichier de mémoire (vide s'il n'existe pas)."""
+        """Contenu d'un fichier de mémoire, pour le prompt ou l'affichage (vide s'il n'existe pas).
+
+        Un fichier illisible ne bloque pas les réponses : caractères invalides remplacés par « � »
+        (fichier enregistré dans un autre encodage), ou vide s'il ne peut pas être lu du tout (droits,
+        dossier à ce nom). Avant une modification, voir _read_for_update."""
         try:
-            return (self.root / name).read_text(encoding="utf-8").strip()
+            data = (self.root / name).read_bytes()
         except FileNotFoundError:
+            self._unreadable.discard(name)
             return ""
+        except OSError as exc:
+            self._report(name, exc)
+            return ""
+        try:
+            text = data.decode("utf-8-sig")  # -sig : BOM laissé par certains éditeurs Windows retiré
+            self._unreadable.discard(name)
+        except UnicodeDecodeError as exc:
+            self._report(name, exc)
+            text = data.decode("utf-8-sig", errors="replace")
+        # Fins de ligne Windows ramenées à « \n », comme le fait read_text.
+        return text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
     def member_file(self, member_id: int | str) -> str:
         return f"membres/{member_id}.md"
@@ -190,7 +207,12 @@ class MemoryStore:
             if limit is None:
                 logger.warning("Mémoire : %s refusé sur %r (%s)", action, command.get("fichier"), label)
                 return ToolResult(label, is_error=True)
-            before = self.read(name)
+            try:
+                before = self._read_for_update(name)
+            except (OSError, UnicodeDecodeError) as exc:
+                self._report(name, exc)
+                return ToolResult(f"{name} est illisible pour l'instant, à cause d'une erreur du bot : "
+                                  f"rien n'a été modifié.", is_error=True)
             if action == "ajouter":
                 if not text:
                     return ToolResult("Rien à ajouter : « texte » est vide.", is_error=True)
@@ -280,7 +302,12 @@ class MemoryStore:
             # Mot entier : « Bob » ne retire pas une ligne sur « Bobine ».
             cites = (re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, names)) + r")(?!\w)", re.IGNORECASE)
                      if names else None)
-            server = self.read(SERVER_FILE).splitlines()
+            try:
+                server = self._read_for_update(SERVER_FILE).splitlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                # Rien n'est effacé ni désactivé : le membre réessaiera une fois le fichier réparé.
+                self._report(SERVER_FILE, exc)
+                return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
             kept = [line for line in server if cites is None or not cites.search(line)]
             try:
                 (self.root / name).unlink(missing_ok=True)
@@ -299,6 +326,21 @@ class MemoryStore:
         return None
 
     # ------------------------------------------------------------ internes
+
+    def _read_for_update(self, name: str) -> str:
+        """Contenu d'un fichier avant de le modifier (vide s'il n'existe pas). Lève OSError ou
+        UnicodeDecodeError s'il est illisible : le réécrire effacerait ce qui n'a pas pu être lu."""
+        try:
+            return (self.root / name).read_text(encoding="utf-8-sig").strip()
+        except FileNotFoundError:
+            return ""
+
+    def _report(self, name: str, exc: Exception) -> None:
+        """Signale un fichier illisible, une seule fois tant qu'il le reste (il est relu à chaque message)."""
+        if name not in self._unreadable:
+            self._unreadable.add(name)
+            logger.error("Mémoire : %s illisible (%s). À corriger sur le disque, ou à remplacer avec "
+                         "/memoire ou /memoire-serveur.", name, exc)
 
     @staticmethod
     def _normalize(name: str) -> str:
