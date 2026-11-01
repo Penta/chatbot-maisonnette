@@ -32,6 +32,9 @@ NOTE_TAGS = re.compile(r"<\s*/?\s*(liste_des_membres|fichier_general)\b[^>]*>", 
 # Noms plus courts ignorés pour retirer du fichier général les lignes qui citent un membre (forget) :
 # « Al » ou « Jo » retireraient des lignes sans rapport avec lui.
 MIN_CITED_NAME = 3
+# Au-delà, forget ne retire aucune ligne du fichier général et le signale à l'administrateur : un pseudo
+# qui est un mot courant (« Soleil ») viderait le fichier de lignes sans rapport avec le membre.
+MAX_FORGOTTEN_LINES = 3
 # Fiches jointes au plus à un message : un message qui mentionne 90 membres n'en joint pas 90.
 MAX_ATTACHED_NOTES = 5
 
@@ -308,16 +311,18 @@ class MemoryStore:
 
     async def forget(self, member_id: int | str, by: str) -> str | None:
         """Membre qui désactive la mémoire : efface sa fiche et les lignes du fichier général qui citent
-        un de ses noms, puis désactive la mémoire (by : son nom, pour les logs). Renvoie un message
-        d'erreur, ou None.
+        un de ses noms Discord, puis désactive la mémoire (by : son nom, pour les logs). Renvoie un
+        message d'erreur, ou None.
+
+        Les surnoms de la fiche ne comptent pas : le membre les écrit lui-même avec /memoire, sans que
+        personne le voie (« Surnoms : les, est, une » viderait le fichier). Plus de MAX_FORGOTTEN_LINES
+        lignes citées : aucune n'est retirée, l'administrateur vérifie.
 
         Tout se fait sous le verrou : un appel de l'outil en attente ne peut pas recréer la fiche."""
         name = self.member_file(member_id)
         async with self._lock:
             entry = self.members.get(member_id)
-            names = list(self.nicknames(member_id))
-            if entry is not None:
-                names += [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"]
+            names = [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"] if entry is not None else []
             names = sorted({n for n in names if len(n) >= MIN_CITED_NAME}, key=len, reverse=True)
             # Mot entier : « Bob » ne retire pas une ligne sur « Bobine ».
             cites = (re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, names)) + r")(?!\w)", re.IGNORECASE)
@@ -329,6 +334,12 @@ class MemoryStore:
                 self._report(SERVER_FILE, exc)
                 return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
             kept = [line for line in server if cites is None or not cites.search(line)]
+            if len(server) - len(kept) > MAX_FORGOTTEN_LINES:
+                # Les noms trouvés seulement, pas les lignes : l'administrateur les retrouve dans le fichier.
+                found = sorted({m.group(0) for line in server for m in cites.finditer(line)}, key=str.casefold)
+                logger.warning("Mémoire : %d lignes de %s citent %s (%s) : aucune retirée, à vérifier avec "
+                               "/memoire-serveur.", len(server) - len(kept), SERVER_FILE, name, ", ".join(found))
+                kept = server
             try:
                 (self.root / name).unlink(missing_ok=True)
                 self._indexed(name, "")

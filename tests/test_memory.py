@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 
 from bot.members import MemberRegistry, with_username
-from bot.memory import MAX_ATTACHED_NOTES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, SERVER_FILE, MemoryStore
+from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
+                        SERVER_FILE, MemoryStore)
 
 MEMBER_ID = 111
 
@@ -257,12 +258,32 @@ class ForgetTest(MemoryTestCase):
             "soirée jeux le vendredi",
             "Bob : adore les lasagnes (d'après Alice)",
             "BOBBY a gagné le tournoi",
-            "le grand b ramène les chips",
             "concours de bobines en mai",
         ]))
         self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
         self.assertEqual(self.server_file(), "soirée jeux le vendredi\nconcours de bobines en mai")
+
+    async def test_file_nicknames_ignored(self):
+        # Le membre écrit lui-même ses surnoms avec /memoire : ils ne servent pas au nettoyage.
+        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : les, est, une")
+        self.write(SERVER_FILE, "soirée jeux tous les vendredis\nla blague du canard est récurrente")
+        await self.store.forget(MEMBER_ID, by="bob")
+        self.assertEqual(self.server_file(), "soirée jeux tous les vendredis\nla blague du canard est récurrente")
+
+    async def test_too_many_lines_nothing_removed(self):
+        await self.members.see(MEMBER_ID, "soleil", "Soleil")
+        lines = [f"le soleil se lève à {hour} h" for hour in range(5, 5 + MAX_FORGOTTEN_LINES + 1)]
+        self.write(SERVER_FILE, "\n".join(lines))
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        with self.assertLogs("chatbot.memory", "WARNING") as logs:
+            self.assertIsNone(await self.store.forget(MEMBER_ID, by="soleil"))
+        self.assertEqual(self.server_file(), "\n".join(lines))
+        self.assertTrue(any("aucune retirée" in line and "soleil" in line for line in logs.output))
+        self.assertFalse(any("se lève" in line for line in logs.output))
+        # Le reste de la désactivation a lieu.
+        self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
+        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
 
     async def test_short_names_ignored(self):
         await self.members.see(MEMBER_ID, "jo", None)
