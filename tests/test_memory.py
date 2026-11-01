@@ -47,6 +47,17 @@ class NicknamesTest(MemoryTestCase):
         self.assertEqual(nicknames, names[:MAX_NICKNAMES])
         self.assertNotIn("alexandrins", self.store.system_context())
 
+    async def test_line_found_anywhere(self):
+        fiche = f"membres/{MEMBER_ID}.md"
+        self.write(fiche, "habite à Lyon")
+        await self.tool(fichier=fiche, texte="- Surnoms : Bobby, le Grand B")
+        self.assertEqual(self.store.nicknames(MEMBER_ID), ["Bobby", "le Grand B"])
+        self.assertIn("Bobby", self.store.system_context())
+
+    async def test_several_lines_merged(self):
+        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : Bobby\nhabite à Lyon\nsurnoms : bobby ; B")
+        self.assertEqual(self.store.nicknames(MEMBER_ID), ["Bobby", "B"])
+
     async def test_short_nickname_kept(self):
         name = "x" * MAX_NICKNAME_LENGTH
         self.write(f"membres/{MEMBER_ID}.md", f"Surnoms : {name}")

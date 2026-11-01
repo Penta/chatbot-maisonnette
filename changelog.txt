@@ -69,6 +69,10 @@ Corrections
   réparation, au lieu de repartir d'un registre vide qui réactivait la
   mémoire de ceux qui l'avaient désactivée. Le fichier n'est plus mis
   de côté ni réécrit ; le log et /memoire signalent la panne.
+- Les surnoms d'un membre sont reconnus même si la ligne « Surnoms : … »
+  n'est pas la première de sa fiche (ajoutée à la fin, ou fiche
+  modifiée à la main), avec ou sans puce ; plusieurs lignes « Surnoms »
+  sont regroupées. Avant, elles étaient ignorées sans rien dire.
 
 Divers
 - Le token Discord et les clés Anthropic et Steam n'apparaissent plus

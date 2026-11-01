@@ -19,8 +19,9 @@ logger = logging.getLogger("chatbot.memory")
 
 SERVER_FILE = "serveur.md"
 MEMBER_FILE = re.compile(r"^membres/(\d+)\.md$")
-# Première ligne d'une fiche : les surnoms du membre, repris dans la liste des membres.
-NICKNAMES_LINE = re.compile(r"^surnoms\s*:\s*(.*)$", re.IGNORECASE)
+# Ligne d'une fiche (la première, en principe) avec les surnoms du membre, repris dans la liste des
+# membres. Une puce en tête (« - Surnoms : … ») est acceptée.
+NICKNAMES_LINE = re.compile(r"^(?:[-*•]\s*)?surnoms\s*:\s*(.*)$", re.IGNORECASE)
 # Surnoms repris dans la liste : peu nombreux et courts (comme un pseudo Discord), pour qu'une
 # ligne « Surnoms » ne puisse pas glisser un long texte dans le prompt système.
 MAX_NICKNAMES = 5
@@ -111,17 +112,21 @@ class MemoryStore:
         return f"membres/{member_id}.md"
 
     def nicknames(self, member_id: int | str) -> list[str]:
-        """Surnoms notés sur la première ligne de la fiche (« Surnoms : pnt, le Pent »), les
-        MAX_NICKNAMES premiers ; ceux de plus de MAX_NICKNAME_LENGTH caractères sont ignorés."""
+        """Surnoms notés dans la fiche (« Surnoms : pnt, le Pent »), les MAX_NICKNAMES premiers ; ceux
+        de plus de MAX_NICKNAME_LENGTH caractères sont ignorés."""
         return self._nicknames(self.read(self.member_file(member_id)))
 
     @staticmethod
     def _nicknames(content: str) -> list[str]:
-        match = NICKNAMES_LINE.match(content.partition("\n")[0].strip())
-        if match is None:
-            return []
-        names = [name.strip() for name in re.split(r"[,;]", match.group(1)) if name.strip()]
-        return [name for name in names if len(name) <= MAX_NICKNAME_LENGTH][:MAX_NICKNAMES]
+        # Toutes les lignes « Surnoms », pas seulement la première de la fiche : une ligne ajoutée à la
+        # fin avec « ajouter » ou une fiche modifiée à la main ne doit pas être ignorée sans rien dire.
+        names: dict[str, str] = {}
+        for line in content.splitlines():
+            if match := NICKNAMES_LINE.match(line.strip()):
+                for name in re.split(r"[,;]", match.group(1)):
+                    if 0 < len(name := name.strip()) <= MAX_NICKNAME_LENGTH:
+                        names.setdefault(name.casefold(), name)
+        return list(names.values())[:MAX_NICKNAMES]
 
     def index(self) -> dict[str, list[str]]:
         """Identifiants des membres dont la fiche n'est pas vide, avec leurs surnoms (voir _index)."""
