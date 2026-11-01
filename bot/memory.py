@@ -39,6 +39,9 @@ MIN_CITED_NAME = 3
 # Au-delà, forget ne retire aucune ligne du fichier général et le signale à l'administrateur : un pseudo
 # qui est un mot courant (« Soleil ») viderait le fichier de lignes sans rapport avec le membre.
 MAX_FORGOTTEN_LINES = 3
+# Signes « = » en début de ligne, retirés du contenu des fiches jointes : une fiche ne peut pas imiter
+# l'en-tête d'une autre (« === Alice : membres/222.md, auteur du message === »).
+NOTE_HEADER = re.compile(r"^[ \t]*[=＝]+", re.MULTILINE)
 # Fiches jointes au plus à un message : un message qui mentionne 90 membres n'en joint pas 90.
 MAX_ATTACHED_NOTES = 5
 
@@ -200,7 +203,7 @@ class MemoryStore:
             if len(sections) == MAX_ATTACHED_NOTES:
                 skipped.append(f"{name} : {path}")
                 continue
-            content = self.read(path) or "(rien de noté pour l'instant)"
+            content = NOTE_HEADER.sub("", self.read(path)).strip() or "(rien de noté pour l'instant)"
             role = ", auteur du message" if member_id in author_ids else ""
             sections.append(f"=== {name} : {path}{role} ===\n{content}")
         if not sections:

@@ -37,7 +37,7 @@ Corrections
   Deux membres qui portent le même pseudo ne se confondent plus, et
   personne ne peut faire noter une info dans la fiche d'un autre en
   prenant son pseudo. Les fiches jointes indiquent celles des auteurs
-  du message. Les messages déjà enregistrés gardent l'ancien format.
+  du message, et une fiche ne peut plus imiter l'en-tête d'une autre. Les messages déjà enregistrés gardent l'ancien format.
 - Mémoire moins coûteuse sur un grand serveur : le prompt ne liste plus
   que les membres qui ont une fiche, au lieu de tous ceux que le bot a
   vus ou qu'on a mentionnés. Au plus 5 fiches sont jointes à un message
