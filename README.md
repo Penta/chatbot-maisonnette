@@ -185,4 +185,6 @@ bot/images.py            préparation des images (taille, format)
 bot/pdf_files.py         vérification des PDF joints (pages, mot de passe)
 bot/text_files.py        lecture des fichiers texte joints
 bot/text_utils.py        découpage des longues réponses, réflexion affichée retirée
+bot/files.py             écriture des fichiers sur le disque, sans fichier à moitié écrit
+tests/                   tests automatisés : python -m unittest
 ```

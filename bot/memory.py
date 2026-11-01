@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .files import write_atomic
 from .members import NAME_KEYS, MemberRegistry, display_name, with_username
 
 logger = logging.getLogger("chatbot.memory")
@@ -373,8 +373,9 @@ class MemoryStore:
 
     @staticmethod
     def _normalize(name: str) -> str:
-        """Accepte aussi « /memories/membres/123.md » ou « membres/123 » pour « membres/123.md »."""
-        name = name.strip().replace("\\", "/").removeprefix("/memories/").lstrip("/")
+        """Accepte aussi « /memories/membres/123.md », « memories/membres/123.md » ou « membres/123 »
+        pour « membres/123.md »."""
+        name = name.strip().replace("\\", "/").lstrip("/").removeprefix("memories/").lstrip("/")
         if name.startswith("membres/") and not name.endswith(".md"):
             name += ".md"
         return name
@@ -400,8 +401,4 @@ class MemoryStore:
 
     @staticmethod
     def _write_atomic(path: Path, text: str) -> None:
-        # Écrit dans un fichier temporaire puis le renomme : jamais de fichier à moitié écrit.
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(text + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        write_atomic(path, text + "\n")

@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
+
+from .files import write_atomic
 
 logger = logging.getLogger("chatbot.members")
 
@@ -135,16 +136,9 @@ class MemberRegistry:
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         async with self._save_lock:
             try:
-                await asyncio.to_thread(self._write_atomic, text)
+                await asyncio.to_thread(write_atomic, self.file_path, text)
             except OSError as exc:
                 logger.error("Impossible de sauvegarder le registre des membres : %s", exc)
-
-    def _write_atomic(self, text: str) -> None:
-        # Écrit dans un fichier temporaire puis le renomme : jamais de fichier à moitié écrit.
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.file_path.with_suffix(self.file_path.suffix + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, self.file_path)
 
 
 def display_name(entry: dict) -> str:
