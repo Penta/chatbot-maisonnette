@@ -28,6 +28,9 @@ MAX_NICKNAME_LENGTH = 32
 # Balises qui entourent les notes dans le prompt système. Retirées du contenu des notes : une note
 # ne peut pas fermer la balise pour écrire hors des notes.
 NOTE_TAGS = re.compile(r"<\s*/?\s*(liste_des_membres|fichier_general)\b[^>]*>", re.IGNORECASE)
+# Noms plus courts ignorés pour retirer du fichier général les lignes qui citent un membre (forget) :
+# « Al » ou « Jo » retireraient des lignes sans rapport avec lui.
+MIN_CITED_NAME = 3
 
 MEMORY_TOOL = {
     "name": "memoire",
@@ -100,9 +103,11 @@ class MemoryStore:
             if not entry["memory"]:
                 continue  # mémoire désactivée : Rika ne doit rien noter sur ce membre
             name = display_name(entry)
+            # Pas encore prévenu de la mémoire (membre seulement mentionné) : pas de fiche.
+            notified = entry["notified"]
             # Sans doublon, majuscules comprises (« penta » et « Penta » : un seul nom).
             others: dict[str, str] = {name.casefold(): name}
-            for other in [entry[key] for key in NAME_KEYS] + self.nicknames(member_id):
+            for other in [entry[key] for key in NAME_KEYS] + (self.nicknames(member_id) if notified else []):
                 if other:
                     others.setdefault(other.casefold(), other)
             others = list(others.values())[1:]
@@ -112,7 +117,7 @@ class MemoryStore:
             if entry["former_names"]:
                 details.append("anciens pseudos : " + ", ".join(entry["former_names"]))
             suffix = f" ({' ; '.join(details)})" if details else ""
-            lines.append(f"- {name}{suffix} → {self.member_file(member_id)}")
+            lines.append(f"- {name}{suffix} → {self.member_file(member_id) if notified else 'pas de fiche'}")
         members = NOTE_TAGS.sub("", "\n".join(lines)) or "(aucun membre pour l'instant)"
         server = NOTE_TAGS.sub("", self.read(SERVER_FILE)) or "(vide pour l'instant)"
         # Écrits à la demande de n'importe quel membre : présentés comme des notes, pas des consignes.
@@ -124,11 +129,11 @@ class MemoryStore:
 
     def notes_for(self, member_ids: list[int]) -> str:
         """Fiches des membres concernés par un message, jointes à ce message (vide s'il n'y en a aucune).
-        Les membres inconnus du registre ou qui ont désactivé la mémoire sont ignorés."""
+        Les membres inconnus du registre, pas encore prévenus ou qui ont désactivé la mémoire sont ignorés."""
         sections = []
         for member_id in dict.fromkeys(member_ids):
             entry = self.members.get(member_id)
-            if entry is None or not entry["memory"]:
+            if entry is None or not entry["memory"] or not entry["notified"]:
                 continue
             path = self.member_file(member_id)
             content = self.read(path) or "(rien de noté pour l'instant)"
@@ -226,6 +231,36 @@ class MemoryStore:
         logger.info("Mémoire : %s %s par %s (%d caractères)", name, "modifié" if text else "effacé", by, len(text))
         return None
 
+    async def forget(self, member_id: int | str, by: str) -> str | None:
+        """Membre qui désactive la mémoire : efface sa fiche et les lignes du fichier général qui citent
+        un de ses noms (by : son nom, pour les logs). Renvoie un message d'erreur, ou None."""
+        entry = self.members.get(member_id)
+        name = self.member_file(member_id)
+        async with self._lock:
+            names = list(self.nicknames(member_id))
+            if entry is not None:
+                names += [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"]
+            names = sorted({n for n in names if len(n) >= MIN_CITED_NAME}, key=len, reverse=True)
+            # Mot entier : « Bob » ne retire pas une ligne sur « Bobine ».
+            cites = (re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, names)) + r")(?!\w)", re.IGNORECASE)
+                     if names else None)
+            server = self.read(SERVER_FILE).splitlines()
+            kept = [line for line in server if cites is None or not cites.search(line)]
+            try:
+                (self.root / name).unlink(missing_ok=True)
+                if len(kept) < len(server):
+                    if kept:
+                        await asyncio.to_thread(self._write_atomic, self.root / SERVER_FILE, "\n".join(kept))
+                    else:
+                        (self.root / SERVER_FILE).unlink(missing_ok=True)
+            except OSError as exc:
+                logger.error("Mémoire : impossible d'effacer ce qui concerne %s : %s", name, exc)
+                return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
+        # Le nombre seulement : recopier les lignes retirées garderait ce que le membre veut voir effacé.
+        logger.info("Mémoire : %s effacé par %s, %d ligne(s) retirée(s) de %s",
+                    name, by, len(server) - len(kept), SERVER_FILE)
+        return None
+
     # ------------------------------------------------------------ internes
 
     @staticmethod
@@ -250,6 +285,9 @@ class MemoryStore:
             return None, "Membre inconnu : utilise un chemin de la liste des membres."
         if not entry["memory"]:
             return None, f"{display_name(entry)} a désactivé la mémoire : ne note rien sur ce membre."
+        if not entry["notified"]:
+            return None, (f"{display_name(entry)} n'a pas de fiche : la mémoire ne lui a pas encore été "
+                          f"présentée. Ne note rien sur ce membre pour l'instant.")
         return self.member_limit, display_name(entry)
 
     @staticmethod

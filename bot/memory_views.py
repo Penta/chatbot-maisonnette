@@ -133,16 +133,17 @@ class MemoryCard:
         await self.refresh(interaction, error or "C'est effacé.")
 
     async def ask_disable(self, interaction: discord.Interaction) -> None:
-        question = (f"Si tu désactives la mémoire, tout ce que {self.bot_name} a retenu sur toi sera "
-                    f"définitivement effacé, et plus rien ne sera retenu sur toi. Tu pourras la réactiver "
-                    f"plus tard avec /memoire.")
+        question = (f"Si tu désactives la mémoire, ta fiche et les lignes du fichier général de "
+                    f"{self.bot_name} qui te citent seront définitivement effacées, et plus rien ne sera "
+                    f"retenu sur toi. Tu pourras la réactiver plus tard avec /memoire.")
         await confirm(interaction, self, question, self.disable)
 
     async def disable(self, interaction: discord.Interaction) -> None:
-        error = await self.store.overwrite(self.target.file, "", by=str(interaction.user))
+        error = await self.store.forget(self.target.member_id, by=str(interaction.user))
         if error is None:
             await self.store.members.set_memory(self.target.member_id, False)
-        await self.refresh(interaction, error or "Mémoire désactivée : ta fiche a été effacée.")
+        await self.refresh(interaction, error or "Mémoire désactivée : ta fiche et ce qui te citait "
+                                                 "dans le fichier général ont été effacés.")
 
     async def enable(self, interaction: discord.Interaction) -> None:
         await self.store.members.set_memory(self.target.member_id, True)
