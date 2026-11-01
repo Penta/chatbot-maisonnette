@@ -9,7 +9,7 @@ from unittest import mock
 
 from bot.members import MemberRegistry, with_username
 from bot.discord_bot import memory_command
-from bot.memory_views import ADMINS_NOTE, MemoryCard, Target
+from bot.memory_views import ADMINS_NOTE, EditModal, MemoryCard, Target
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
@@ -430,6 +430,51 @@ class ConfirmationTextsTest(MemoryTestCase):
         text = await self.question(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True), "ask_disable")
         self.assertIn("retiré des sources", text)
         self.assertNotIn("plus rien ne sera retenu", text)
+
+
+class EditWindowTest(MemoryTestCase):
+    """La fenêtre « Modifier » n'écrase pas ce qui a changé depuis son ouverture."""
+
+    def window(self, target: Target) -> EditModal:
+        return EditModal(MemoryCard(self.store, target, owner_id=999, bot_name="Rika"))
+
+    @staticmethod
+    def submit(window: EditModal, text: str) -> mock.Mock:
+        window.inputs[0]._value = text
+        for text_input in window.inputs[1:]:
+            text_input._value = ""
+        interaction = mock.Mock()
+        interaction.response.send_message = mock.AsyncMock()
+        interaction.response.edit_message = mock.AsyncMock()
+        return interaction
+
+    async def test_line_removed_by_forget_not_restored(self):
+        # Scénario de l'audit : un administrateur ouvre le fichier général, Bob désactive sa mémoire,
+        # l'administrateur ajoute une ligne et valide.
+        self.write(SERVER_FILE, "soirée jeux le vendredi\nBob adore le chocolat")
+        window = self.window(Target(SERVER_FILE, None))
+        await self.store.forget(MEMBER_ID, by="bob")
+        interaction = self.submit(window, "soirée jeux le vendredi\nBob adore le chocolat\ntournoi en mai")
+        await window.on_submit(interaction)
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        message = interaction.response.send_message.call_args
+        self.assertIn("a changé pendant ta modification", message.args[0])
+        self.assertIn(b"tournoi en mai", message.kwargs["file"].fp.getvalue())
+
+    async def test_note_written_meanwhile_kept(self):
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        window = self.window(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True))
+        await self.tool(commande="ajouter", fichier=f"membres/{MEMBER_ID}.md", texte="joue à Zelda")
+        await window.on_submit(self.submit(window, "habite à Paris"))
+        self.assertEqual(self.store.read(f"membres/{MEMBER_ID}.md"), "habite à Lyon\njoue à Zelda")
+
+    async def test_unchanged_file_saved(self):
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        window = self.window(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True))
+        interaction = self.submit(window, "habite à Paris")
+        await window.on_submit(interaction)
+        self.assertEqual(self.store.read(f"membres/{MEMBER_ID}.md"), "habite à Paris")
+        interaction.response.edit_message.assert_awaited_once()
 
 
 class AdminAccessTest(MemoryTestCase):

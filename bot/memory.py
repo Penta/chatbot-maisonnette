@@ -299,9 +299,13 @@ class MemoryStore:
     def limit(self, name: str) -> int:
         return self.server_limit if name == SERVER_FILE else self.member_limit
 
-    async def overwrite(self, name: str, text: str, by: str) -> str | None:
+    async def overwrite(self, name: str, text: str, by: str, expected: str | None = None) -> str | None:
         """Remplace tout un fichier, ou le supprime si text est vide : modification faite par un membre
-        avec /memoire (by : son nom, pour les logs). Renvoie un message d'erreur, ou None."""
+        avec /memoire (by : son nom, pour les logs). Renvoie un message d'erreur, ou None.
+
+        expected : le contenu (lu avec read) à partir duquel text a été écrit ; si le fichier a changé
+        depuis, rien n'est enregistré, pour ne pas remettre ce qui a été retiré entre-temps (forget) ni
+        perdre une note de Claude."""
         text = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
         limit = self.limit(name)
         if len(text) > limit:
@@ -311,6 +315,9 @@ class MemoryStore:
             # Fenêtre /memoire ouverte avant la désactivation : la fiche ne peut plus qu'être effacée.
             if text and (match := MEMBER_FILE.match(name)) and not self.members.memory_enabled(match.group(1)):
                 return "La mémoire est désactivée pour ce membre : rien n'a été enregistré."
+            if expected is not None and self.read(name) != expected:
+                return ("Le fichier a changé pendant ta modification (nouvelle note, ou autre modification) : "
+                        "rien n'a été enregistré. Recommence avec « Modifier ».")
             try:
                 if text:
                     await asyncio.to_thread(self._write_atomic, path, text)

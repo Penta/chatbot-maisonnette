@@ -4,6 +4,7 @@ Tout s'affiche dans des messages éphémères : seule la personne qui a lancé l
 
 from __future__ import annotations
 
+import io
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -124,11 +125,17 @@ class MemoryCard:
     async def edit(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(EditModal(self))
 
-    async def save(self, interaction: discord.Interaction, text: str) -> None:
-        """Enregistre le texte de la fenêtre « Modifier »."""
-        error = await self.store.overwrite(self.target.file, text, by=str(interaction.user))
+    async def save(self, interaction: discord.Interaction, text: str, original: str | None = None) -> None:
+        """Enregistre le texte de la fenêtre « Modifier » (original : le fichier à son ouverture)."""
+        error = await self.store.overwrite(self.target.file, text, by=str(interaction.user), expected=original)
         if error:
-            await interaction.response.send_message(error, ephemeral=True)
+            if not text.strip():
+                await interaction.response.send_message(error, ephemeral=True)
+                return
+            # Le texte saisi est renvoyé en fichier joint (trop long pour un message) : rien n'est perdu.
+            file = discord.File(io.BytesIO(text.encode("utf-8")), filename="texte_non_enregistre.txt")
+            await interaction.response.send_message(f"{error} Ton texte est joint, pour le recopier.",
+                                                    file=file, ephemeral=True)
             return
         await self.refresh(interaction, "C'est enregistré." if text.strip() else "C'est effacé.")
 
@@ -203,7 +210,8 @@ class EditModal(discord.ui.Modal):
         self.card = card
         limit = card.store.limit(card.target.file)
         count = min(MAX_INPUTS, -(-limit // INPUT_MAX))
-        parts = split_for_inputs(card.store.read(card.target.file), count)
+        self.original = card.store.read(card.target.file)  # comparé à l'enregistrement (voir overwrite)
+        parts = split_for_inputs(self.original, count)
         self.inputs = []
         for i in range(count):
             label = "Contenu" if count == 1 else f"Contenu ({i + 1}/{count})"
@@ -217,7 +225,7 @@ class EditModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         text = "\n".join(text_input.value.strip() for text_input in self.inputs if text_input.value.strip())
-        await self.card.save(interaction, text)
+        await self.card.save(interaction, text, self.original)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         logger.exception("Erreur pendant la modification de %s", self.card.target.file, exc_info=error)
