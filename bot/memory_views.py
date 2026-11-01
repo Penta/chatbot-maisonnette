@@ -61,6 +61,7 @@ class Target:
     member_id: int | None
     name: str = ""        # nom du membre
     is_self: bool = False  # fiche de la personne qui a lancé la commande
+    departed: bool = False  # membre parti du serveur : un administrateur désactive sa mémoire à sa place
 
 
 class MemoryCard:
@@ -129,11 +130,12 @@ class MemoryCard:
         add_button(view, "Modifier", "✏️", discord.ButtonStyle.primary, self.edit, disabled=not self.memory_enabled)
         add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
                    discord.ButtonStyle.secondary, self.ask_erase, disabled=not content)
-        # Seul le membre lui-même choisit d'activer ou non la mémoire.
-        if self.target.member_id is not None and self.target.is_self:
+        # Seul le membre lui-même active ou désactive la mémoire. Parti du serveur, il ne peut plus lancer
+        # /memoire : un administrateur peut alors la désactiver à sa place, pour tout effacer.
+        if self.target.member_id is not None and (self.target.is_self or self.target.departed):
             if self.memory_enabled:
                 add_button(view, "Désactiver la mémoire", "🚫", discord.ButtonStyle.danger, self.ask_disable)
-            else:
+            elif self.target.is_self:
                 add_button(view, "Activer la mémoire", "✅", discord.ButtonStyle.success, self.ask_enable)
         return view
 
@@ -199,6 +201,12 @@ class MemoryCard:
         await self.refresh(interaction, error or "C'est effacé.")
 
     async def ask_disable(self, interaction: discord.Interaction) -> None:
+        if self.target.departed:
+            question = (f"{self.target.name} a quitté le serveur. Désactiver sa mémoire efface définitivement sa "
+                        f"fiche et les lignes du fichier général de {self.bot_name} qui citent ce membre, et "
+                        f"retire son nom des sources (« d'après … ») dans les fiches des autres.")
+            await confirm(interaction, self, question, self.disable)
+            return
         question = (f"Si tu désactives la mémoire, ta fiche et les lignes du fichier général de "
                     f"{self.bot_name} qui te citent seront définitivement effacées, et ton nom sera retiré "
                     f"des sources (« d'après … ») dans les fiches des autres. {self.bot_name} ne notera plus "
@@ -208,8 +216,13 @@ class MemoryCard:
 
     async def disable(self, interaction: discord.Interaction) -> None:
         error = await self.store.forget(self.target.member_id, by=str(interaction.user))
-        await self.refresh(interaction, error or "Mémoire désactivée : ta fiche et ce qui te citait dans le "
-                                                 "fichier général ont été effacés, et ton nom retiré des sources.")
+        if self.target.departed:
+            done = (f"Mémoire désactivée pour {self.target.name} : sa fiche et ce qui citait ce membre dans le "
+                    f"fichier général ont été effacés, et son nom retiré des sources.")
+        else:
+            done = ("Mémoire désactivée : ta fiche et ce qui te citait dans le fichier général ont été effacés, "
+                    "et ton nom retiré des sources.")
+        await self.refresh(interaction, error or done)
 
     async def ask_enable(self, interaction: discord.Interaction) -> None:
         # Seule présentation de la mémoire au membre : tout ce qu'il doit savoir avant d'accepter.
@@ -337,7 +350,10 @@ def split_for_inputs(text: str, sizes: list[int]) -> list[str]:
 def member_target(store: MemoryStore, member: discord.User | discord.Member, owner_id: int) -> Target:
     entry = store.members.get(member.id)
     name = display_name(entry) if entry else member.display_name
-    return Target(store.member_file(member.id), member.id, name, is_self=member.id == owner_id)
+    # Hors du serveur, Discord donne un discord.User au lieu d'un discord.Member.
+    is_self = member.id == owner_id
+    departed = not is_self and not isinstance(member, discord.Member)
+    return Target(store.member_file(member.id), member.id, name, is_self=is_self, departed=departed)
 
 
 def server_target() -> Target:

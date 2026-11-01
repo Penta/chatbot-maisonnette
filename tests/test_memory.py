@@ -12,7 +12,7 @@ import discord
 from bot.members import MemberRegistry, with_username
 from bot.discord_bot import memory_command
 from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, MODAL_TIMEOUT, EditModal, MemoryCard, Target, input_sizes,
-                              reply_error, split_for_inputs)
+                              member_target, reply_error, split_for_inputs)
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
@@ -684,6 +684,52 @@ class ExpiryAndErrorsTest(MemoryTestCase):
 
     async def test_modal_lasts_longer(self):
         self.assertEqual(EditModal(self.card()).timeout, MODAL_TIMEOUT)
+
+
+class DepartedMemberTest(MemoryTestCase):
+    """Membre parti du serveur : il ne peut plus lancer /memoire, un administrateur efface tout à sa place."""
+
+    @staticmethod
+    def user(member_id: int, in_guild: bool) -> mock.Mock:
+        return mock.Mock(spec=discord.Member if in_guild else discord.User, id=member_id, display_name="Bob")
+
+    def card(self, in_guild: bool) -> MemoryCard:
+        target = member_target(self.store, self.user(MEMBER_ID, in_guild), owner_id=999)
+        return MemoryCard(self.store, target, owner_id=999, bot_name="Rika")
+
+    @staticmethod
+    def labels(card: MemoryCard) -> list[str]:
+        return [item.label for item in card.view().children]
+
+    def test_departed_detected(self):
+        self.assertTrue(member_target(self.store, self.user(MEMBER_ID, False), owner_id=999).departed)
+        self.assertFalse(member_target(self.store, self.user(MEMBER_ID, True), owner_id=999).departed)
+        self.assertFalse(member_target(self.store, self.user(999, True), owner_id=999).departed)
+
+    def test_admin_can_disable_only_for_departed(self):
+        self.assertIn("Désactiver la mémoire", self.labels(self.card(in_guild=False)))
+        self.assertNotIn("Désactiver la mémoire", self.labels(self.card(in_guild=True)))
+
+    async def test_admin_cannot_enable(self):
+        await self.members.set_memory(MEMBER_ID, False)
+        self.assertNotIn("Activer la mémoire", self.labels(self.card(in_guild=False)))
+
+    async def test_disable_erases_everything(self):
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        self.write("membres/222.md", "part à Rome (d'après Bob)")
+        self.write(SERVER_FILE, "soirée jeux le vendredi\nBob adore le chocolat")
+        card = self.card(in_guild=False)
+        interaction = mock.Mock()
+        interaction.response.edit_message = mock.AsyncMock()
+        await card.ask_disable(interaction)
+        self.assertIn("a quitté le serveur", interaction.response.edit_message.call_args.kwargs["embeds"][0].description)
+        interaction.user.__str__ = lambda self: "admin"
+        await card.disable(interaction)
+        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
+        self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
+        self.assertIn("Mémoire désactivée pour Bob", interaction.response.edit_message.call_args.kwargs["content"])
 
 
 class AdminAccessTest(MemoryTestCase):

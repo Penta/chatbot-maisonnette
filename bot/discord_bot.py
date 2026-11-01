@@ -934,9 +934,11 @@ def bot_name(interaction: discord.Interaction) -> str:
 
 
 @app_commands.command(name="memoire", description="Voir, modifier ou effacer ce que le bot a retenu sur toi")
-@app_commands.describe(membre="Réservé aux administrateurs : la fiche d'un autre membre")
+@app_commands.describe(membre="Réservé aux administrateurs : la fiche d'un autre membre, ou son identifiant s'il est parti")
 @app_commands.guild_only()
-async def memory_command(interaction: discord.Interaction, membre: discord.Member | None = None) -> None:
+# discord.User plutôt que discord.Member : un membre parti du serveur reste accepté (Discord le résout par
+# son identifiant), pour que sa fiche puisse encore être effacée.
+async def memory_command(interaction: discord.Interaction, membre: discord.User | None = None) -> None:
     bot: ChatBot = interaction.client  # type: ignore[assignment]
     if bot.memory is None:
         await interaction.response.send_message(memory_off(bot), ephemeral=True)
