@@ -255,10 +255,12 @@ class ChatBot(commands.Bot):
             await self.handle_mention(message)
 
     async def concerned_members(self, message: discord.Message) -> list[discord.User | discord.Member]:
-        """Membres concernés par un message, sans les bots : auteur, membres mentionnés, auteur du message cité."""
-        users = [message.author, *message.mentions]
+        """Membres concernés par un message, sans les bots : auteur, auteur du message cité, membres
+        mentionnés (ordre des fiches jointes quand elles sont trop nombreuses)."""
+        users = [message.author]
         if (cited := await self.fetch_cited(message)) is not None:
             users.append(cited.author)
+        users += message.mentions
         unique = {user.id: user for user in users if not user.bot}
         return list(unique.values())
 

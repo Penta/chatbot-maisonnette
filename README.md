@@ -36,8 +36,8 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 
 Avec `MEMORY=on` :
 
-- **Présentation** : à son premier message, chaque membre reçoit une seule fois un message privé qui lui présente la mémoire et `/memoire`. Si ses messages privés sont fermés, le message est posté dans le salon et s'efface au bout d'une minute.
-- **`/memoire`** : chacun voit la fiche que le bot tient sur lui, visible par lui seul. Il peut la modifier dans une fenêtre déjà remplie, tout effacer (après confirmation) ou désactiver la mémoire : sa fiche est alors effacée et plus rien n'est retenu sur lui, jusqu'à ce qu'il la réactive. Les administrateurs voient, modifient et effacent la fiche de n'importe quel membre avec `/memoire membre:@…` ; seul le membre lui-même peut désactiver la mémoire.
+- **Présentation** : à son premier message, chaque membre reçoit une seule fois un message privé qui lui présente la mémoire et `/memoire`. Si ses messages privés sont fermés, le message est posté dans le salon et s'efface au bout d'une minute. Rien n'est noté sur un membre avant qu'il ait reçu cette présentation.
+- **`/memoire`** : chacun voit la fiche que le bot tient sur lui, visible par lui seul. Il peut la modifier dans une fenêtre déjà remplie, tout effacer (après confirmation) ou désactiver la mémoire : sa fiche et les lignes du fichier général qui le citent sont alors effacées, et plus rien n'est retenu sur lui, jusqu'à ce qu'il la réactive. Les administrateurs voient, modifient et effacent la fiche de n'importe quel membre avec `/memoire membre:@…` ; seul le membre lui-même peut désactiver la mémoire.
 - **`/memoire-serveur`** : le fichier général du serveur, à voir, modifier ou effacer. Réservé aux administrateurs.
 
 ### Modération
@@ -144,7 +144,7 @@ Chaque message envoyé à Claude est facturé selon le nombre de tokens lus (per
 - les images, PDF et fichiers ne sont payés qu'une fois, au message qui les contient ;
 - `claude-haiku-5-5` coûte environ 20 fois moins cher que `claude-sonnet-5-5` ; `THINKING=off` et un `EFFORT` bas réduisent aussi les réponses ;
 - chaque page de PDF coûte souvent plusieurs milliers de tokens, et chaque recherche web est payante en plus ;
-- avec `MEMORY=on`, les fiches jointes sont relues à chaque message, hors cache : environ 850 tokens par fiche pleine de 3000 caractères. Chaque note demande en plus un court appel, la conversation étant alors relue en cache.
+- avec `MEMORY=on`, les fiches jointes (5 au plus par message) sont relues à chaque message, hors cache : environ 850 tokens par fiche pleine de 3000 caractères. Le prompt ne liste que les membres qui ont une fiche, mais chaque nouvelle fiche, changement de pseudo ou note dans le fichier général fait réécrire la conversation en cache au message suivant. Chaque note demande en plus un court appel, la conversation étant alors relue en cache.
 
 Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque appel les tokens utilisés et le coût estimé en dollars. Les tarifs de Sonnet, Haiku et Opus 5.5 sont connus du bot ; pour un autre modèle, renseigne `PRICE_INPUT_PER_MTOK` et `PRICE_OUTPUT_PER_MTOK`.
 
