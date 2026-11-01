@@ -130,6 +130,15 @@ class MemoryCard:
     # -------------------------------------------------------------- actions
 
     async def edit(self, interaction: discord.Interaction) -> None:
+        content = self.store.read(self.target.file)
+        if len(content) > INPUT_MAX * MAX_INPUTS:  # au-delà de ce qu'une fenêtre Discord peut contenir
+            file = discord.File(io.BytesIO(content.encode("utf-8")), filename="contenu_complet.txt")
+            limit = self.store.limit(self.target.file)
+            await interaction.response.send_message(
+                f"Ce fichier fait {len(content)} caractères, trop pour la fenêtre de Discord (sa limite est de "
+                f"{limit}). Son contenu est joint : efface-le, puis recopie ce qui compte avec « Modifier », ou "
+                f"demande à l'administrateur du bot de le raccourcir sur le disque.", file=file, ephemeral=True)
+            return
         await interaction.response.send_modal(EditModal(self))
 
     async def save(self, interaction: discord.Interaction, text: str, original: str | None = None) -> None:
@@ -224,13 +233,20 @@ class EditModal(discord.ui.Modal):
             "Modifier le fichier général" if card.target.member_id is None else f"Fiche de {card.target.name}")
         super().__init__(title=title[:45], timeout=VIEW_TIMEOUT)
         self.card = card
-        sizes = input_sizes(card.store.limit(card.target.file))
-        count = len(sizes)
+        limit = card.store.limit(card.target.file)
         self.original = card.store.read(card.target.file)  # comparé à l'enregistrement (voir overwrite)
+        # Fichier plus long que sa limite (limite baissée, fichier modifié sur le disque) : les zones
+        # s'agrandissent pour le contenir en entier, à raccourcir avant d'enregistrer. Tronqué, il serait
+        # perdu en partie ; plus long que sa zone, Discord refuserait d'ouvrir la fenêtre.
+        too_long = len(self.original) > limit
+        sizes = input_sizes(max(limit, len(self.original)))
+        count = len(sizes)
         parts = split_for_inputs(self.original, sizes)
         self.inputs = []
         for i in range(count):
             label = "Contenu" if count == 1 else f"Contenu ({i + 1}/{count})"
+            if too_long and i == 0:
+                label += f" — {limit} caractères au plus"
             text_input = discord.ui.TextInput(
                 label=label, style=discord.TextStyle.paragraph, required=False,
                 max_length=sizes[i], default=parts[i] or None,

@@ -579,6 +579,53 @@ class InputSizesTest(MemoryTestCase):
         self.assertEqual(split_for_inputs("", [3000]), [""])
 
 
+class TooLongFileTest(MemoryTestCase):
+    """Fichier plus long que sa limite (limite baissée, modification sur le disque) : « Modifier » s'ouvre
+    quand même, sans rien tronquer."""
+
+    def card(self) -> MemoryCard:
+        return MemoryCard(self.store, Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True),
+                          owner_id=MEMBER_ID, bot_name="Rika")
+
+    @staticmethod
+    def interaction() -> mock.Mock:
+        interaction = mock.Mock()
+        interaction.response.send_modal = mock.AsyncMock()
+        interaction.response.send_message = mock.AsyncMock()
+        return interaction
+
+    async def test_window_holds_whole_file(self):
+        # Scénario de l'audit : fiche de 3500 caractères, limite de 3000.
+        text = "\n".join(["a" * 1999, "b" * 1500])
+        self.write(f"membres/{MEMBER_ID}.md", text)
+        interaction = self.interaction()
+        await self.card().edit(interaction)
+        window = interaction.response.send_modal.call_args.args[0]
+        self.assertEqual([text_input.max_length for text_input in window.inputs], [3500])
+        self.assertEqual(window.inputs[0].default, text)
+        self.assertIn("3000 caractères au plus", window.inputs[0].label)
+        self.assertLessEqual(len(window.inputs[0].label), 45)
+
+    async def test_saving_unshortened_refused(self):
+        self.write(f"membres/{MEMBER_ID}.md", "a" * 3500)
+        window = EditModal(self.card())
+        window.inputs[0]._value = "a" * 3500
+        interaction = self.interaction()
+        await window.on_submit(interaction)
+        self.assertIn("Trop long", interaction.response.send_message.call_args.args[0])
+        self.assertEqual(len(self.store.read(f"membres/{MEMBER_ID}.md")), 3500)
+
+    async def test_beyond_discord_window(self):
+        # Plus que 5 zones de 4000 : pas de fenêtre, le contenu complet est envoyé en fichier joint.
+        self.write(f"membres/{MEMBER_ID}.md", "a" * 25139)
+        interaction = self.interaction()
+        await self.card().edit(interaction)
+        interaction.response.send_modal.assert_not_awaited()
+        message = interaction.response.send_message.call_args
+        self.assertIn("25139 caractères", message.args[0])
+        self.assertEqual(len(message.kwargs["file"].fp.getvalue()), 25139)
+
+
 class AdminAccessTest(MemoryTestCase):
     """Les membres savent que les administrateurs voient leur fiche, et chaque consultation est tracée."""
 

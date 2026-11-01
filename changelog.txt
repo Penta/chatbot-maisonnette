@@ -126,6 +126,12 @@ Corrections
 - Mémoire : la fenêtre « Modifier » du fichier général n'accepte plus
   que 5000 caractères (MEMORY_SERVER_LIMIT) : sa deuxième zone de texte
   laissait en écrire 8000, refusés ensuite à l'enregistrement.
+- Mémoire : un fichier plus long que sa limite (MEMORY_*_LIMIT baissée,
+  fichier modifié sur le disque) s'ouvre de nouveau dans « Modifier »,
+  en entier, avec la limite rappelée pour le raccourcir. Avant, la
+  fenêtre ne s'ouvrait pas (« Échec de l'interaction »). Au-delà de
+  20000 caractères, trop pour une fenêtre Discord, son contenu est
+  envoyé en fichier joint.
 - Mémoire : un membre ne peut plus prendre le nom Discord d'un autre
   (pseudo, nom d'utilisateur ou ancien pseudo) comme surnom dans sa
   fiche. Ce surnom est ignoré dans la liste des membres : Rika ne note
