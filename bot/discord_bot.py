@@ -158,9 +158,11 @@ class ChatBot(commands.Bot):
                     "on" if s.web_search else "off", f"on ({s.memory_dir})" if s.memory else "off")
         if not is_known(s.model):
             # Un nom mal écrit ne serait sinon découvert qu'au premier message (erreur 404).
-            logger.warning("Modèle %s inconnu du bot : vérifie CLAUDE_MODEL dans le .env. S'il existe bien, "
-                           "renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK pour estimer les coûts.",
-                           s.model)
+            prices = ""
+            if s.price_input_per_mtok is None or s.price_output_per_mtok is None:
+                prices = (" S'il existe bien, renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK "
+                          "pour estimer les coûts.")
+            logger.warning("Modèle %s inconnu du bot : vérifie CLAUDE_MODEL dans le .env.%s", s.model, prices)
         if self.presence:
             self.presence.start()
 
