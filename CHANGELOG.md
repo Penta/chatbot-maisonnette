@@ -2,7 +2,15 @@
 
 Les versions les plus récentes sont en haut. Chaque entrée commence par un résumé en gras, suivi du détail.
 
-**Versions :** [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500)
+**Versions :** [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500)
+
+---
+
+## Version 5.12
+
+### Changements
+
+- **Un message de démarrage plus soigné.** Le bloc « Bot en ligne » affiche maintenant l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage, sur le vert du statut « en ligne » de Discord.
 
 ---
 

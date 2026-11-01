@@ -25,7 +25,7 @@ from .images import ImageError, prepare_image
 from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
 from .memory_views import MemoryCard, member_target, reply_error, see_user, server_target
-from .models import is_known
+from .models import display_name, is_known
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
@@ -36,6 +36,8 @@ logger = logging.getLogger("chatbot.discord")
 CUSTOM_EMOJI_ONLY = re.compile(r"^<a?:\w+:\d+>$")
 USER_MENTION = re.compile(r"<@!?(\d+)>")
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
+# Couleur du message de démarrage : le vert du statut « en ligne » de Discord.
+ONLINE_COLOR = discord.Color(0x23A55A)
 # Longueur maximale du texte d'un message cité ou transféré transmis à Claude.
 QUOTE_MAX_LENGTH = 500
 # Messages écrits par quelqu'un ; les autres types sont des messages système
@@ -243,14 +245,20 @@ class ChatBot(commands.Bot):
             logger.warning("Le bot est aussi sur %d autre(s) serveur(s), où il ne répond pas : %s. Retire-le de ces "
                            "serveurs, et décoche Public Bot dans le portail Discord (voir le README).", len(others),
                            ", ".join(f"{guild.name} ({guild.id})" for guild in others))
-        name = channel.guild.me.display_name if getattr(channel, "guild", None) else self.user.name
+        me = channel.guild.me if getattr(channel, "guild", None) else self.user
         logger.info("%d emoji(s) du serveur utilisable(s) dans les réponses.",
                     len(usable_emojis(getattr(channel, "guild", None))))
+        started = discord.utils.utcnow()
         embed = discord.Embed(
-            title="Bot en ligne",
-            description=f"{name} est désormais en ligne. Version {VERSION}.",
-            color=discord.Color.green(),
+            title="En ligne",
+            description=f"**{me.display_name}** vient de démarrer et répond de nouveau aux messages.",
+            color=ONLINE_COLOR,
+            timestamp=started,
         )
+        embed.set_thumbnail(url=me.display_avatar.url)
+        embed.add_field(name="Version", value=f"`{VERSION}`")
+        embed.add_field(name="Modèle", value=display_name(self.settings.model))
+        embed.add_field(name="Démarrage", value=discord.utils.format_dt(started, "R"))
         try:
             await channel.send(embed=embed)
         except discord.HTTPException as exc:

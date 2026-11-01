@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import re
+
+# « claude-sonnet-5-5 » ou « claude-sonnet-4-5-20250929 » : famille, version, date éventuelle.
+_MODEL_ID = re.compile(r"^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$")
+
 # Façon de couper la réflexion préalable (THINKING=off), qui dépend du modèle.
 # None : impossible sur ce modèle, seul EFFORT permet alors de la réduire.
 _THINKING_OFF: dict[str, dict | None] = {
@@ -23,6 +28,14 @@ PRICES: dict[str, tuple[float, float]] = {
 def is_known(model: str) -> bool:
     """Modèle connu du bot (tarifs et réglage de la réflexion) : sinon, peut-être une faute de frappe."""
     return model in PRICES
+
+
+def display_name(model: str) -> str:
+    """Nom lisible du modèle (« Sonnet 5.5 ») ; l'identifiant tel quel s'il n'a pas la forme habituelle."""
+    if not (match := _MODEL_ID.match(model)):
+        return model
+    family, major, minor = match.groups()
+    return f"{family.capitalize()} {major}{f'.{minor}' if minor else ''}"
 
 
 def thinking_off(model: str) -> dict | None:
