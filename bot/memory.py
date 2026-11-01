@@ -160,6 +160,11 @@ class MemoryStore:
             return ToolResult(content or f"Le fichier {name} est vide : rien n'y est encore noté.")
 
         async with self._lock:
+            # Vérifié de nouveau : le membre a pu désactiver la mémoire pendant l'attente du verrou.
+            limit, label = self._check(name)
+            if limit is None:
+                logger.warning("Mémoire : %s refusé sur %r (%s)", action, command.get("fichier"), label)
+                return ToolResult(label, is_error=True)
             before = self.read(name)
             if action == "ajouter":
                 if not text:
@@ -220,6 +225,9 @@ class MemoryStore:
             return f"Trop long : {len(text)} caractères pour {limit} au plus. Rien n'a été modifié."
         path = self.root / name
         async with self._lock:
+            # Fenêtre /memoire ouverte avant la désactivation : la fiche ne peut plus qu'être effacée.
+            if text and (match := MEMBER_FILE.match(name)) and not self.members.memory_enabled(match.group(1)):
+                return "La mémoire est désactivée pour ce membre : rien n'a été enregistré."
             try:
                 if text:
                     await asyncio.to_thread(self._write_atomic, path, text)
@@ -233,10 +241,13 @@ class MemoryStore:
 
     async def forget(self, member_id: int | str, by: str) -> str | None:
         """Membre qui désactive la mémoire : efface sa fiche et les lignes du fichier général qui citent
-        un de ses noms (by : son nom, pour les logs). Renvoie un message d'erreur, ou None."""
-        entry = self.members.get(member_id)
+        un de ses noms, puis désactive la mémoire (by : son nom, pour les logs). Renvoie un message
+        d'erreur, ou None.
+
+        Tout se fait sous le verrou : un appel de l'outil en attente ne peut pas recréer la fiche."""
         name = self.member_file(member_id)
         async with self._lock:
+            entry = self.members.get(member_id)
             names = list(self.nicknames(member_id))
             if entry is not None:
                 names += [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"]
@@ -256,6 +267,7 @@ class MemoryStore:
             except OSError as exc:
                 logger.error("Mémoire : impossible d'effacer ce qui concerne %s : %s", name, exc)
                 return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
+            await self.members.set_memory(member_id, False)
         # Le nombre seulement : recopier les lignes retirées garderait ce que le membre veut voir effacé.
         logger.info("Mémoire : %s effacé par %s, %d ligne(s) retirée(s) de %s",
                     name, by, len(server) - len(kept), SERVER_FILE)

@@ -140,8 +140,6 @@ class MemoryCard:
 
     async def disable(self, interaction: discord.Interaction) -> None:
         error = await self.store.forget(self.target.member_id, by=str(interaction.user))
-        if error is None:
-            await self.store.members.set_memory(self.target.member_id, False)
         await self.refresh(interaction, error or "Mémoire désactivée : ta fiche et ce qui te citait "
                                                  "dans le fichier général ont été effacés.")
 

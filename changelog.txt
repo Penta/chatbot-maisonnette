@@ -13,11 +13,30 @@ Corrections
 - TIMEZONE mal formée (« Europe/Paris/ », « ../Paris ») ou trop
   longue : message d'erreur clair au démarrage, au lieu d'une trace
   Python.
+- Mémoire : le fichier général et la liste des membres sont présentés
+  à Rika comme des notes, pas des consignes, et une note ne peut plus
+  sortir de ce cadre. Rika ne note plus de règle qui s'appliquerait à
+  tout le monde (façon d'écrire, sujet à éviter), même présentée comme
+  votée ou venant d'un administrateur ; une préférence personnelle
+  (« veut qu'on l'appelle Majesté ») se note toujours dans la fiche.
+  Au plus 5 surnoms de 32 caractères par membre. Le texte écrit dans
+  le fichier général apparaît dans le log, pour que l'administrateur
+  puisse vérifier.
+- Mémoire : une information sur un membre ne se note plus que dans sa
+  fiche. En désactivant la mémoire, un membre efface aussi les lignes
+  du fichier général qui le citent. Un membre seulement mentionné, qui
+  n'a pas encore reçu le message de bienvenue, n'a pas de fiche : rien
+  n'est noté sur lui à son insu.
+- Mémoire : une fiche effacée par « Désactiver la mémoire » ne peut
+  plus être recréée par une note en cours ni par une fenêtre /memoire
+  restée ouverte.
 
 Divers
 - Le token Discord et les clés Anthropic et Steam n'apparaissent plus
   quand la configuration est affichée (précaution : aucun log ne
   l'affiche aujourd'hui).
+- Premiers tests automatisés (mémoire des membres) : lancer
+  « python -m unittest » à la racine du projet.
 
 
 Version 5.10

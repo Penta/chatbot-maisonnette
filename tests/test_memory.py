@@ -138,6 +138,31 @@ class ForgetTest(MemoryTestCase):
         await self.store.forget(MEMBER_ID, by="bob")
         self.assertFalse((self.root / "memories" / SERVER_FILE).exists())
 
+    async def test_memory_disabled(self):
+        await self.store.forget(MEMBER_ID, by="bob")
+        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
+
+    async def test_waiting_tool_call_cannot_recreate_file(self):
+        # Une écriture de l'outil est en cours (verrou pris) ; « Désactiver » attend le verrou, puis un
+        # appel de l'outil sur le même membre arrive et passe la première vérification.
+        fiche = self.root / "memories" / "membres" / f"{MEMBER_ID}.md"
+        async with self.store._lock:
+            forget = asyncio.create_task(self.store.forget(MEMBER_ID, by="bob"))
+            await asyncio.sleep(0)
+            tool = asyncio.create_task(self.store.run(
+                {"commande": "ajouter", "fichier": f"membres/{MEMBER_ID}.md", "texte": "habite à Lyon", "ancien": ""}))
+            await asyncio.sleep(0)
+        self.assertIsNone(await forget)
+        self.assertTrue((await tool).is_error)
+        self.assertFalse(fiche.exists())
+
+    async def test_open_window_cannot_rewrite_file(self):
+        await self.store.forget(MEMBER_ID, by="bob")
+        error = await self.store.overwrite(f"membres/{MEMBER_ID}.md", "habite à Lyon", by="bob")
+        self.assertIsNotNone(error)
+        self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
+        self.assertIsNone(await self.store.overwrite(f"membres/{MEMBER_ID}.md", "", by="bob"))
+
     async def test_removed_lines_not_logged(self):
         self.write(SERVER_FILE, "Bob : adore les lasagnes")
         with self.assertLogs("chatbot.memory", "INFO") as logs:
