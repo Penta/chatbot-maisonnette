@@ -414,7 +414,7 @@ class ClaudeClient:
                 logger.critical("Crédit Anthropic épuisé : %s", exc)
                 raise ClaudeError(CONFIG_ERROR)
             logger.critical("Requête refusée par l'API, sans doute à cause d'un réglage du .env "
-                            "(MODEL, MAX_TOKENS, THINKING, EFFORT, WEB_SEARCH…) : %s", exc)
+                            "(CLAUDE_MODEL, MAX_TOKENS, THINKING, EFFORT, WEB_SEARCH…) : %s", exc)
             raise ClaudeError(CONFIG_ERROR)
         except anthropic.AuthenticationError:
             logger.critical("Clé API Anthropic invalide : vérifie ANTHROPIC_API_KEY dans le .env.")
@@ -423,7 +423,7 @@ class ClaudeClient:
             logger.critical("Accès refusé par l'API (clé sans accès à ce modèle ou à cet outil ?) : %s", exc)
             raise ClaudeError(CONFIG_ERROR)
         except anthropic.NotFoundError as exc:
-            logger.critical("Modèle introuvable : vérifie MODEL dans le .env (%s).", exc)
+            logger.critical("Modèle introuvable : vérifie CLAUDE_MODEL dans le .env (%s).", exc)
             raise ClaudeError(CONFIG_ERROR)
         except anthropic.APIStatusError as exc:
             logger.error("Erreur de l'API (%s) : %s", exc.status_code, exc)

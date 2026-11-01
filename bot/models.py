@@ -20,6 +20,11 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 
 
+def is_known(model: str) -> bool:
+    """Modèle connu du bot (tarifs et réglage de la réflexion) : sinon, peut-être une faute de frappe."""
+    return model in PRICES
+
+
 def thinking_off(model: str) -> dict | None:
     """Paramètre « thinking » à envoyer quand THINKING=off (None : ne rien envoyer)."""
     return _THINKING_OFF.get(model, _DEFAULT_THINKING_OFF)

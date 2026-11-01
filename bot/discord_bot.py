@@ -25,6 +25,7 @@ from .images import ImageError, prepare_image
 from .members import MemberRegistry
 from .memory import MemoryStore
 from .memory_views import MemoryCard, member_target, see_user, server_target
+from .models import is_known
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
@@ -155,6 +156,11 @@ class ChatBot(commands.Bot):
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
                     s.model, "on" if s.thinking else "off", s.effort or "par défaut",
                     "on" if s.web_search else "off", f"on ({s.memory_dir})" if s.memory else "off")
+        if not is_known(s.model):
+            # Un nom mal écrit ne serait sinon découvert qu'au premier message (erreur 404).
+            logger.warning("Modèle %s inconnu du bot : vérifie CLAUDE_MODEL dans le .env. S'il existe bien, "
+                           "renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK pour estimer les coûts.",
+                           s.model)
         if self.presence:
             self.presence.start()
 

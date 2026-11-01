@@ -2,6 +2,16 @@ CHANGELOG — Chatbot Discord
 ===========================
 
 
+Version 5.11
+------------
+
+Corrections
+- Un modèle inconnu du bot (CLAUDE_MODEL mal écrit, par exemple) est
+  signalé dans le log dès le démarrage, et plus seulement au premier
+  message. Les messages d'erreur citent CLAUDE_MODEL (et non MODEL,
+  une variable qui n'existe pas).
+
+
 Version 5.10
 ------------
 
