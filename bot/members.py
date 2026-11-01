@@ -149,3 +149,10 @@ class MemberRegistry:
 def display_name(entry: dict) -> str:
     """Le nom affiché sur le serveur : pseudo, sinon nom d'affichage, sinon nom d'utilisateur."""
     return entry["nickname"] or entry["global_name"] or entry["username"]
+
+
+def with_username(name: str, username: str) -> str:
+    """« Johnounet (johnk) » : le nom affiché, libre et non unique, suivi du nom d'utilisateur, unique,
+    pour que personne ne puisse se faire passer pour un autre en prenant son pseudo. Seul s'il est
+    identique au nom affiché (« Penta » et « penta »)."""
+    return name if name.casefold() == username.casefold() else f"{name} ({username})"

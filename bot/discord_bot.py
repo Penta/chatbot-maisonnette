@@ -22,7 +22,7 @@ from .config import Settings
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import IMAGE_MARKER, ConversationHistory, render_line
 from .images import ImageError, prepare_image
-from .members import MemberRegistry
+from .members import MemberRegistry, with_username
 from .memory import MemoryStore
 from .memory_views import MemoryCard, member_target, see_user, server_target
 from .models import is_known
@@ -49,6 +49,11 @@ WELCOME = ("{name} peut retenir des choses sur toi au fil des conversations (tes
            "ou désactiver la fonction.")
 # Durée d'affichage, en secondes, de ce message quand il est posté dans le salon.
 WELCOME_PUBLIC_DURATION = 60
+
+
+def author_name(user: discord.User | discord.Member) -> str:
+    """Nom d'un auteur pour Claude, avec son nom d'utilisateur (voir with_username)."""
+    return with_username(user.display_name, user.name)
 
 
 def looks_like_image(attachment: discord.Attachment) -> bool:
@@ -262,7 +267,7 @@ class ChatBot(commands.Bot):
         if not self.memory:
             return ""
         ids = [user.id for message in messages for user in await self.concerned_members(message)]
-        return self.memory.notes_for(ids)
+        return self.memory.notes_for(ids, author_ids=[message.author.id for message in messages])
 
     async def register_members(self, message: discord.Message) -> None:
         """Ajoute au registre les membres concernés par le message, ou met leurs noms à jour."""
@@ -351,7 +356,7 @@ class ChatBot(commands.Bot):
         reply, reply_image = await self.read_reply(message, want_image=image is None and forward_image is None)
         image = image or forward_image or reply_image
 
-        line: dict = {"id": message.id, "date": self.timestamp(message), "author": message.author.display_name}
+        line: dict = {"id": message.id, "date": self.timestamp(message), "author": author_name(message.author)}
         if forward:
             line["forward"] = forward
         else:
@@ -440,7 +445,7 @@ class ChatBot(commands.Bot):
                     if msg.stickers:
                         content = (content + " [sticker]").strip()
                     if content:
-                        lines.append(f"{msg.author.display_name} : {content}")
+                        lines.append(f"{author_name(msg.author)} : {content}")
             except discord.Forbidden:
                 logger.warning("Pas la permission de lire l'historique de #%s.", message.channel)
         lines.reverse()
@@ -473,7 +478,7 @@ class ChatBot(commands.Bot):
         if lines:
             parts.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
         reply_part = f" ({reply})" if reply else ""
-        parts.append(f"{self.timestamp(message)}, {message.author.display_name} te mentionne{reply_part} et écrit : {text}")
+        parts.append(f"{self.timestamp(message)}, {author_name(message.author)} te mentionne{reply_part} et écrit : {text}")
         prompt = "\n\n".join(parts)
 
         text_files = [a for a in message.attachments if looks_like_text(a)]
@@ -749,7 +754,7 @@ class ChatBot(commands.Bot):
         image = await self.first_image(cited.attachments, "cité") if want_image else None
         description = self.describe_quoted(cited.clean_content, image, cited.attachments, cited.stickers)
 
-        who = "à ton message" if cited.author == self.user else f"au message de {cited.author.display_name}"
+        who = "à ton message" if cited.author == self.user else f"au message de {author_name(cited.author)}"
         return f"en réponse {who} du {self.timestamp(cited)} : {description or '(message vide)'}", image
 
     async def read_forward(self, message: discord.Message) -> tuple[str | None, ImageData | None]:

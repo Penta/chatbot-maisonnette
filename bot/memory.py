@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .members import NAME_KEYS, MemberRegistry, display_name
+from .members import NAME_KEYS, MemberRegistry, display_name, with_username
 
 logger = logging.getLogger("chatbot.memory")
 
@@ -117,7 +117,9 @@ class MemoryStore:
             if entry["former_names"]:
                 details.append("anciens pseudos : " + ", ".join(entry["former_names"]))
             suffix = f" ({' ; '.join(details)})" if details else ""
-            lines.append(f"- {name}{suffix} → {self.member_file(member_id) if notified else 'pas de fiche'}")
+            # Flèche retirée des noms : un pseudo « Bob → membres/111.md » ne peut pas imiter une ligne.
+            names = f"{name}{suffix}".replace("→", "")
+            lines.append(f"- {names} → {self.member_file(member_id) if notified else 'pas de fiche'}")
         members = NOTE_TAGS.sub("", "\n".join(lines)) or "(aucun membre pour l'instant)"
         server = NOTE_TAGS.sub("", self.read(SERVER_FILE)) or "(vide pour l'instant)"
         # Écrits à la demande de n'importe quel membre : présentés comme des notes, pas des consignes.
@@ -127,8 +129,9 @@ class MemoryStore:
                 f"\n<liste_des_membres>\n{members}\n</liste_des_membres>"
                 f"\n\nTon fichier général ({SERVER_FILE}) :\n<fichier_general>\n{server}\n</fichier_general>")
 
-    def notes_for(self, member_ids: list[int]) -> str:
-        """Fiches des membres concernés par un message, jointes à ce message (vide s'il n'y en a aucune).
+    def notes_for(self, member_ids: list[int], author_ids: list[int] = ()) -> str:
+        """Fiches des membres concernés par un message, jointes à ce message (vide s'il n'y en a aucune),
+        en signalant celles des auteurs (author_ids).
         Les membres inconnus du registre, pas encore prévenus ou qui ont désactivé la mémoire sont ignorés."""
         sections = []
         for member_id in dict.fromkeys(member_ids):
@@ -137,7 +140,9 @@ class MemoryStore:
                 continue
             path = self.member_file(member_id)
             content = self.read(path) or "(rien de noté pour l'instant)"
-            sections.append(f"=== {display_name(entry)} ({path}) ===\n{content}")
+            name = with_username(display_name(entry), entry["username"])
+            role = ", auteur du message" if member_id in author_ids else ""
+            sections.append(f"=== {name} : {path}{role} ===\n{content}")
         if not sections:
             return ""
         return ("[Tes fiches sur les membres concernés par ce message, jointes automatiquement : "
