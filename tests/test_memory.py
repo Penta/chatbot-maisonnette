@@ -9,7 +9,7 @@ from unittest import mock
 
 from bot.members import MemberRegistry, with_username
 from bot.discord_bot import memory_command
-from bot.memory_views import ADMINS_NOTE, EditModal, MemoryCard, Target
+from bot.memory_views import ADMINS_NOTE, EditModal, MemoryCard, Target, input_sizes, split_for_inputs
 from bot.memory import (MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
@@ -545,6 +545,38 @@ class NotEnabledWriteTest(MemoryTestCase):
         await self.members.set_memory(333, True)
         self.assertIsNone(await self.store.overwrite("membres/333.md", "habite à Lyon", by="admin"))
         self.assertFalse({item.label: item.disabled for item in self.card.view().children}["Modifier"])
+
+
+class InputSizesTest(MemoryTestCase):
+    """La fenêtre « Modifier » n'accepte pas plus que la limite du fichier."""
+
+    def test_sizes(self):
+        self.assertEqual(input_sizes(3000), [3000])
+        self.assertEqual(input_sizes(5000), [4000, 1000])
+        self.assertEqual(input_sizes(8000), [4000, 4000])
+        self.assertEqual(input_sizes(30000), [4000] * 5)
+
+    def test_server_window_limited(self):
+        # Scénario de l'audit : limite de 5000, deux zones de 4000 laissaient écrire 8000 caractères.
+        self.store.server_limit = 5000
+        window = EditModal(MemoryCard(self.store, Target(SERVER_FILE, None), owner_id=999, bot_name="Rika"))
+        self.assertEqual([text_input.max_length for text_input in window.inputs], [4000, 1000])
+
+    def test_split_between_lines(self):
+        text = "\n".join(["a" * 2000, "b" * 1500, "c" * 900])
+        self.assertEqual(split_for_inputs(text, [4000, 1000]), ["a" * 2000 + "\n" + "b" * 1500, "c" * 900])
+
+    def test_split_never_exceeds_sizes(self):
+        # Coupé entre les lignes, le reste (1400) ne tiendrait pas dans la zone de 1000 : découpage exact.
+        for text in ["\n".join(["a" * 3500, "b" * 1399]), "x" * 5000, "\n" + "y" * 4500]:
+            with self.subTest(text=text[:5]):
+                parts = split_for_inputs(text, [4000, 1000])
+                self.assertTrue(all(len(part) <= size for part, size in zip(parts, [4000, 1000])))
+                self.assertEqual(len("".join(parts).replace("\n", "")), len(text.replace("\n", "")))
+
+    def test_short_text(self):
+        self.assertEqual(split_for_inputs("habite à Lyon", [4000, 1000]), ["habite à Lyon", ""])
+        self.assertEqual(split_for_inputs("", [3000]), [""])
 
 
 class AdminAccessTest(MemoryTestCase):

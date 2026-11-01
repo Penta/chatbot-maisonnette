@@ -123,6 +123,9 @@ Corrections
   perdue, ou la ligne retirée revenait. Quand un texte n'est pas
   enregistré (fichier changé, trop long…), il est renvoyé en fichier
   joint pour ne pas être perdu.
+- Mémoire : la fenêtre « Modifier » du fichier général n'accepte plus
+  que 5000 caractères (MEMORY_SERVER_LIMIT) : sa deuxième zone de texte
+  laissait en écrire 8000, refusés ensuite à l'enregistrement.
 - Mémoire : un membre ne peut plus prendre le nom Discord d'un autre
   (pseudo, nom d'utilisateur ou ancien pseudo) comme surnom dans sa
   fiche. Ce surnom est ignoré dans la liste des membres : Rika ne note

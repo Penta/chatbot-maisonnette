@@ -224,16 +224,16 @@ class EditModal(discord.ui.Modal):
             "Modifier le fichier général" if card.target.member_id is None else f"Fiche de {card.target.name}")
         super().__init__(title=title[:45], timeout=VIEW_TIMEOUT)
         self.card = card
-        limit = card.store.limit(card.target.file)
-        count = min(MAX_INPUTS, -(-limit // INPUT_MAX))
+        sizes = input_sizes(card.store.limit(card.target.file))
+        count = len(sizes)
         self.original = card.store.read(card.target.file)  # comparé à l'enregistrement (voir overwrite)
-        parts = split_for_inputs(self.original, count)
+        parts = split_for_inputs(self.original, sizes)
         self.inputs = []
         for i in range(count):
             label = "Contenu" if count == 1 else f"Contenu ({i + 1}/{count})"
             text_input = discord.ui.TextInput(
                 label=label, style=discord.TextStyle.paragraph, required=False,
-                max_length=min(INPUT_MAX, limit), default=parts[i] or None,
+                max_length=sizes[i], default=parts[i] or None,
                 placeholder="Une information par ligne. Tout vider efface le fichier." if i == 0 else None,
             )
             self.inputs.append(text_input)
@@ -249,12 +249,28 @@ class EditModal(discord.ui.Modal):
             await interaction.response.send_message("La modification a échoué, regarde les logs.", ephemeral=True)
 
 
-def split_for_inputs(text: str, count: int) -> list[str]:
-    """Répartit un texte dans count zones de texte, de préférence entre les lignes."""
-    parts = split_message(text, INPUT_MAX)
-    if len(parts) > count:  # lignes trop mal réparties : découpage exact
-        parts = [text[i:i + INPUT_MAX] for i in range(0, len(text), INPUT_MAX)]
-    return (parts + [""] * count)[:count]
+def input_sizes(limit: int) -> list[int]:
+    """Taille maximale de chaque zone de texte : INPUT_MAX, sauf la dernière, réduite pour que le total ne
+    dépasse pas la limite du fichier (5000 : 4000 + 1000). Sinon le compteur de Discord laisserait écrire
+    un texte refusé à l'enregistrement."""
+    count = min(MAX_INPUTS, -(-limit // INPUT_MAX))
+    return [min(INPUT_MAX, limit - INPUT_MAX * i) for i in range(count)]
+
+
+def split_for_inputs(text: str, sizes: list[int]) -> list[str]:
+    """Répartit un texte dans des zones de texte de ces tailles, de préférence entre les lignes. Une zone
+    ne reçoit jamais plus que sa taille : Discord refuserait d'ouvrir la fenêtre."""
+    parts, rest = [], text
+    for size in sizes:
+        cut = len(rest) if len(rest) <= size else rest.rfind("\n", 0, size + 1)
+        if cut <= 0 < len(rest):  # ligne plus longue que la zone : coupée au milieu
+            cut = min(size, len(rest))
+        parts.append(rest[:cut])
+        rest = rest[cut:].lstrip("\n")
+    if rest:  # lignes trop mal réparties : découpage exact
+        starts = [sum(sizes[:i]) for i in range(len(sizes))]
+        parts = [text[start:start + size] for start, size in zip(starts, sizes)]
+    return parts
 
 
 def member_target(store: MemoryStore, member: discord.User | discord.Member, owner_id: int) -> Target:
