@@ -157,6 +157,9 @@ class ChatBot(commands.Bot):
         self.tree.add_command(memory_command)
         self.tree.add_command(server_memory_command)
         await self.sync_commands()
+        if self.memory:
+            # Lecture de toutes les fiches, avant la connexion : elle ne bloque aucun message.
+            await asyncio.to_thread(self.memory.index)
         s = self.settings
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
                     s.model, "on" if s.thinking else "off", s.effort or "par défaut",

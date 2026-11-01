@@ -76,6 +76,11 @@ class MemoryStore:
         self.server_limit = server_limit
         self._lock = asyncio.Lock()  # deux réponses en parallèle ne modifient pas un fichier en même temps
         self._unreadable: set[str] = set()  # fichiers illisibles déjà signalés dans le log
+        # Membres dont la fiche n'est pas vide, avec leurs surnoms : lu une fois sur le disque, puis tenu
+        # à jour à chaque écriture (toutes passent par ici). Sans lui, la liste des membres relirait
+        # toutes les fiches à chaque message, en bloquant le bot. Une fiche modifiée directement sur
+        # le disque n'y est prise en compte qu'au redémarrage.
+        self._index: dict[str, list[str]] | None = None
 
     # ------------------------------------------------------------------ accès
 
@@ -118,6 +123,17 @@ class MemoryStore:
         names = [name.strip() for name in re.split(r"[,;]", match.group(1)) if name.strip()]
         return [name for name in names if len(name) <= MAX_NICKNAME_LENGTH][:MAX_NICKNAMES]
 
+    def index(self) -> dict[str, list[str]]:
+        """Identifiants des membres dont la fiche n'est pas vide, avec leurs surnoms (voir _index)."""
+        if self._index is None:
+            self._index = {}
+            directory = self.root / "membres"
+            for path in directory.glob("*.md") if directory.is_dir() else []:
+                name = f"membres/{path.name}"
+                if MEMBER_FILE.match(name):
+                    self._indexed(name, self.read(name))
+        return self._index
+
     def system_context(self) -> str:
         """Liste des membres qui ont une fiche (tous leurs noms et le chemin de leur fiche) et fichier
         général, pour le prompt système. Les autres membres n'y sont pas : la liste ne grandit qu'avec
@@ -127,15 +143,12 @@ class MemoryStore:
         for member_id, entry in self.members.members().items():
             # Mémoire désactivée : Rika ne doit rien noter sur ce membre. Pas encore prévenu (membre
             # seulement mentionné) : pas de fiche.
-            if not entry["memory"] or not entry["notified"]:
-                continue
-            content = self.read(self.member_file(member_id))
-            if not content:
+            if not entry["memory"] or not entry["notified"] or member_id not in self.index():
                 continue
             name = display_name(entry)
             # Sans doublon, majuscules comprises (« penta » et « Penta » : un seul nom).
             others: dict[str, str] = {name.casefold(): name}
-            for other in [entry[key] for key in NAME_KEYS] + self._nicknames(content):
+            for other in [entry[key] for key in NAME_KEYS] + self.index()[member_id]:
                 if other:
                     others.setdefault(other.casefold(), other)
             others = list(others.values())[1:]
@@ -249,6 +262,7 @@ class MemoryStore:
                 return ToolResult(f"Aucun changement : {name} contenait déjà cela.")
             try:
                 await asyncio.to_thread(self._write_atomic, self.root / name, after)
+                self._indexed(name, after)
             except OSError as exc:
                 logger.error("Mémoire : impossible d'écrire %s : %s", name, exc)
                 return ToolResult("Écriture impossible pour l'instant, à cause d'une erreur du bot.", is_error=True)
@@ -280,6 +294,7 @@ class MemoryStore:
                     await asyncio.to_thread(self._write_atomic, path, text)
                 else:
                     path.unlink(missing_ok=True)
+                self._indexed(name, text)
             except OSError as exc:
                 logger.error("Mémoire : impossible de modifier %s : %s", name, exc)
                 return "Modification impossible pour l'instant, à cause d'une erreur du bot."
@@ -311,6 +326,7 @@ class MemoryStore:
             kept = [line for line in server if cites is None or not cites.search(line)]
             try:
                 (self.root / name).unlink(missing_ok=True)
+                self._indexed(name, "")
                 if len(kept) < len(server):
                     if kept:
                         await asyncio.to_thread(self._write_atomic, self.root / SERVER_FILE, "\n".join(kept))
@@ -334,6 +350,14 @@ class MemoryStore:
             return (self.root / name).read_text(encoding="utf-8-sig").strip()
         except FileNotFoundError:
             return ""
+
+    def _indexed(self, name: str, text: str) -> None:
+        """Met à jour l'index après l'écriture (text) ou la suppression (text vide) d'un fichier."""
+        if self._index is not None and (match := MEMBER_FILE.match(name)):
+            if text:
+                self._index[match.group(1)] = self._nicknames(text)
+            else:
+                self._index.pop(match.group(1), None)
 
     def _report(self, name: str, exc: Exception) -> None:
         """Signale un fichier illisible, une seule fois tant qu'il le reste (il est relu à chaque message)."""

@@ -160,7 +160,7 @@ Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque app
 | `presence_state.json` | Statut Discord en cours, repris après un redémarrage |
 | `slash_commands.sha256` | Empreinte des commandes slash, pour ne les envoyer à Discord que quand elles changent |
 | `memories/registre.json` | Avec `MEMORY=on` : membres vus par le bot, leurs noms et anciens pseudos, et leurs réglages de la mémoire. Si le fichier est illisible, il est mis de côté sous un nom daté |
-| `memories/membres/<id>.md`, `memories/serveur.md` | Avec `MEMORY=on` : fiche de chaque membre et fichier général du serveur, tenus par Claude, en UTF-8. Un fichier illisible (enregistré dans un autre encodage, par exemple) est signalé dans le log : le bot continue de répondre, mais n'y écrit plus rien tant qu'il n'est pas corrigé |
+| `memories/membres/<id>.md`, `memories/serveur.md` | Avec `MEMORY=on` : fiche de chaque membre et fichier général du serveur, tenus par Claude, en UTF-8. Un fichier illisible (enregistré dans un autre encodage, par exemple) est signalé dans le log : le bot continue de répondre, mais n'y écrit plus rien tant qu'il n'est pas corrigé. Après une modification directe sur le disque, redémarre le bot pour que la liste des membres (fiches existantes et surnoms) en tienne compte ; `/memoire` n'a pas besoin de redémarrage |
 | `bot.log` | Logs (5 Mo par fichier, 2 anciens fichiers gardés) |
 
 Le détail de chaque version est dans `changelog.txt`.

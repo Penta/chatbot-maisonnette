@@ -139,6 +139,34 @@ class SizeLimitsTest(MemoryTestCase):
         self.assertIn("membre210 : membres/210.md", notes)
 
 
+class IndexTest(MemoryTestCase):
+    """La liste des membres ne relit pas les fiches à chaque message, mais suit chaque écriture."""
+
+    async def test_only_server_file_read_once_indexed(self):
+        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : Bobby")
+        self.store.system_context()
+        read = []
+        original = self.store.read
+        self.store.read = lambda name: read.append(name) or original(name)
+        self.assertIn("Bobby", self.store.system_context())
+        self.assertEqual(read, [SERVER_FILE])
+
+    async def test_follows_writes(self):
+        fiche = f"membres/{MEMBER_ID}.md"
+        self.assertNotIn(fiche, self.store.system_context())
+        await self.tool(fichier=fiche, texte="Surnoms : Bobby")
+        self.assertIn("Bobby", self.store.system_context())
+        await self.tool(commande="remplacer", fichier=fiche, ancien="Bobby", texte="le Grand B")
+        self.assertIn("le Grand B", self.store.system_context())
+        self.assertIsNone(await self.store.overwrite(fiche, "", by="admin"))
+        self.assertNotIn(fiche, self.store.system_context())
+        self.assertIsNone(await self.store.overwrite(fiche, "habite à Lyon", by="admin"))
+        self.assertIn(fiche, self.store.system_context())
+        await self.store.forget(MEMBER_ID, by="bob")
+        await self.members.set_memory(MEMBER_ID, True)
+        self.assertNotIn(fiche, self.store.system_context())
+
+
 class UnreadableFileTest(MemoryTestCase):
     """Un fichier illisible ne bloque pas les réponses, et n'est pas écrasé par une note."""
 
