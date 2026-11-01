@@ -64,6 +64,15 @@ class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
         await registry.see(222, "alice", "Alice")
         self.assertIn("222", json.loads(self.path.read_text(encoding="utf-8"))["members"])
 
+    async def test_file_with_bom(self):
+        # Registre corrigé à la main puis enregistré avec BOM (Bloc-notes) : toujours lisible.
+        self.path.write_text(json.dumps({"version": 1, "members": {"111": ENTRY}}), encoding="utf-8-sig")
+        registry = MemberRegistry(self.path)
+        self.assertIsNone(registry.broken)
+        self.assertFalse(registry.memory_enabled(111))
+        await registry.see(222, "alice", "Alice")
+        self.assertIn("222", json.loads(self.path.read_text(encoding="utf-8"))["members"])  # réécrit sans BOM
+
     async def test_missing_file(self):
         registry = MemberRegistry(self.path)
         self.assertIsNone(registry.broken)

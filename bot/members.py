@@ -102,7 +102,8 @@ class MemberRegistry:
         if not self.file_path.exists():
             return {}
         try:
-            raw = json.loads(self.file_path.read_text(encoding="utf-8"))
+            # -sig : BOM laissé par certains éditeurs Windows (Bloc-notes) après une correction à la main.
+            raw = json.loads(self.file_path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict) or not isinstance(raw.get("members"), dict):
                 raise ValueError("« members » absent ou n'est pas un dictionnaire")
             return {key: self._sanitize(key, value) for key, value in raw["members"].items()}

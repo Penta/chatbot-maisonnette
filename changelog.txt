@@ -69,7 +69,9 @@ Corrections
   modifié à la main) : la mémoire des membres est coupée jusqu'à sa
   réparation, au lieu de repartir d'un registre vide qui réactivait la
   mémoire de ceux qui l'avaient désactivée. Le fichier n'est plus mis
-  de côté ni réécrit ; le log et /memoire signalent la panne.
+  de côté ni réécrit ; le log et /memoire signalent la panne. Un
+  registre corrigé à la main et enregistré avec BOM (Bloc-notes)
+  reste lisible.
 - Les surnoms d'un membre sont reconnus même si la ligne « Surnoms : … »
   n'est pas la première de sa fiche (ajoutée à la fin, ou fiche
   modifiée à la main), avec ou sans puce ; plusieurs lignes « Surnoms »
