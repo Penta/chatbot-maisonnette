@@ -32,6 +32,13 @@ DELETED_REPLY = "en réponse à un message supprimé depuis"
 _DELETED_KEYS = ("reply_to", "reply", "forward", "content", "edited", "attachments")
 
 
+def images_marker(count: int) -> str:
+    """Remplace les images d'un message dans la mémoire : un seul repère, quel que soit leur nombre."""
+    if count == 1:
+        return IMAGE_MARKER
+    return f"[{count} images jointes : tu les as vues et analysées à ce moment-là, mais elles ne sont plus conservées en mémoire]"
+
+
 def render_line(line: dict) -> str:
     """Texte d'une ligne de la mémoire, tel qu'il est envoyé à Claude.
 

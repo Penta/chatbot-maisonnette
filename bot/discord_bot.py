@@ -20,7 +20,7 @@ from . import VERSION
 from .claude_client import ClaudeClient, ClaudeError, ImageData
 from .config import Settings
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
-from .history import IMAGE_MARKER, ConversationHistory, render_line
+from .history import ConversationHistory, images_marker, render_line
 from .images import ImageError, prepare_image
 from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
@@ -92,11 +92,11 @@ def text_file_marker(name: str) -> str:
     return f"[fichier texte joint « {name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
 
 
-def attachment_marker(attachment: ImageData) -> str:
-    """Remplace une image ou un PDF dans la mémoire (son contenu n'est pas conservé)."""
-    if attachment.is_pdf:
-        return f"[PDF joint « {attachment.name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
-    return IMAGE_MARKER
+def attachments_marker(attachments: list[ImageData]) -> str:
+    """Remplace les images ou le PDF d'un message dans la mémoire (leur contenu n'est pas conservé)."""
+    if attachments[0].is_pdf:
+        return f"[PDF joint « {attachments[0].name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
+    return images_marker(len(attachments))
 
 
 @dataclass
@@ -399,7 +399,7 @@ class ChatBot(commands.Bot):
                 line["reply_to"] = message.reference.message_id  # citation retirée si ce message est supprimé
                 line["reply"] = reply
             line["content"] = self.message_body(message)
-        markers = [attachment_marker(image) for image in images]
+        markers = [attachments_marker(images)] if images else []
         extra = ""
         if text_file:
             extra = text_file_prompt(*text_file)
@@ -754,15 +754,18 @@ class ChatBot(commands.Bot):
         return await asyncio.to_thread(prepare_image, data)
 
     async def download_images(self, attachments: list[discord.Attachment]) -> list[ImageData]:
-        """Télécharge et prépare plusieurs images en parallèle (lève ImageError si l'une pose problème)."""
-        async def download(attachment: discord.Attachment) -> ImageData:
-            try:
-                return await self.download_image(attachment)
-            except ImageError as exc:
-                if len(attachments) > 1:  # précise laquelle, sinon « cette image » est ambigu
-                    raise ImageError(f"« {attachment.filename} » : {exc.user_message}")
-                raise
-        return list(await asyncio.gather(*(download(a) for a in attachments)))
+        """Télécharge et prépare plusieurs images en parallèle (lève ImageError si l'une pose problème).
+
+        Si plusieurs échouent, l'erreur nomme la première dans l'ordre du message, pas la plus rapide.
+        """
+        results = await asyncio.gather(*(self.download_image(a) for a in attachments), return_exceptions=True)
+        for attachment, result in zip(attachments, results):
+            if isinstance(result, ImageError) and len(attachments) > 1:
+                # précise laquelle, sinon « cette image » est ambigu
+                raise ImageError(f"« {attachment.filename} » : {result.user_message}")
+            if isinstance(result, BaseException):
+                raise result
+        return list(results)
 
     # ------------------------------------------- message cité ou transféré
 

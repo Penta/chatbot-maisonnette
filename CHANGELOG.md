@@ -10,7 +10,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
-- **Plusieurs images dans un même message.** On peut envoyer jusqu'à 4 images à la fois : Rika les voit toutes, dans l'ordre, et peut les comparer ou parler de « la deuxième ». Les images d'un message cité ou transféré sont lues elles aussi, jusqu'à 4. Si une image pose problème, le message d'erreur dit laquelle. Un PDF reste seul, sans image.
+- **Plusieurs images dans un même message.** On peut envoyer jusqu'à 4 images à la fois : Rika les voit toutes, dans l'ordre, et peut les comparer ou parler de « la deuxième ». Les images d'un message cité ou transféré sont lues elles aussi, jusqu'à 4. Si une image pose problème, le message d'erreur dit laquelle (la première dans l'ordre du message si plusieurs échouent). Dans la mémoire, les images d'un message tiennent en un seul repère (« 4 images jointes »). Un PDF reste seul, sans image.
 
 - **Un message de démarrage plus soigné.** Le bloc « Bot en ligne » affiche maintenant l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage, sur le vert du statut « en ligne » de Discord.
 
