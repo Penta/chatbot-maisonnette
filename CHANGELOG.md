@@ -12,6 +12,10 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Un message de démarrage plus soigné.** Le bloc « Bot en ligne » affiche maintenant l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage, sur le vert du statut « en ligne » de Discord.
 
+### Corrections
+
+- **« Modifier » ne signale plus de faux conflit.** Quand l'écriture sur le disque prenait plus de 3 secondes, Discord considérait l'envoi comme échoué alors que le texte était enregistré : la fenêtre restait ouverte, et un second clic répondait que le fichier avait changé entre-temps. Le bot répond maintenant tout de suite à Discord, avant d'enregistrer, et un même texte envoyé deux fois est accepté.
+
 ---
 
 ## Version 5.11

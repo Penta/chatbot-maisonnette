@@ -433,6 +433,7 @@ class ConfirmationTextsTest(MemoryTestCase):
 
     async def question(self, target: Target, ask: str) -> str:
         interaction = mock.Mock()
+        interaction.response.is_done.return_value = False
         interaction.response.edit_message = mock.AsyncMock()
         card = MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika")
         await getattr(card, ask)(interaction)
@@ -468,6 +469,7 @@ class ConfirmationTextsTest(MemoryTestCase):
         self.assertIn("noté dans sa fiche avec ton nom", text)  # ses propres propos, montrés aux autres
         self.assertIn("administrateurs du serveur peuvent la voir", text)
         interaction = mock.Mock()
+        interaction.response.is_done.return_value = False
         interaction.response.edit_message = mock.AsyncMock()
         await card.enable(interaction)
         self.assertTrue(self.members.memory_enabled(222))
@@ -485,9 +487,12 @@ class EditWindowTest(MemoryTestCase):
         window.inputs[0]._value = text
         for text_input in window.inputs[1:]:
             text_input._value = ""
+        # La fenêtre diffère sa réponse : le résultat arrive en suivi, ou à la place du fichier affiché.
         interaction = mock.Mock()
-        interaction.response.send_message = mock.AsyncMock()
-        interaction.response.edit_message = mock.AsyncMock()
+        interaction.response.defer = mock.AsyncMock()
+        interaction.response.is_done.return_value = True
+        interaction.followup.send = mock.AsyncMock()
+        interaction.edit_original_response = mock.AsyncMock()
         return interaction
 
     async def test_line_removed_by_forget_not_restored(self):
@@ -499,7 +504,7 @@ class EditWindowTest(MemoryTestCase):
         interaction = self.submit(window, "soirée jeux le vendredi\nBob adore le chocolat\ntournoi en mai")
         await window.on_submit(interaction)
         self.assertEqual(self.server_file(), "soirée jeux le vendredi")
-        message = interaction.response.send_message.call_args
+        message = interaction.followup.send.call_args
         self.assertIn("a changé pendant ta modification", message.args[0])
         self.assertIn(b"tournoi en mai", message.kwargs["file"].fp.getvalue())
 
@@ -516,7 +521,20 @@ class EditWindowTest(MemoryTestCase):
         interaction = self.submit(window, "habite à Paris")
         await window.on_submit(interaction)
         self.assertEqual(self.store.read(f"membres/{MEMBER_ID}.md"), "habite à Paris")
-        interaction.response.edit_message.assert_awaited_once()
+        interaction.response.defer.assert_awaited_once()
+        interaction.edit_original_response.assert_awaited_once()
+
+    async def test_same_text_sent_twice_saved(self):
+        # Premier envoi enregistré, mais réponse trop lente pour Discord : la fenêtre reste ouverte et
+        # la personne valide à nouveau le même texte.
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        window = self.window(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True))
+        await window.on_submit(self.submit(window, "habite à Paris"))
+        interaction = self.submit(window, "habite à Paris")
+        await window.on_submit(interaction)
+        self.assertEqual(self.store.read(f"membres/{MEMBER_ID}.md"), "habite à Paris")
+        interaction.followup.send.assert_not_awaited()
+        interaction.edit_original_response.assert_awaited_once()
 
 
 class ManualEditDateTest(MemoryTestCase):
@@ -691,8 +709,10 @@ class TooLongFileTest(MemoryTestCase):
         window = EditModal(self.card())
         window.inputs[0]._value = "a" * 3500
         interaction = self.interaction()
+        interaction.response.defer = mock.AsyncMock()
+        interaction.followup.send = mock.AsyncMock()
         await window.on_submit(interaction)
-        self.assertIn("Trop long", interaction.response.send_message.call_args.args[0])
+        self.assertIn("Trop long", interaction.followup.send.call_args.args[0])
         self.assertEqual(len(self.store.read(f"membres/{MEMBER_ID}.md")), 3500)
 
     async def test_beyond_discord_window(self):
@@ -797,6 +817,7 @@ class DepartedMemberTest(MemoryTestCase):
         self.write(SERVER_FILE, "soirée jeux le vendredi\nBob adore le chocolat")
         card = self.card(in_guild=False)
         interaction = mock.Mock()
+        interaction.response.is_done.return_value = False
         interaction.response.edit_message = mock.AsyncMock()
         await card.ask_disable(interaction)
         self.assertIn("a quitté le serveur", interaction.response.edit_message.call_args.kwargs["embeds"][0].description)

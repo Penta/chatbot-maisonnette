@@ -336,7 +336,7 @@ class MemoryStore:
 
         expected : le contenu (lu avec read) à partir duquel text a été écrit ; si le fichier a changé
         depuis, rien n'est enregistré, pour ne pas remettre ce qui a été retiré entre-temps (forget) ni
-        perdre une note de Claude."""
+        perdre une note de Claude. Sauf s'il contient déjà text (même envoi validé deux fois)."""
         text = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
         limit = self.limit(name)
         if len(text) > limit:
@@ -349,7 +349,8 @@ class MemoryStore:
             if text and (match := MEMBER_FILE.match(name)) and not self.members.memory_enabled(match.group(1)):
                 return "La mémoire n'est pas activée pour ce membre : rien n'a été enregistré."
             current = self.read(name)
-            if expected is not None and current != expected:
+            # Fichier qui contient déjà ce texte : même envoi validé deux fois, ce n'est pas un conflit.
+            if expected is not None and current != expected and current != text:
                 return ("Le fichier a changé pendant ta modification (nouvelle note, ou autre modification) : "
                         "rien n'a été enregistré. Recommence avec « Modifier ».")
             try:

@@ -154,6 +154,8 @@ class MemoryCard:
         self._view, view.interaction = view, interaction
         if new:
             await interaction.response.send_message(embeds=embeds, view=view, ephemeral=True)
+        elif interaction.response.is_done():  # réponse différée (voir EditModal.on_submit)
+            await interaction.edit_original_response(content=note, embeds=embeds, view=view)
         else:
             await interaction.response.edit_message(content=note, embeds=embeds, view=view)
 
@@ -175,13 +177,14 @@ class MemoryCard:
         """Enregistre le texte de la fenêtre « Modifier » (original : le fichier à son ouverture)."""
         error = await self.store.overwrite(self.target.file, text, by=str(interaction.user), expected=original)
         if error:
+            # Réponse déjà différée par la fenêtre : le message part en suivi.
             if not text.strip():
-                await interaction.response.send_message(error, ephemeral=True)
+                await interaction.followup.send(error, ephemeral=True)
                 return
             # Le texte saisi est renvoyé en fichier joint (trop long pour un message) : rien n'est perdu.
             file = discord.File(io.BytesIO(text.encode("utf-8")), filename="texte_non_enregistre.txt")
-            await interaction.response.send_message(f"{error} Ton texte est joint, pour le recopier.",
-                                                    file=file, ephemeral=True)
+            await interaction.followup.send(f"{error} Ton texte est joint, pour le recopier.",
+                                            file=file, ephemeral=True)
             return
         await self.refresh(interaction, "C'est enregistré." if text.strip() else "C'est effacé.")
 
@@ -318,6 +321,10 @@ class EditModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         text = "\n".join(text_input.value.strip() for text_input in self.inputs if text_input.value.strip())
+        # Discord laisse 3 secondes pour répondre, et l'écriture sur le disque peut prendre plus longtemps
+        # (fsync sur un volume réseau) : sans réponse, la fenêtre reste ouverte et un second clic renverrait
+        # le même texte, déjà enregistré.
+        await interaction.response.defer()
         await self.card.save(interaction, text, self.original)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
