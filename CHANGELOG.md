@@ -18,6 +18,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **« Modifier » ne signale plus de faux conflit.** Quand l'écriture sur le disque prenait plus de 3 secondes, Discord considérait l'envoi comme échoué alors que le texte était enregistré : la fenêtre restait ouverte, et un second clic répondait que le fichier avait changé entre-temps. Le bot répond maintenant tout de suite à Discord, avant d'enregistrer, et un même texte envoyé deux fois est accepté.
 
+- **Une personnalité illisible ne rend plus Rika muette.** Un fichier de personnalité qui n'est pas en UTF-8 (enregistré en ANSI avec le Bloc-notes, par exemple), illisible, ou un `PERSONALITY_FILE` qui désigne un dossier (ConfigMap montée comme dossier sur OpenShift) faisait échouer chaque message sans réponse. Rika garde maintenant la dernière personnalité valide, ou celle par défaut au démarrage, et le journal indique une seule fois le problème et comment le corriger. Le fichier est relu dès qu'il est modifié.
+
 ---
 
 ## Version 5.11

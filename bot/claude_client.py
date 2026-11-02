@@ -208,16 +208,37 @@ class ClaudeClient:
         path: Path = self.settings.personality_file
         try:
             mtime = path.stat().st_mtime
-            if self._personality_cache is None or self._personality_cache[0] != mtime:
-                text = path.read_text(encoding="utf-8").strip()
-                self._personality_cache = (mtime, text or DEFAULT_PERSONALITY)
-                logger.info("Personnalité chargée depuis %s", path)
-            return self._personality_cache[1]
         except FileNotFoundError:
             if self._personality_cache != (0.0, DEFAULT_PERSONALITY):
                 logger.warning("%s introuvable : utilisation de la personnalité par défaut.", path)
                 self._personality_cache = (0.0, DEFAULT_PERSONALITY)
             return DEFAULT_PERSONALITY
+        except OSError as e:
+            return self._personality_unreadable(-1.0, f"{path} illisible ({e})")
+        if self._personality_cache is not None and self._personality_cache[0] == mtime:
+            return self._personality_cache[1]
+        if path.is_dir():  # ConfigMap montée comme dossier (Windows lèverait une PermissionError peu parlante)
+            return self._personality_unreadable(
+                mtime, f"{path} est un dossier : PERSONALITY_FILE doit désigner le fichier lui-même")
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:
+            return self._personality_unreadable(
+                mtime, f"{path} n'est pas en UTF-8 : enregistre-le en UTF-8 (Bloc-notes : Enregistrer sous, Encodage)")
+        except OSError as e:
+            return self._personality_unreadable(mtime, f"{path} illisible ({e})")
+        self._personality_cache = (mtime, text or DEFAULT_PERSONALITY)
+        logger.info("Personnalité chargée depuis %s", path)
+        return self._personality_cache[1]
+
+    def _personality_unreadable(self, mtime: float, reason: str) -> str:
+        """Garde la dernière personnalité valide (ou celle par défaut) ; une seule erreur par version du fichier."""
+        text = self._personality_cache[1] if self._personality_cache else DEFAULT_PERSONALITY
+        if self._personality_cache is None or self._personality_cache[0] != mtime:
+            kept = "celle par défaut" if text == DEFAULT_PERSONALITY else "la dernière valide"
+            logger.error("%s. Personnalité conservée : %s.", reason, kept)
+            self._personality_cache = (mtime, text)
+        return text
 
     # ------------------------------------------------------------------ appel
 
