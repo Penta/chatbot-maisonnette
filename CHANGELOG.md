@@ -2,7 +2,7 @@
 
 Les versions les plus récentes sont en haut. Chaque entrée commence par un résumé en gras, suivi du détail.
 
-**Versions :** [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500)
+**Versions :** [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500) · [Avant la 5.0](#avant-la-version-50)
 
 ---
 
@@ -362,3 +362,265 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 - L'ancien `conversation_history.json` est converti automatiquement au premier lancement (les images sont remplacées par un marqueur texte).
 - Dans le `.env` : `MISTRAL_API_KEY` devient `ANTHROPIC_API_KEY`, et `MISTRAL_MODEL` devient `CLAUDE_MODEL`.
 - L'intent Discord « Presence » n'est plus nécessaire.
+
+---
+
+## Avant la version 5.0
+
+Historique des versions précédentes, avant la réécriture du bot pour Claude. Ce code n'est plus dans le dépôt. Cliquez sur une version majeure pour l'ouvrir.
+
+<details>
+<summary><strong>Versions 4.x</strong> : passage à Mistral (4.0.0 à 4.6.8)</summary>
+
+### Version 4.6.8
+
+- Correction d'une erreur liée aux images corrompues.
+
+### Version 4.6.7
+
+- Retour à la version 4.6.3.
+
+### Version 4.6.6
+
+- Retour à la version 4.6.4.
+
+### Version 4.6.5
+
+- Il n'est plus nécessaire de citer Rika pour qu'elle réagisse : écrire son pseudonyme suffit.
+
+### Version 4.6.4
+
+- Le prompt de personnalité est maintenant chargé après (et non avant) l'historique des messages, ce qui peut éviter que l'IA boucle.
+
+### Version 4.6.3
+
+- Ajout du paramètre « Température » en tant que variable d'environnement.
+
+### Version 4.6.2
+
+- Modification de la manière dont sont rédigés les messages utilisateurs dans l'historique.
+
+### Version 4.6.1
+
+- Plusieurs valeurs écrites en dur dans le code deviennent des variables d'environnement : le modèle utilisé, la taille maximum des images, le nombre de messages comptés lors d'une citation.
+- Les messages du bot de plus de 2000 caractères sont scindés en plusieurs messages au lieu de renvoyer une erreur.
+- Augmentation du nombre de tokens de sortie possible : 1000 → 128000.
+
+### Version 4.6.0
+
+- Le bot connaît désormais la date et l'heure actuelles.
+- Changement du modèle (mais pas vraiment) : `mistral-medium-2508` → `mistral-medium-latest`.
+- Ajout d'un log dans la console indiquant le nombre de tokens envoyés et reçus, et le coût total du message.
+- Réorganisation globale du code.
+
+### Version 4.5.1
+
+- Correction : quand il était cité, le bot ne voyait pas les auteurs des messages précédents.
+- Messages précédents récupérés : 10 → 20.
+
+### Version 4.5.0
+
+- Les utilisateurs peuvent désormais citer le bot dans un autre salon que le sien.
+
+### Version 4.4.0
+
+- Utilisation du modèle `mistral-medium-2508` à la place de `pixtral-large-2411`.
+
+### Version 4.3.1
+
+- Si on envoie un fichier autre qu'une image, le bot répond par un message d'erreur.
+- Augmentation de l'historique à 20 messages.
+
+### Version 4.3.0
+
+- La commande `!reset` est remplacée par `/reset`.
+- Correction : Rika répondait par un smiley aux messages ne contenant qu'un seul mot.
+
+### Version 4.2.0
+
+- Amélioration de la vérification des variables d'environnement.
+- Nombre d'images possibles par message : 3 → 1.
+- Le bot répond par un emoji personnalisé du serveur si l'utilisateur envoie un message contenant uniquement un emoji personnalisé.
+- Correction : le bot pouvait répondre à un sticker dans n'importe quel salon où il se trouvait.
+
+### Version 4.1.1
+
+- Taille maximale des images : 2 → 5 Mo.
+
+### Version 4.1.0
+
+- Modification de la manière dont sont gérés les logs.
+
+### Version 4.0.1
+
+- Correction de l'erreur possible lors de l'envoi d'un sticker : `discord.errors.Forbidden: 403 Forbidden (error code: 50081): Cannot use this sticker`.
+  - Le sticker envoyé est désormais affiché dans la console. Si le bot ne parvient pas à l'envoyer, un autre sticker est sélectionné automatiquement.
+- Ajout de l'heure dans la console pour chaque message.
+
+### Version 4.0.0
+
+- Refonte totale du bot à partir de zéro : il passe de l'API OpenAI à l'API Mistral.
+- Suppression des messages automatiques après inactivité.
+- Suppression de la fonction de rappel.
+- La commande `/reset_history` devient `!reset`.
+- La base de données est remplacée par un fichier `.json`.
+- Si un utilisateur envoie un sticker, le bot répond par un sticker du serveur.
+- Autres modifications.
+
+</details>
+
+<details>
+<summary><strong>Versions 3.x</strong> : messages spontanés après inactivité, <code>/help</code>, rappels (3.0.0)</summary>
+
+### Version 3.0.0
+
+- Après une période d'inactivité, le bot envoie maintenant un message de lui-même dans son salon.
+  - Période d'inactivité : entre 3 et 6 heures, choisie au hasard.
+  - Cette fonction n'est pas active entre minuit et 7 h.
+  - Le bot réagit à l'activité en cours d'un membre du serveur ayant le rôle « Rika ».
+  - Si aucun membre n'a d'activité, le bot envoie un message d'ennui.
+- La date du jour et l'heure actuelle sont envoyées à OpenAI avec le reste, pour qu'il puisse éventuellement s'en servir dans son message.
+- Création de la commande `/help`, qui affiche toutes les commandes disponibles.
+- Création des commandes `/mes_rappels` et `/supprimer_rappel`, qui permettent aux utilisateurs de voir et supprimer leurs rappels enregistrés.
+- Nombre de messages conservés dans l'historique : 150 → 50.
+
+</details>
+
+<details>
+<summary><strong>Versions 2.x</strong> : analyse d'images avec GPT-4o, historique persistant (2.0.0 à 2.8.0)</summary>
+
+### Version 2.8.0
+
+- Le bot peut séparer ses messages en plusieurs parties s'ils sont trop longs, pour qu'ils ne soient plus coupés en plein milieu.
+- Ajout de la commande `/rappel`, utilisable par tous : le bot vous rappelle quelque chose à la date et l'heure choisies.
+  - Le bot vous cite dans son salon à la date et l'heure indiquées.
+  - Les rappels sont visibles par tous les utilisateurs.
+  - Pour le moment, les rappels utilisent uniquement le fuseau horaire Europe/Paris.
+- La commande `!reset_history` devient `/reset_history` (réservée aux administrateurs).
+
+### Version 2.7.0
+
+- Ajout de l'indicateur « Chatbot est en train d'écrire… » pendant que le bot prépare sa réponse.
+- Modification de la manière dont les messages des utilisateurs sont sauvegardés dans la base de données.
+- Quand plusieurs messages arrivent en même temps, ils sont traités un par un et non plus simultanément.
+- Le prompt de GPT-4o pour l'analyse d'images est désormais dans un fichier séparé du code.
+
+### Version 2.6.0
+
+- L'historique est stocké dans une base de données MariaDB au lieu d'un fichier `.json`.
+- Nombre de tokens maximum par message de GPT-4o mini : 400 → 450.
+- Réorganisation du code.
+
+### Version 2.5.0
+
+- Modification des prompts de GPT-4o et GPT-4o mini pour les images.
+- Réorganisation globale du code.
+
+### Version 2.4.3
+
+- Modification des prompts de GPT-4o et GPT-4o mini pour l'analyse d'images.
+- L'analyse d'image de GPT-4o est conservée pendant 15 messages, ou jusqu'à ce qu'une nouvelle image soit postée.
+- La réponse de GPT-4o mini à une image n'apparaît plus dans la console. Le coût en tokens apparaît à la place.
+- Suppression de la fonction qui empêchait certains messages d'être sauvegardés dans l'historique. Elle ne fonctionnait pas.
+
+### Version 2.4.2
+
+- Modification des prompts de GPT-4o pour l'analyse d'images.
+
+### Version 2.4.1
+
+- Suppression du résumé des messages les plus anciens quand l'historique est plein.
+- Historique : 150 → 200 messages maximum.
+- Les analyses d'images de GPT-4o sont supprimées après 7 nouveaux messages.
+
+### Version 2.4.0
+
+- Le nom du bot est désormais une variable d'environnement.
+- Meilleure intégration du prompt de personnalité lors de l'analyse d'une image.
+- Ajout d'un message temporaire pendant l'analyse d'une image, pour prévenir l'utilisateur qu'elle est en cours.
+
+### Version 2.3.0
+
+- Maximum de messages dans l'historique : 150.
+  - Arrivé à 150, les 50 messages les plus anciens sont rassemblés dans un résumé de 1000 tokens maximum.
+  - À chaque nouveau palier de 150, les 50 plus anciens et le résumé précédent servent à générer un nouveau résumé.
+- Le prompt de personnalité n'est plus inclus dans l'historique : il est transmis au bot à part.
+- Suppression du résumé des messages longs (plus de 200 tokens).
+
+### Version 2.2.1
+
+- Correction : les images envoyées seules n'étaient pas commentées par le bot.
+
+### Version 2.2.0
+
+- Changement de modèle : GPT-4o est remplacé par GPT-4o mini.
+  - Le prompt de personnalité et de contexte peut contenir bien plus d'informations.
+  - L'historique de conversation peut être bien plus long.
+- GPT-4o est toujours utilisé pour analyser les images, car il est plus performant pour ça.
+  - Quand une image est postée, GPT-4o l'analyse et transmet son analyse à GPT-4o mini, qui commente l'image.
+
+### Version 2.1.0
+
+- L'historique est désormais conservé entre les redémarrages du bot.
+  - Il peut être réinitialisé avec la commande `!reset_history`, réservée aux administrateurs.
+- Ajout d'un message au démarrage du bot, avec sa version actuelle.
+- Ajout du paramètre de température, qui influe sur la « créativité » et le côté aléatoire du bot. Valeur : 1.1.
+- Suppression de la détection des dessins ASCII (qui servait à les exclure de l'historique). Elle ne fonctionnait pas.
+  - Elle sera réintroduite dans une mise à jour ultérieure.
+- Corrections :
+  - `aiohttp.client_exceptions.ClientConnectionError: Connector is closed.`
+  - `AttributeError: '_MissingSentinel' object has no attribute 'create_task'`
+
+### Version 2.0.1
+
+- Correction : `ValueError: unknown file extension.`
+
+### Version 2.0.0
+
+- Le bot peut désormais détecter les images et y réagir !
+- Plus de limite maximum de messages dans l'historique. Quand l'historique atteint 30 messages, les 20 plus anciens sont résumés automatiquement.
+  - Nombre maximum de tokens du résumé : 150.
+  - Un log dans la console indique que l'historique a atteint 30 messages et qu'un résumé a été fait, avec le coût de l'appel à l'API.
+- Les messages longs (plus de 200 tokens), qu'ils viennent de l'utilisateur ou du bot, sont résumés en 50 tokens maximum avant d'être ajoutés à l'historique.
+  - Les textes longs ne sont plus gardés dans un historique temporaire de 10 messages.
+  - Un log indique le coût en tokens de l'appel à l'API pour résumer le message.
+- Les messages courts (moins de 5 caractères) et ceux qui ne contiennent que des emojis ne sont pas ajoutés à l'historique.
+- Un log dans la console signale quand un dessin ASCII ou un texte long est détecté.
+- Tokens utilisés pour générer une réponse : 500 → 400, pour que les réponses dépassent moins souvent la limite de 2000 caractères de Discord.
+- Diverses optimisations du code.
+
+</details>
+
+<details>
+<summary><strong>Versions 1.x</strong> : premières versions avec GPT-4o (1.1.0 à 1.1.2)</summary>
+
+### Version 1.1.2
+
+- Modification de la détection des dessins ASCII, pour qu'ils soient mieux reconnus.
+
+### Version 1.1.1
+
+- Correction : les textes longs de plus de 1200 caractères ou 200 caractères spéciaux n'étaient pas inclus dans la mémoire courte de 10 messages.
+- Limite pour entrer dans la mémoire courte abaissée à 800 caractères ou 50 caractères spéciaux.
+
+### Version 1.1.0
+
+#### Nouveautés
+
+- La conversation est commune à tous les utilisateurs, au lieu d'une conversation par utilisateur.
+
+#### Changements
+
+- Les images et dessins ASCII ne sont plus sauvegardés dans l'historique de l'IA, ce qui réduit la consommation de tokens.
+- Les textes longs de plus de 1200 caractères ou 200 caractères spéciaux ne restent en mémoire que pendant 10 messages.
+- Personnalité de l'IA modifiée et ajustée.
+- L'IA connaît mieux son environnement et ses capacités.
+- L'ID du salon est désormais une variable d'environnement.
+- Le prompt de personnalité de l'IA est désormais dans un fichier séparé, `personnality_prompt.txt`.
+
+#### Corrections
+
+- L'IA ne poursuivait pas ses messages quand ils contenaient un saut de ligne.
+- Divers autres bugs.
+
+</details>
