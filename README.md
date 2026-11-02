@@ -10,16 +10,16 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 
 - **Salon dédié** : le bot répond à tous les messages du salon choisi (`CHANNEL_ID`). Il se souvient des derniers échanges, même après un redémarrage. Les messages envoyés pendant qu'il écrit reçoivent une seule réponse groupée, comme le ferait quelqu'un qui lit plusieurs messages d'un coup.
 - **Mentions ailleurs** : dans les autres salons, il répond quand on le mentionne, en lisant les derniers messages pour comprendre la discussion (sans mémoire d'un appel à l'autre).
-- **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et son image. Il lit aussi les messages transférés dans son salon.
+- **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et ses images. Il lit aussi les messages transférés dans son salon.
 - **Messages modifiés ou supprimés** : sa mémoire suit. Un message supprimé est oublié, un message modifié prend son nouveau texte.
 - **Recherche web** (en option, `WEB_SEARCH=on`) : il peut chercher sur Internet et lire un lien partagé quand la question porte sur l'actualité ou des informations précises.
 - **Autres bots** : il les ignore, sauf quand ils le mentionnent ou répondent à l'un de ses messages : deux bots peuvent ainsi discuter ensemble.
 
 ### Pièces jointes
 
-Dans son salon comme dans les mentions, le bot lit une image ou un PDF, et un fichier texte, par message :
+Dans son salon comme dans les mentions, le bot lit jusqu'à 4 images ou un PDF, et un fichier texte, par message :
 
-- **Images** (JPEG, PNG, GIF, WebP, BMP, TIFF) : réduites et converties automatiquement si besoin.
+- **Images** (JPEG, PNG, GIF, WebP, BMP, TIFF) : réduites et converties automatiquement si besoin. Avec plusieurs images, il peut les comparer ou parler de « la deuxième ».
 - **PDF** : texte, tableaux, schémas et pages scannées, 20 pages (`PDF_MAX_PAGES`) et 20 Mo au plus. Les PDF protégés par un mot de passe sont refusés.
 - **Fichiers texte** (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, configuration, HTML, code…), 100 Ko au plus.
 

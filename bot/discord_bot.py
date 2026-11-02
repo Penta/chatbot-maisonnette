@@ -40,6 +40,8 @@ IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".
 ONLINE_COLOR = discord.Color(0x23A55A)
 # Longueur maximale du texte d'un message cité ou transféré transmis à Claude.
 QUOTE_MAX_LENGTH = 500
+# Images lues par message : chacune coûte jusqu'à ~1 600 tokens.
+MAX_IMAGES = 4
 # Messages écrits par quelqu'un ; les autres types sont des messages système
 # (arrivée d'un membre, message épinglé, boost, fil créé…).
 USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
@@ -103,11 +105,11 @@ class PendingMessage:
     message: discord.Message
     line: dict   # ligne conservée en mémoire (voir history.render_line)
     extra: str   # ajouté pour Claude seulement : contenu du fichier texte joint
-    image: ImageData | None
+    images: list[ImageData]  # images, ou un seul PDF
 
     @property
     def user_text(self) -> str:
-        """Texte envoyé à Claude : l'image ou le fichier lui-même remplace son repère."""
+        """Texte envoyé à Claude : les images ou le fichier eux-mêmes remplacent leur repère."""
         line = {key: value for key, value in self.line.items() if key != "attachments"}
         return render_line(line) + self.extra
 
@@ -376,18 +378,18 @@ class ChatBot(commands.Bot):
             if await self.reply_to_sticker(message) or await self.reply_to_emoji(message):
                 return
 
-        forward, forward_image = await self.read_forward(message)
+        forward, forward_images = await self.read_forward(message)
         if not (content or message.attachments or message.stickers or forward):
             return  # sondage, transfert d'un message vide… : rien à lire
 
         attachments = await self.read_attachments(message)
         if attachments is False:
             return  # pièce jointe refusée, l'utilisateur a été prévenu
-        image, text_file = attachments
+        images, text_file = attachments
 
-        # L'image du message cité n'est utilisée que si le message n'en contient pas lui-même.
-        reply, reply_image = await self.read_reply(message, want_image=image is None and forward_image is None)
-        image = image or forward_image or reply_image
+        # Les images du message cité ne sont utilisées que si le message n'en contient pas lui-même.
+        reply, reply_images = await self.read_reply(message, want_images=not (images or forward_images))
+        images = images or forward_images or reply_images
 
         line: dict = {"id": message.id, "date": self.timestamp(message), "author": author_name(message.author)}
         if forward:
@@ -397,7 +399,7 @@ class ChatBot(commands.Bot):
                 line["reply_to"] = message.reference.message_id  # citation retirée si ce message est supprimé
                 line["reply"] = reply
             line["content"] = self.message_body(message)
-        markers = [attachment_marker(image)] if image else []
+        markers = [attachment_marker(image) for image in images]
         extra = ""
         if text_file:
             extra = text_file_prompt(*text_file)
@@ -407,7 +409,7 @@ class ChatBot(commands.Bot):
 
         # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
         # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel.
-        self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, line, extra, image))
+        self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, line, extra, images))
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_main_channel)
             return
@@ -425,13 +427,13 @@ class ChatBot(commands.Bot):
             if len(batch) > 1:
                 logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
             # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
-            parts = [(p.user_text, p.image) for p in batch]
+            parts = [(p.user_text, p.images) for p in batch]
             lines = [p.line for p in batch]
             notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
             if note := self.presence_note():
                 notes.append(note)
             for note in reversed(notes):
-                parts.insert(0, (note, None))
+                parts.insert(0, (note, []))
                 lines.insert(0, {"content": note})
             try:
                 async with typing(channel):
@@ -483,21 +485,21 @@ class ChatBot(commands.Bot):
                 logger.warning("Pas la permission de lire l'historique de #%s.", message.channel)
         lines.reverse()
 
-        # Seuls la première image (à défaut, le premier PDF) et le premier fichier texte de la mention
-        # sont lus (les autres pièces jointes sont ignorées). L'image du message cité ne sert que s'il
-        # n'y a ni image ni PDF.
-        images = [a for a in message.attachments if looks_like_image(a)]
+        # Seuls les MAX_IMAGES premières images (à défaut, le premier PDF) et le premier fichier texte
+        # de la mention sont lus (les autres pièces jointes sont ignorées). Les images du message cité
+        # ne servent que s'il n'y a ni image ni PDF.
+        image_files = [a for a in message.attachments if looks_like_image(a)][:MAX_IMAGES]
         pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
         try:
-            if images:
-                image = await self.download_image(images[0])
+            if image_files:
+                images = await self.download_images(image_files)
             else:
-                image = await self.download_pdf(pdfs[0]) if pdfs else None
+                images = [await self.download_pdf(pdfs[0])] if pdfs else []
         except (ImageError, PdfError) as exc:
             await self.safe_reply(message, exc.user_message)
             return
-        reply, reply_image = await self.read_reply(message, want_image=image is None)
-        image = image or reply_image
+        reply, reply_images = await self.read_reply(message, want_images=not images)
+        images = images or reply_images
 
         bot_name = f"@{message.guild.me.display_name}" if message.guild else f"@{self.user.name}"
         text = short_emojis(message.clean_content.replace(bot_name, "").strip()) or "(simple mention, sans texte)"
@@ -524,7 +526,7 @@ class ChatBot(commands.Bot):
 
         async with typing(message.channel):
             try:
-                answer = await self.claude.ask([], [(prompt, image)], emojis=emoji_names(message.guild),
+                answer = await self.claude.ask([], [(prompt, images)], emojis=emoji_names(message.guild),
                                                cache_history=False, member_notes=await self.member_notes([message]))
             except ClaudeError as exc:
                 await self.safe_reply(message, exc.user_message)
@@ -574,7 +576,7 @@ class ChatBot(commands.Bot):
             # Attend la fin d'une réponse en cours ; le statut a pu changer encore entre-temps.
             if self.presence.status is not after:
                 return
-            parts = [(note, None) for note in (self.presence_note(), self.presence.departure_note()) if note]
+            parts = [(note, []) for note in (self.presence_note(), self.presence.departure_note()) if note]
             try:
                 async with typing(channel):
                     answer = await self.claude.ask(self.history.get(channel.id), parts,
@@ -670,14 +672,14 @@ class ChatBot(commands.Bot):
 
     async def read_attachments(
         self, message: discord.Message
-    ) -> tuple[ImageData | None, tuple[str, str] | None] | bool:
-        """Vérifie les pièces jointes, puis télécharge l'image (ou le PDF) et le fichier texte.
+    ) -> tuple[list[ImageData], tuple[str, str] | None] | bool:
+        """Vérifie les pièces jointes, puis télécharge les images (ou le PDF) et le fichier texte.
 
-        Renvoie (image ou PDF, (nom, contenu) du fichier texte), chacun pouvant valoir None,
+        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) du fichier texte ou None),
         ou False si l'envoi est refusé (l'utilisateur est alors prévenu).
         """
         if not message.attachments:
-            return None, None
+            return [], None
 
         images = [a for a in message.attachments if looks_like_image(a)]
         pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
@@ -688,8 +690,8 @@ class ChatBot(commands.Bot):
             await self.safe_reply(message, f"Je ne peux lire que {kinds} et des fichiers texte (.txt, .md, .csv, code…). "
                                            f"Fichier(s) non pris en charge : {', '.join(others)}.")
             return False
-        if len(images) > 1:
-            await self.safe_reply(message, "Une seule image par message, s'il te plaît.")
+        if len(images) > MAX_IMAGES:
+            await self.safe_reply(message, f"{MAX_IMAGES} images par message au maximum, s'il te plaît.")
             return False
         if pdfs and (images or len(pdfs) > 1):
             await self.safe_reply(message, "Un seul PDF par message, sans image, s'il te plaît.")
@@ -700,14 +702,14 @@ class ChatBot(commands.Bot):
 
         try:
             if images:
-                image = await self.download_image(images[0])
+                files = await self.download_images(images)
             else:
-                image = await self.download_pdf(pdfs[0]) if pdfs else None
+                files = [await self.download_pdf(pdfs[0])] if pdfs else []
             text_file = await self.download_text_file(texts[0]) if texts else None
         except (ImageError, PdfError, TextFileError) as exc:
             await self.safe_reply(message, exc.user_message)
             return False
-        return image, text_file
+        return files, text_file
 
     async def download_text_file(self, attachment: discord.Attachment) -> tuple[str, str]:
         """Télécharge un fichier texte et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
@@ -751,6 +753,17 @@ class ChatBot(commands.Bot):
         # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot).
         return await asyncio.to_thread(prepare_image, data)
 
+    async def download_images(self, attachments: list[discord.Attachment]) -> list[ImageData]:
+        """Télécharge et prépare plusieurs images en parallèle (lève ImageError si l'une pose problème)."""
+        async def download(attachment: discord.Attachment) -> ImageData:
+            try:
+                return await self.download_image(attachment)
+            except ImageError as exc:
+                if len(attachments) > 1:  # précise laquelle, sinon « cette image » est ambigu
+                    raise ImageError(f"« {attachment.filename} » : {exc.user_message}")
+                raise
+        return list(await asyncio.gather(*(download(a) for a in attachments)))
+
     # ------------------------------------------- message cité ou transféré
 
     async def fetch_cited(self, message: discord.Message) -> discord.Message | None:
@@ -774,59 +787,61 @@ class ChatBot(commands.Bot):
         cited = await self.fetch_cited(message)
         return cited is not None and cited.author == self.user
 
-    async def read_reply(self, message: discord.Message, want_image: bool) -> tuple[str | None, ImageData | None]:
+    async def read_reply(self, message: discord.Message, want_images: bool) -> tuple[str | None, list[ImageData]]:
         """Lit le message auquel l'utilisateur répond.
 
-        Renvoie sa description pour Claude, ainsi que son image si want_image est vrai,
-        ou (None, None) si le message ne répond à rien ou si le message cité est inaccessible.
+        Renvoie sa description pour Claude, ainsi que ses images si want_images est vrai,
+        ou (None, []) si le message ne répond à rien ou si le message cité est inaccessible.
         """
         cited = await self.fetch_cited(message)
         if cited is None:
-            return None, None
+            return None, []
 
-        image = await self.first_image(cited.attachments, "cité") if want_image else None
-        description = self.describe_quoted(cited.clean_content, image, cited.attachments, cited.stickers)
+        images = await self.quoted_images(cited.attachments, "cité") if want_images else []
+        description = self.describe_quoted(cited.clean_content, images, cited.attachments, cited.stickers)
 
         who = "à ton message" if cited.author == self.user else f"au message de {author_name(cited.author)}"
-        return f"en réponse {who} du {self.timestamp(cited)} : {description or '(message vide)'}", image
+        return f"en réponse {who} du {self.timestamp(cited)} : {description or '(message vide)'}", images
 
-    async def read_forward(self, message: discord.Message) -> tuple[str | None, ImageData | None]:
+    async def read_forward(self, message: discord.Message) -> tuple[str | None, list[ImageData]]:
         """Lit le message transféré (bouton « Transférer » de Discord).
 
-        Renvoie sa description pour Claude et son image, ou (None, None) si le message
+        Renvoie sa description pour Claude et ses images, ou (None, []) si le message
         n'est pas un transfert ou si le message transféré ne contient rien de lisible.
         """
         if not message.message_snapshots:
-            return None, None
+            return None, []
         snapshot = message.message_snapshots[0]
 
-        image = await self.first_image(snapshot.attachments, "transféré")
+        images = await self.quoted_images(snapshot.attachments, "transféré")
         # Contrairement à un message normal, le contenu transféré garde ses mentions brutes (<@123>).
         content = self.clean_mentions(snapshot.content)
-        description = self.describe_quoted(content, image, snapshot.attachments, snapshot.stickers)
+        description = self.describe_quoted(content, images, snapshot.attachments, snapshot.stickers)
         if not description:
-            return None, None
-        return f"du {self.timestamp(snapshot)} : {description}", image
+            return None, []
+        return f"du {self.timestamp(snapshot)} : {description}", images
 
-    async def first_image(self, attachments: list[discord.Attachment], kind: str) -> ImageData | None:
-        """Télécharge la première image d'un message cité ou transféré (None si aucune ou illisible)."""
-        images = [a for a in attachments if looks_like_image(a)]
-        if not images:
-            return None
-        try:
-            return await self.download_image(images[0])
-        except ImageError as exc:
-            logger.warning("Image du message %s ignorée : %s", kind, exc.user_message)
-            return None
+    async def quoted_images(self, attachments: list[discord.Attachment], kind: str) -> list[ImageData]:
+        """Télécharge les MAX_IMAGES premières images d'un message cité ou transféré (les illisibles sont ignorées)."""
+        images = [a for a in attachments if looks_like_image(a)][:MAX_IMAGES]
+        results = await asyncio.gather(*(self.download_image(a) for a in images), return_exceptions=True)
+        for result in results:
+            if isinstance(result, ImageError):
+                logger.warning("Image du message %s ignorée : %s", kind, result.user_message)
+            elif isinstance(result, BaseException):
+                raise result
+        return [r for r in results if isinstance(r, ImageData)]
 
     @staticmethod
-    def describe_quoted(content: str, image: ImageData | None, attachments: list, stickers: list) -> str:
+    def describe_quoted(content: str, images: list[ImageData], attachments: list, stickers: list) -> str:
         """Description d'un message cité ou transféré (vide s'il n'y a rien de lisible)."""
         content = short_emojis(content.strip())
         if len(content) > QUOTE_MAX_LENGTH:
             content = content[:QUOTE_MAX_LENGTH].rstrip() + "…"
         parts = [f"« {content} »"] if content else []
-        if image is not None:
+        if len(images) > 1:
+            parts.append(f"[ses {len(images)} images sont jointes à ce message]")
+        elif images:
             parts.append("[son image est jointe à ce message]")
         elif attachments:
             parts.append("[pièce jointe]")

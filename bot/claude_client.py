@@ -222,13 +222,15 @@ class ClaudeClient:
     # ------------------------------------------------------------------ appel
 
     @staticmethod
-    def build_user_content(parts: list[tuple[str, ImageData | None]]) -> str | list[dict]:
-        """Un ou plusieurs messages à la suite, chacun précédé de son image (ou PDF) éventuel."""
-        if all(image is None for _, image in parts):
+    def build_user_content(parts: list[tuple[str, list[ImageData]]]) -> str | list[dict]:
+        """Un ou plusieurs messages à la suite, chacun précédé de ses images (ou de son PDF) éventuels."""
+        if not any(images for _, images in parts):
             return "\n".join(text for text, _ in parts)
         content: list[dict] = []
-        for text, image in parts:
-            if image is not None:
+        for text, images in parts:
+            for number, image in enumerate(images, 1):
+                if len(images) > 1:  # numérotées : Claude peut parler de « la deuxième image »
+                    content.append({"type": "text", "text": f"Image {number} :"})
                 content.append({
                     "type": "document" if image.is_pdf else "image",
                     "source": {
@@ -240,9 +242,9 @@ class ClaudeClient:
             content.append({"type": "text", "text": text})
         return content
 
-    async def ask(self, history: list[dict], parts: list[tuple[str, ImageData | None]],
+    async def ask(self, history: list[dict], parts: list[tuple[str, list[ImageData]]],
                   emojis: list[str] | None = None, cache_history: bool = True, member_notes: str = "") -> Answer:
-        """Envoie l'historique + le ou les nouveaux messages (texte, image ou PDF), et renvoie la réponse de Claude.
+        """Envoie l'historique + le ou les nouveaux messages (texte, images ou PDF), et renvoie la réponse de Claude.
 
         emojis : noms des emojis du serveur que Claude peut écrire (voir EMOJI_NOTE).
         cache_history=False évite d'écrire les messages en cache quand l'appel suivant ne les
@@ -261,7 +263,7 @@ class ClaudeClient:
                 history_marker = False  # marqueur déjà placé, avant les fiches
             content.append({"type": "text", "text": member_notes})
         messages = list(history) + [{"role": "user", "content": content}]
-        attachments = {("pdf" if image.is_pdf else "image") for _, image in parts if image is not None}
+        attachments = {("pdf" if image.is_pdf else "image") for _, images in parts for image in images}
 
         system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
         if self.settings.web_search:
