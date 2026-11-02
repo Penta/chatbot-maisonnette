@@ -193,6 +193,13 @@ class ChatBot(commands.Bot):
                 prices = (" S'il existe bien, renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK "
                           "pour estimer les coûts.")
             logger.warning("Modèle %s inconnu du bot : vérifie CLAUDE_MODEL dans le .env.%s", s.model, prices)
+        # Une réponse qui remplit MAX_TOKENS s'écrit à environ 80 tokens par seconde au mieux ;
+        # les recherches web et les pages lues ajoutent leur propre attente.
+        needed = s.max_tokens // 80 + (40 if s.web_search else 0)
+        if s.api_timeout < needed:
+            logger.warning("API_TIMEOUT (%g s) est court pour MAX_TOKENS=%s%s : une longue réponse serait "
+                           "abandonnée (« Je mets trop de temps à répondre »). Mets au moins %s dans le .env.",
+                           s.api_timeout, s.max_tokens, " avec la recherche web" if s.web_search else "", needed)
         if self.memory:
             # Un fichier plein se réécrit d'un seul appel d'outil, qui doit tenir dans MAX_TOKENS avec
             # la réflexion : environ 2,5 caractères par token en français (estimation prudente),

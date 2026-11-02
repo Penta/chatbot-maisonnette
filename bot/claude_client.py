@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import re
@@ -190,7 +191,8 @@ class ClaudeClient:
     def __init__(self, settings: Settings, memory: MemoryStore | None = None):
         self.settings = settings
         self.memory = memory  # None : mémoire des membres désactivée
-        # Le SDK réessaie tout seul les erreurs temporaires (surcharge, limite de requêtes…).
+        # Le SDK réessaie tout seul les erreurs temporaires (surcharge, limite de requêtes…),
+        # dans la limite de API_TIMEOUT au total (voir _call).
         self._client = anthropic.AsyncAnthropic(
             api_key=settings.anthropic_api_key,
             timeout=settings.api_timeout,
@@ -447,12 +449,14 @@ class ClaudeClient:
     async def _call(self, params: dict, attachments: set[str] | frozenset[str] = frozenset()):
         """Appel à l'API ; attachments : pièces jointes envoyées ("image", "pdf"), pour les messages d'erreur."""
         try:
-            return await self._client.messages.create(**params)
+            # API_TIMEOUT borne l'attente totale, relances du SDK comprises : une erreur rapide (surcharge)
+            # est encore réessayée, mais une requête trop lente n'est pas relancée (recherches refacturées).
+            return await asyncio.wait_for(self._client.messages.create(**params), self.settings.api_timeout)
         except anthropic.RateLimitError:
             logger.warning("Limite de requêtes Anthropic atteinte.")
             raise ClaudeError("Je reçois trop de messages en ce moment, réessaie dans une minute.")
-        except anthropic.APITimeoutError:
-            logger.warning("Délai dépassé lors de l'appel à Claude.")
+        except (anthropic.APITimeoutError, asyncio.TimeoutError):
+            logger.warning("Délai dépassé lors de l'appel à Claude (API_TIMEOUT=%g s).", self.settings.api_timeout)
             raise ClaudeError("Je mets trop de temps à répondre, réessaie dans un instant.")
         except anthropic.APIConnectionError as exc:
             logger.error("Connexion à l'API impossible : %s", exc)
