@@ -56,6 +56,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une date sans fuseau dans `presence_state.json` n'empêche plus le démarrage.** Après une modification à la main, une date comme `2026-11-03T10:00:00` arrêtait le bot dès le lancement. Le fichier est maintenant ignoré, avec un avertissement dans le journal, et Rika tire un nouveau statut.
 
+- **Une ligne de code très longue ne fige plus le bot.** Une réponse dont un bloc de code s'ouvrait sur une ligne de près de 2000 caractères (« ```py » suivi de texte) figeait tout le bot, dans tous les salons, jusqu'au redémarrage. Elle est maintenant découpée normalement.
+
 ---
 
 ## Version 5.11

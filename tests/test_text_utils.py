@@ -1,5 +1,6 @@
 """Tests du découpage des messages et du retrait de la réflexion. Lancer depuis la racine du projet : python -m unittest"""
 
+import threading
 import unittest
 
 from bot.text_utils import DISCORD_LIMIT, split_message, strip_reasoning
@@ -149,6 +150,47 @@ class SplitMessageTest(unittest.TestCase):
                 text = "```py\n" + "a" * 5 + "\n```" + "x" * after + " fin\nSuite."
                 for chunk in split_message(text, 40):
                     self.assertLessEqual(len(chunk), 40, chunk)
+
+    def split_in_time(self, text: str, limit: int, delay: float = 2) -> list[str]:
+        """Lance split_message dans un fil à part : une boucle infinie fait échouer le test au lieu de le bloquer.
+
+        Le fil est « daemon » pour ne pas empêcher la fin des tests s'il ne s'arrête jamais."""
+        result: list[list[str]] = []
+        thread = threading.Thread(target=lambda: result.append(split_message(text, limit)), daemon=True)
+        thread.start()
+        thread.join(delay)
+        if thread.is_alive():
+            self.fail(f"split_message ne rend pas la main en {delay} s (limite {limit})")
+        return result[0]
+
+    def test_long_opening_fence_line(self):
+        # Une ligne qui ouvre un bloc puis continue sur des centaines de caractères (« ```py » suivi de
+        # texte) : seul « ```py » est rouvert au début des morceaux suivants, et le découpage se termine.
+        for limit, size in ((DISCORD_LIMIT, 1000), (40, 23)):
+            openings = {
+                "un long mot": "```py " + "w" * (2 * size),
+                "avec des espaces": "```py " + "w " * size,
+                "sans aucun espace": "```" + "w" * (3 * size),
+            }
+            for name, opening in openings.items():
+                with self.subTest(limit=limit, ouverture=name):
+                    chunks = self.split_in_time(opening + "\ncode\n```\nfin", limit)
+                    self.assert_valid(chunks, limit)
+                    self.assertTrue(any("code" in chunk.split("\n") for chunk in chunks), chunks)
+                    self.assertTrue(chunks[-1].endswith("fin"), chunks[-1])
+                    # Un bloc rouvert ne reprend que « ```py » (ou « ``` »), pas le texte de la ligne d'ouverture.
+                    for chunk in chunks[1:]:
+                        first = chunk.split("\n")[0]
+                        if first.startswith("```"):
+                            self.assertLessEqual(len(first), len("```py"), chunk)
+
+    def test_limit_too_small_for_fence(self):
+        # Une limite plus petite que « ```python » et sa fermeture ne peut pas être tenue, mais le
+        # découpage doit quand même se terminer, sans rien perdre du code (la ligne « ```python » elle-même
+        # est coupée lettre par lettre, d'où « python » devant).
+        chunks = self.split_in_time("```python\n" + "abcdef" * 3 + "\n```", 8)
+        self.assertEqual("".join(line for chunk in chunks for line in chunk.split("\n") if "`" not in line),
+                         "python" + "abcdef" * 3)
 
 
 class StripReasoningTest(unittest.TestCase):

@@ -7,6 +7,8 @@ import re
 DISCORD_LIMIT = 2000
 
 _FENCE_RE = re.compile(r"^\s*```(\S*)")
+# Au-delà, le mot collé à ``` n'est pas un nom de langage : le bloc est rouvert avec ``` seul.
+_MAX_LANGUAGE = 20
 
 # Bloc dans lequel le modèle écrit parfois sa réflexion au lieu de la garder pour lui.
 _REASONING_BLOCK = re.compile(r"\s*<(think|thinking|reasoning|function_calls|invoke)\b[^>]*>.*?</\1\s*>",
@@ -38,7 +40,7 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
 
     chunks: list[str] = []
     current = ""
-    open_fence: str | None = None  # ligne d'ouverture du bloc de code en cours, ex. "```python"
+    open_fence: str | None = None  # marqueur du bloc de code en cours, ex. "```python" (sans le texte qui suit)
 
     def closing_len() -> int:
         return len("\n```") if open_fence is not None else 0
@@ -59,11 +61,14 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
 
     for line in text.split("\n"):
         match = _FENCE_RE.match(line)
-        # Une ligne trop longue à elle seule est découpée en morceaux plus petits.
-        pieces = _split_long_line(line, limit - 10 - (len(open_fence) if open_fence else 0))
+        new_fence = _fence(match) if match and open_fence is None else None
+        # Une ligne trop longue à elle seule est découpée en morceaux plus petits, assez courts pour
+        # tenir avec la réouverture du bloc (en cours ou ouvert par cette ligne) et sa fermeture.
+        fence = new_fence or open_fence
+        pieces = _split_long_line(line, limit - 10 - (len(fence) if fence else 0))
         # Une ligne qui ouvre un bloc doit laisser la place de le refermer. Celle qui le ferme n'en a pas
         # besoin, sauf si elle est découpée : le bloc reste alors ouvert entre ses morceaux.
-        if match and open_fence is None:
+        if new_fence:
             room_to_close = len("\n```")
         elif match and len(pieces) == 1:
             room_to_close = 0
@@ -74,9 +79,13 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
             if len(current) + len(addition) + room_to_close > limit:
                 flush()
             current += addition
+            # Le bloc est ouvert dès le premier morceau de sa ligne d'ouverture : si elle est découpée,
+            # la suite est dans le bloc, à refermer en fin de morceau.
+            if new_fence:
+                open_fence = new_fence
 
-        if match:
-            open_fence = None if open_fence is not None else line.strip()
+        if match and not new_fence:
+            open_fence = None
 
     # Dernier morceau : pas de bloc à refermer artificiellement s'il est déjà fermé.
     body = current.rstrip("\n")
@@ -85,7 +94,15 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
     return chunks
 
 
+def _fence(match: re.Match[str]) -> str:
+    """Marqueur d'ouverture d'un bloc (« ```py »), sans le texte qui suit sur la même ligne."""
+    language = match.group(1)
+    return "```" + (language if len(language) <= _MAX_LANGUAGE else "")
+
+
 def _split_long_line(line: str, limit: int) -> list[str]:
+    # Au moins un caractère par morceau, même si la place manque : sinon la ligne ne raccourcit jamais.
+    limit = max(limit, 1)
     if len(line) <= limit:
         return [line]
     pieces: list[str] = []
