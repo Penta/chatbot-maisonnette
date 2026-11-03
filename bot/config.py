@@ -39,7 +39,8 @@ def _get_str(name: str, default: str | None = None, required: bool = False) -> s
     return value.strip()
 
 
-def _get_int(name: str, default: int | None = None, required: bool = False, minimum: int | None = None) -> int | None:
+def _get_int(name: str, default: int | None = None, required: bool = False, minimum: int | None = None,
+             maximum: int | None = None) -> int | None:
     raw = _get_str(name, required=required)
     if raw is None:
         return default
@@ -49,6 +50,8 @@ def _get_int(name: str, default: int | None = None, required: bool = False, mini
         raise ConfigError(f"La variable {name} doit être un nombre entier (valeur actuelle : {raw!r}).")
     if minimum is not None and value < minimum:
         raise ConfigError(f"La variable {name} doit être supérieure ou égale à {minimum} (valeur actuelle : {value}).")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"La variable {name} ne peut pas dépasser {maximum} (valeur actuelle : {value}).")
     return value
 
 
@@ -247,7 +250,8 @@ def load_settings() -> Settings:
         web_search=web_search_raw == "on",
         web_max_uses=_get_int("WEB_MAX_USES", default=3, minimum=1),
         max_history_length=_get_int("MAX_HISTORY_LENGTH", default=10, minimum=2),
-        context_message_limit=_get_int("CONTEXT_MESSAGE_LIMIT", default=20, minimum=0),
+        # Lus à chaque mention puis envoyés à Claude : au-delà, chaque mention coûte cher (ou dépasse la limite).
+        context_message_limit=_get_int("CONTEXT_MESSAGE_LIMIT", default=20, minimum=0, maximum=100),
         history_file=history_file,
         personality_file=Path(_get_str("PERSONALITY_FILE", default="personality_prompt.txt")),
         memory=memory_raw == "on",

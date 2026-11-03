@@ -24,6 +24,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une personnalité illisible ne rend plus Rika muette.** Un fichier de personnalité qui n'est pas en UTF-8 (enregistré en ANSI avec le Bloc-notes, par exemple), illisible, ou un `PERSONALITY_FILE` qui désigne un dossier (ConfigMap montée comme dossier sur OpenShift) faisait échouer chaque message sans réponse. Rika garde maintenant la dernière personnalité valide, ou celle par défaut au démarrage, et le journal indique une seule fois le problème et comment le corriger. Le fichier est relu dès qu'il est modifié.
 
+- **`CONTEXT_MESSAGE_LIMIT` plafonné à 100.** Aucune limite n'empêchait d'y mettre 2000 : chaque mention demandait alors une vingtaine d'appels à Discord et envoyait environ 100 000 tokens à Claude (plusieurs dizaines de centimes par mention, ou un refus « prompt is too long »). Au-delà de 100, le bot refuse de démarrer avec un message « Erreur de configuration » clair.
+
 - **Un dossier absent est signalé au démarrage.** Si le dossier de `LOG_FILE`, de `HISTORY_FILE` ou de `MEMORY_DIR` n'existe pas (volume Docker mal monté, faute de frappe) ou n'est pas accessible en écriture, le bot refuse de démarrer avec un message « Erreur de configuration » clair, au lieu d'une trace Python (`LOG_FILE`) ou de tourner sans jamais rien sauvegarder (`HISTORY_FILE`). L'historique est aussi enregistré comme les autres fichiers : envoyé jusqu'au disque avant de remplacer l'ancien, pour ne pas finir vide après une coupure de courant.
 
 ---
