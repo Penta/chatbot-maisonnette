@@ -548,26 +548,38 @@ class ChatBot(commands.Bot):
         await self.send_answer(last, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
+        # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
+        # puis partent ensemble dans un seul appel.
+        self._mentions.setdefault(message.channel.id, []).append(message)
         if not self.available() or message.channel.id in self._waiters:
-            self._mentions.setdefault(message.channel.id, []).append(message)
             self.answer_later(message, self.answer_mentions)
             return
-        await self.answer_mention(message)
+        await self.answer_mentions(message.channel)
 
     async def answer_mentions(self, channel: discord.abc.Messageable, late: Status | None = None) -> None:
-        """Répond, une par une, aux mentions reçues pendant une absence (avec « Répondre »)."""
-        for message in sorted(self._mentions.pop(channel.id, []), key=lambda m: m.id):
+        """Répond en une fois aux mentions en attente d'un salon (hors salon dédié)."""
+        # Un seul appel à la fois par salon, envoi compris : la réponse suivante voit la précédente dans le contexte.
+        async with self.history.lock(channel.id):
+            batch = sorted(self._mentions.pop(channel.id, []), key=lambda m: m.id)
+            if not batch:
+                return  # déjà parties avec une mention précédente
+            if len(batch) > 1:
+                logger.info("%s mentions regroupées en une seule réponse dans #%s", len(batch), channel)
             try:
-                await self.answer_mention(message, late)
+                await self.answer_mention(batch, late)
             finally:
-                self.forget_waiting(message)
+                self.forget_waiting(*batch)
 
-    async def answer_mention(self, message: discord.Message, late: Status | None = None) -> None:
-        """Hors du salon dédié : répond à une mention en lisant les messages récents."""
+    async def answer_mention(self, mentions: list[discord.Message], late: Status | None = None) -> None:
+        """Hors du salon dédié : répond aux mentions d'un même salon en lisant les messages récents."""
+        channel = mentions[-1].channel
+        mention_ids = {m.id for m in mentions}
         lines: list[str] = []
         if self.settings.context_message_limit > 0:
             try:
-                async for msg in message.channel.history(limit=self.settings.context_message_limit, before=message):
+                async for msg in channel.history(limit=self.settings.context_message_limit, before=mentions[-1]):
+                    if msg.id in mention_ids:
+                        continue  # décrite plus bas, avec ses pièces jointes
                     content = short_emojis(msg.clean_content.strip())
                     if msg.attachments:
                         content = (content + " [pièce jointe]").strip()
@@ -576,9 +588,46 @@ class ChatBot(commands.Bot):
                     if content:
                         lines.append(f"{author_name(msg.author)} : {content}")
             except discord.Forbidden:
-                logger.warning("Pas la permission de lire l'historique de #%s.", message.channel)
+                logger.warning("Pas la permission de lire l'historique de #%s.", channel)
         lines.reverse()
 
+        answered, parts = [], []
+        for message in mentions:
+            if part := await self.mention_part(message):
+                answered.append(message)
+                parts.append(part)
+        if not parts:
+            return  # pièces jointes refusées, les auteurs ont été prévenus
+        last = answered[-1]
+
+        channel_name = f"#{channel.name}" if hasattr(channel, "name") else "un message privé"
+        header = []
+        if late:
+            header.append(self.presence.late_note(late, several=len(parts) > 1))
+        if note := self.presence_note():
+            header.append(note)
+        if lines:
+            header.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
+        text, images = parts[0]
+        parts[0] = ("\n\n".join([*header, text]), images)
+
+        async with typing(channel):
+            try:
+                answer = await self.claude.ask([], parts, emojis=emoji_names(last.guild), cache_history=False,
+                                               member_notes=await self.member_notes(answered))
+            except ClaudeError as exc:
+                await self.safe_reply(last, exc.user_message)
+                return
+            except Exception:
+                logger.exception("Erreur inattendue pendant le traitement d'une mention")
+                await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
+                return
+        # En retard, la réponse cite la dernière mention : on sait à quoi elle répond.
+        await self.send_answer(last, answer.text, reply=late is not None)
+
+    async def mention_part(self, message: discord.Message) -> tuple[str, list[ImageData]] | None:
+        """Une mention telle qu'elle est transmise à Claude, ou None si une pièce jointe est refusée
+        (l'auteur a été prévenu)."""
         # Seuls les MAX_IMAGES premières images (à défaut, le premier PDF) et le premier fichier texte
         # de la mention sont lus (les autres pièces jointes sont ignorées). Les images du message cité
         # ne servent que s'il n'y a ni image ni PDF.
@@ -591,24 +640,14 @@ class ChatBot(commands.Bot):
                 images = [await self.download_pdf(pdfs[0])] if pdfs else []
         except (ImageError, PdfError) as exc:
             await self.safe_reply(message, exc.user_message)
-            return
+            return None
         reply, reply_images = await self.read_reply(message, want_images=not images)
         images = images or reply_images
 
         bot_name = f"@{message.guild.me.display_name}" if message.guild else f"@{self.user.name}"
         text = short_emojis(message.clean_content.replace(bot_name, "").strip()) or "(simple mention, sans texte)"
-        channel_name = f"#{message.channel.name}" if hasattr(message.channel, "name") else "un message privé"
-
-        parts = []
-        if late:
-            parts.append(self.presence.late_note(late, several=False))
-        if note := self.presence_note():
-            parts.append(note)
-        if lines:
-            parts.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
         reply_part = f" ({reply})" if reply else ""
-        parts.append(f"{self.timestamp(message)}, {author_name(message.author)} te mentionne{reply_part} et écrit : {text}")
-        prompt = "\n\n".join(parts)
+        prompt = f"{self.timestamp(message)}, {author_name(message.author)} te mentionne{reply_part} et écrit : {text}"
 
         text_files = [a for a in message.attachments if looks_like_text(a)]
         if text_files:
@@ -616,21 +655,8 @@ class ChatBot(commands.Bot):
                 prompt += text_file_prompt(*await self.download_text_file(text_files[0]))
             except TextFileError as exc:
                 await self.safe_reply(message, exc.user_message)
-                return
-
-        async with typing(message.channel):
-            try:
-                answer = await self.claude.ask([], [(prompt, images)], emojis=emoji_names(message.guild),
-                                               cache_history=False, member_notes=await self.member_notes([message]))
-            except ClaudeError as exc:
-                await self.safe_reply(message, exc.user_message)
-                return
-            except Exception:
-                logger.exception("Erreur inattendue pendant le traitement d'une mention")
-                await self.safe_reply(message, "Désolé, une erreur inattendue est survenue.")
-                return
-        # En retard, la réponse cite la mention : on sait à quoi elle répond.
-        await self.send_answer(message, answer.text, reply=late is not None)
+                return None
+        return prompt, images
 
     # ------------------------------------------------------ réponses différées
 

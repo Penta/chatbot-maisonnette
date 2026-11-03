@@ -1,0 +1,122 @@
+"""Tests des mentions hors du salon dédié : une rafale ne lance pas un appel par message.
+Lancer depuis la racine du projet : python -m unittest"""
+
+import asyncio
+import contextlib
+import unittest
+from unittest import mock
+
+from bot.discord_bot import ChatBot
+
+CHANNEL_ID = 20
+
+
+def fake_bot() -> mock.Mock:
+    bot = mock.Mock()
+    bot._mentions = {}
+    bot._waiters = {}
+    bot.available.return_value = True
+    lock = asyncio.Lock()
+    bot.history.lock.return_value = lock
+    bot.answer_mentions = lambda channel, late=None: ChatBot.answer_mentions(bot, channel, late)
+    bot.answer_mention = lambda mentions, late=None: ChatBot.answer_mention(bot, mentions, late)
+    bot.mention_part = lambda message: ChatBot.mention_part(bot, message)
+    bot.settings.context_message_limit = 20
+    bot.settings.pdf_max_pages = 100
+    bot.presence_note.return_value = None
+    bot.timestamp = lambda message: "03/11/2026 18:00"
+    bot.read_reply = mock.AsyncMock(return_value=(None, []))
+    bot.member_notes = mock.AsyncMock(return_value="")
+    bot.claude.ask = mock.AsyncMock(return_value=mock.Mock(text="Coucou"))
+    bot.send_answer = mock.AsyncMock()
+    bot.safe_reply = mock.AsyncMock()
+    return bot
+
+
+def fake_mention(message_id: int, text: str, channel: mock.Mock) -> mock.Mock:
+    message = mock.Mock(id=message_id, clean_content=f"@Rika {text}", attachments=[], stickers=[])
+    message.channel = channel
+    message.guild.me.display_name = "Rika"
+    message.author.display_name = message.author.name = f"membre{message_id}"
+    return message
+
+
+def fake_channel(history: list) -> mock.Mock:
+    channel = mock.Mock(id=CHANNEL_ID)
+    channel.name = "général"
+
+    async def read(limit, before):
+        for msg in reversed([m for m in history if m.id < before.id][-limit:]):
+            yield msg
+    channel.history = read
+    return channel
+
+
+@mock.patch("bot.discord_bot.typing", lambda channel: contextlib.nullcontext())
+@mock.patch("bot.discord_bot.emoji_names", lambda guild: [])
+class MentionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_burst_grouped(self):
+        # 10 mentions en rafale : la première part seule, les 9 autres attendent puis partent ensemble.
+        bot = fake_bot()
+        calls, release = [], asyncio.Event()
+
+        async def answer(mentions, late=None):
+            calls.append([m.id for m in mentions])
+            await release.wait()
+        bot.answer_mention = answer
+        channel = mock.Mock(id=CHANNEL_ID)
+        tasks = [asyncio.create_task(ChatBot.handle_mention(bot, mock.Mock(id=1, channel=channel)))]
+        await asyncio.sleep(0)
+        tasks += [asyncio.create_task(ChatBot.handle_mention(bot, mock.Mock(id=i, channel=channel)))
+                  for i in range(2, 11)]
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.gather(*tasks)
+        self.assertEqual(calls, [[1], list(range(2, 11))])
+        self.assertEqual(bot._mentions, {})
+
+    async def test_one_call_for_grouped_mentions(self):
+        bot = fake_bot()
+        history = []
+        channel = fake_channel(history)
+        history += [mock.Mock(id=1, clean_content="salut tout le monde", attachments=[], stickers=[]),
+                    fake_mention(2, "ça va ?", channel),
+                    mock.Mock(id=3, clean_content="il dort", attachments=[], stickers=[]),
+                    fake_mention(4, "réveille-toi", channel)]
+        for msg in history:
+            msg.author.display_name = msg.author.name = f"membre{msg.id}"
+        bot._mentions[CHANNEL_ID] = [history[3], history[1]]
+        await ChatBot.answer_mentions(bot, channel)
+
+        bot.claude.ask.assert_awaited_once()
+        parts = bot.claude.ask.await_args.args[1]
+        self.assertEqual(len(parts), 2)  # une partie par mention, dans l'ordre
+        context, second = parts[0][0], parts[1][0]
+        self.assertIn("salut tout le monde", context)
+        self.assertIn("il dort", context)
+        self.assertNotIn("membre2 : ", context)  # la mention n'est pas recopiée dans le contexte
+        self.assertTrue(context.endswith("membre2 te mentionne et écrit : ça va ?"))
+        self.assertEqual(second, "03/11/2026 18:00, membre4 te mentionne et écrit : réveille-toi")
+        bot.member_notes.assert_awaited_once_with([history[1], history[3]])
+        bot.send_answer.assert_awaited_once_with(history[3], "Coucou", reply=False)
+
+    async def test_refused_attachment_drops_only_that_mention(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        first, second = fake_mention(1, "regarde", channel), fake_mention(2, "et ça ?", channel)
+        bot.mention_part = mock.AsyncMock(side_effect=[None, ("texte", [])])
+        await ChatBot.answer_mention(bot, [first, second])
+        self.assertEqual(bot.claude.ask.await_args.args[1], [("texte", [])])
+        bot.member_notes.assert_awaited_once_with([second])
+
+    async def test_all_refused_no_call(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        bot.mention_part = mock.AsyncMock(return_value=None)
+        await ChatBot.answer_mention(bot, [fake_mention(1, "regarde", channel)])
+        bot.claude.ask.assert_not_awaited()
+        bot.send_answer.assert_not_awaited()
+
+
+if __name__ == "__main__":
+    unittest.main()
