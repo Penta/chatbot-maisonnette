@@ -47,20 +47,27 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
         nonlocal current
         body = current.rstrip("\n")
         if open_fence is not None:
-            body += "\n```"
+            head, _, last = body.rpartition("\n")
+            if last.strip() == open_fence:
+                # Bloc ouvert en fin de morceau, encore vide : sa ligne d'ouverture passe au morceau suivant.
+                body = head
+            else:
+                body += "\n```"
         if body.strip():
             chunks.append(body)
         current = (open_fence + "\n") if open_fence is not None else ""
 
     for line in text.split("\n"):
+        match = _FENCE_RE.match(line)
+        # Une ligne qui ouvre un bloc doit laisser la place de le refermer.
+        room_to_close = len("\n```") if match and open_fence is None else closing_len()
         # Une ligne trop longue à elle seule est découpée en morceaux plus petits.
         for piece in _split_long_line(line, limit - 10 - (len(open_fence) if open_fence else 0)):
             addition = piece + "\n"
-            if len(current) + len(addition) + closing_len() > limit:
+            if len(current) + len(addition) + room_to_close > limit:
                 flush()
             current += addition
 
-        match = _FENCE_RE.match(line)
         if match:
             open_fence = None if open_fence is not None else line.strip()
 

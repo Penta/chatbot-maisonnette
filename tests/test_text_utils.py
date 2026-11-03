@@ -121,11 +121,9 @@ class SplitMessageTest(unittest.TestCase):
                 self.assertGreater(len(chunks), 1)
                 self.assert_valid(chunks, limit)
 
-    @unittest.expectedFailure
     def test_opening_fence_at_end_of_chunk(self):
-        # BUG : quand la ligne d'ouverture d'un bloc (```py) remplit le morceau à 1, 2 ou 3 caractères
-        # près, le morceau se termine par un bloc vide « ```py\n``` » qui dépasse la limite de 3 caractères
-        # au plus : Discord refuserait ce message. La ligne d'ouverture devrait passer au morceau suivant.
+        # La ligne d'ouverture d'un bloc (```py) qui remplit presque le morceau passe au morceau suivant,
+        # au lieu de laisser un bloc vide « ```py\n``` » qui pourrait dépasser la limite.
         for before in range(1990, 2000):
             with self.subTest(before=before):
                 text = "a" * before + "\n```py\n" + "b" * 10 + "\nfin\n```"

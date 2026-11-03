@@ -52,6 +52,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une clé Anthropic ou un modèle faux arrête le bot.** Une `ANTHROPIC_API_KEY` ou un `CLAUDE_MODEL` invalide ne se voyait qu'au premier message, avec « Je suis mal configuré ». Le bot les vérifie maintenant au démarrage ; seul un crédit épuisé ne se voit toujours qu'au premier message.
 
+- **Une longue réponse avec du code n'est plus coupée.** Quand un bloc de code commençait juste à la fin d'un morceau de 2000 caractères, ce morceau dépassait la limite de Discord et la suite de la réponse n'était pas envoyée. Le bloc passe maintenant au morceau suivant ; même chose pour les fiches de `/memoire`.
+
 ---
 
 ## Version 5.11
