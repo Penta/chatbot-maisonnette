@@ -8,17 +8,17 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.12
 
+> **En bref :** plusieurs images par message, des réponses groupées aux mentions, et un bot qui vérifie ses réglages au démarrage au lieu de tomber en panne plus tard.
+
 ### Changements
 
 - **Journal réglable.** `LOG_LEVEL` choisit le détail du journal (`DEBUG` pour enquêter, `INFO` par défaut), et `LOG_FILE=off` n'écrit que sur la console, pratique en conteneur. Le démarrage rappelle aussi les principaux réglages et les chemins des fichiers.
 
 - **Plusieurs images dans un même message.** Rika lit jusqu'à 4 images à la fois, dans l'ordre, y compris dans un message cité ou transféré, et peut les comparer ou parler de « la deuxième ». Si une image pose problème, le message d'erreur dit laquelle. Un PDF reste seul, sans image.
 
-- **Un message de démarrage plus soigné.** Le bloc « Bot en ligne » affiche l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage.
+- **Un message de démarrage plus soigné.** Le message « En ligne » affiche l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage.
 
 ### Corrections
-
-- **L'image Docker n'est plus publiée si les tests échouent.** Chaque push sur `main` lance maintenant les tests avant de construire l'image : une régression ne part plus en production.
 
 - **Deux bots ne tournent plus en boucle.** Face à un bot qui lui répond à chaque fois, Rika pouvait enchaîner les réponses, et les appels à Claude, sans fin. Elle s'arrête maintenant après 5 messages de bots d'affilée dans un salon, jusqu'au prochain message d'un membre ou après 10 minutes de calme.
 
@@ -40,9 +40,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une personnalité illisible ne rend plus Rika muette.** Un fichier de personnalité illisible (pas en UTF-8, ou un dossier au lieu d'un fichier) faisait échouer chaque message. Rika garde maintenant la dernière personnalité valide, et le journal explique comment corriger le fichier.
 
-- **`CONTEXT_MESSAGE_LIMIT` plafonné à 100.** Une valeur comme 2000 pouvait coûter plusieurs dizaines de centimes par mention. Au-delà de 100, le bot refuse maintenant de démarrer, avec un message clair.
-
-- **Les autres réglages ont aussi un plafond.** Une valeur trop grande (`MAX_TOKENS`, `PDF_MAX_PAGES`, `WEB_MAX_USES`…) ne se voyait qu'au premier message, ou coûtait cher sans prévenir. Le bot refuse maintenant de démarrer au-delà du plafond, indiqué dans `.env.exemple`.
+- **Les réglages ont un plafond.** Une valeur trop grande ne se voyait qu'au premier message, ou coûtait cher sans prévenir : `CONTEXT_MESSAGE_LIMIT=2000` pouvait coûter plusieurs dizaines de centimes par mention. Au-delà du plafond (100 pour `CONTEXT_MESSAGE_LIMIT`, les autres dans `.env.exemple`), le bot refuse maintenant de démarrer, avec un message clair.
 
 - **`PRESENCE_WEIGHTS` mieux vérifié.** Une virgule en trop est ignorée. Un statut écrit deux fois, ou `jeu` comme seul statut possible sans `STEAM_API_KEY`, arrête maintenant le bot avec un message clair.
 
