@@ -92,6 +92,33 @@ class MaximumTest(unittest.TestCase):
         self.assertEqual((s.max_tokens, s.pdf_max_pages, s.presence_speed), (64000, 100, 100))
 
 
+class AllErrorsTest(unittest.TestCase):
+    def test_every_error_reported_at_once(self):
+        # Le scénario de l'audit : trois variables fausses, un seul redémarrage pour les voir toutes.
+        with self.assertRaises(ConfigError) as ctx:
+            settings(CHANNEL_ID="abc", THINKING="oui", PDF_MAX_PAGES="101", DISCORD_TOKEN="")
+        self.assertEqual(len(ctx.exception.errors), 4)
+        for text in ("CHANNEL_ID doit être un nombre entier", "THINKING doit valoir", "PDF_MAX_PAGES ne peut pas",
+                     "DISCORD_TOKEN est obligatoire"):
+            self.assertIn(text, str(ctx.exception))
+
+    def test_invalid_value_not_reused_in_other_checks(self):
+        # MAX_TOKENS illisible : pas de second message sur la mémoire, ni pour THINKING invalide avec EFFORT=max.
+        with self.assertRaises(ConfigError) as ctx:
+            settings(MAX_TOKENS="beaucoup", THINKING="oui", EFFORT="max")
+        self.assertEqual(len(ctx.exception.errors), 2)
+
+    def test_log_file_given_when_usable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            log = Path(folder) / "bot.log"
+            with self.assertRaises(ConfigError) as ctx:
+                settings(CHANNEL_ID="abc", LOG_FILE=str(log))
+            self.assertEqual(ctx.exception.log_file, log)
+            with self.assertRaises(ConfigError) as ctx:
+                settings(LOG_FILE=str(Path(folder) / "absent" / "bot.log"))
+            self.assertIsNone(ctx.exception.log_file)
+
+
 class PresenceWeightsTest(unittest.TestCase):
     ONLY_GAME = "anime=0,musique=0,pensee=0,jeu=100,en_ligne=0,ne_pas_deranger=0,absent=0"
 
