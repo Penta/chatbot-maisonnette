@@ -14,7 +14,9 @@ logger = logging.getLogger("chatbot.pdf")
 logging.getLogger("pypdf").setLevel(logging.ERROR)  # avertissements sur les PDF mal formés, sans gravité
 
 PDF_EXTENSIONS = (".pdf",)
-# Limite de l'API : 32 Mo par requête, une fois encodé en base64 (+33 %), historique compris.
+# 26,7 Mo une fois encodé en base64 (+33 %) : bien en dessous de la limite de l'API (128 Mo par requête).
+# Plusieurs PDF arrivés pendant une réponse partent au besoin dans des requêtes séparées (voir
+# media.REQUEST_MAX_BASE64) ; seul, un PDF peut dépasser ce budget.
 PDF_MAX_BYTES = 20_000_000
 
 
@@ -43,4 +45,4 @@ def prepare_pdf(name: str, data: bytes, max_pages: int) -> ImageData:
         raise PdfError(f"Ce PDF a {pages} pages : je n'en lis que {max_pages} au maximum. "
                        "Envoie-moi seulement les pages utiles.")
     logger.info("PDF %s : %d page(s), %.1f Mo", name, pages, len(data) / 1e6)
-    return ImageData(PDF_MEDIA_TYPE, data, name=name)
+    return ImageData(PDF_MEDIA_TYPE, data, name=name, pages=pages)

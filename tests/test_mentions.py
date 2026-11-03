@@ -7,6 +7,7 @@ import unittest
 from unittest import mock
 
 from bot.discord_bot import ChatBot
+from bot.media import PDF_MEDIA_TYPE, ImageData
 
 CHANNEL_ID = 20
 
@@ -21,6 +22,7 @@ def fake_bot() -> mock.Mock:
     bot.answer_mentions = lambda channel, late=None: ChatBot.answer_mentions(bot, channel, late)
     bot.answer_mention = lambda mentions, late=None: ChatBot.answer_mention(bot, mentions, late)
     bot.mention_part = lambda message: ChatBot.mention_part(bot, message)
+    bot.mention_context = lambda channel, ids, before=None: ChatBot.mention_context(bot, channel, ids, before)
     bot.settings.context_message_limit = 20
     bot.settings.pdf_max_pages = 100
     bot.presence_note.return_value = None
@@ -136,6 +138,36 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         await ChatBot.answer_mention(bot, [first, second])
         self.assertEqual(bot.claude.ask.await_args.args[1], [("texte", [])])
         bot.member_notes.assert_awaited_once_with([second])
+
+    async def test_heavy_mentions_split(self):
+        # Deux mentions avec chacune un PDF de 15 Mo : trop lourdes pour une seule requête, elles reçoivent
+        # deux réponses à la suite, et la seconde voit la première dans le contexte.
+        bot = fake_bot()
+        history = []
+        channel = fake_channel(history)
+        history += [mock.Mock(id=1, clean_content="salut", attachments=[], stickers=[]),
+                    fake_mention(2, "lis ça", channel), fake_mention(3, "et ça", channel)]
+        history[0].author.display_name = history[0].author.name = "membre1"
+        heavy = ImageData(PDF_MEDIA_TYPE, bytes(15_000_000), name="doc.pdf")
+        bot.mention_part = mock.AsyncMock(side_effect=[("lis ça", [heavy]), ("et ça", [heavy])])
+
+        async def post(message, text, reply=False):
+            answer = mock.Mock(id=len(history) + 1, clean_content=text, attachments=[], stickers=[])
+            answer.author.display_name = answer.author.name = "Rika"
+            history.append(answer)
+        bot.send_answer = mock.AsyncMock(side_effect=post)
+        await ChatBot.answer_mention(bot, history[1:3])
+
+        first, second = (call.args[1] for call in bot.claude.ask.await_args_list)
+        self.assertEqual([len(first), len(second)], [1, 1])
+        self.assertIn("membre1 : salut", first[0][0])
+        self.assertTrue(first[0][0].endswith("lis ça"))
+        self.assertNotIn("Rika : Coucou", first[0][0])
+        self.assertIn("Rika : Coucou", second[0][0])
+        self.assertTrue(second[0][0].endswith("et ça"))
+        self.assertEqual(bot.member_notes.await_args_list, [mock.call([history[1]]), mock.call([history[2]])])
+        self.assertEqual(bot.send_answer.await_args_list,
+                         [mock.call(history[1], "Coucou", reply=False), mock.call(history[2], "Coucou", reply=False)])
 
     async def test_all_refused_no_call(self):
         bot = fake_bot()

@@ -273,6 +273,7 @@ class PreparePdfTest(unittest.TestCase):
         self.assertTrue(result.is_pdf)
         self.assertEqual(result.name, "cours.pdf")
         self.assertIs(result.data, data)
+        self.assertEqual(result.pages, 3)  # compte dans le budget de la requête (voir media.fit_in_request)
 
     def test_too_many_pages(self):
         with self.assertRaises(PdfError) as ctx:

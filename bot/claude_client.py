@@ -362,6 +362,11 @@ class ClaudeClient:
         except anthropic.NotFoundError as exc:
             logger.critical("Modèle introuvable : vérifie CLAUDE_MODEL dans le .env (%s).", exc)
             raise ClaudeError(CONFIG_ERROR)
+        except anthropic.RequestTooLargeError as exc:
+            # Seules les pièces jointes peuvent atteindre la limite (128 Mo), et le budget de media.py
+            # garde chaque requête bien en dessous : simple garde-fou.
+            logger.error("Requête trop lourde pour l'API : %s", exc)
+            raise ClaudeError("Ces fichiers sont trop lourds pour moi tous ensemble, renvoie-les un par un.")
         except anthropic.APIStatusError as exc:
             logger.error("Erreur de l'API (%s) : %s", exc.status_code, exc)
             raise ClaudeError("Une erreur est survenue de mon côté, réessaie dans un instant.")

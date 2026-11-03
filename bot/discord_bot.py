@@ -25,7 +25,7 @@ from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import ConversationHistory, render_line
 from .images import ImageError
-from .media import ImageData
+from .media import ImageData, fit_in_request
 from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
 from .memory_views import reply_error, see_user
@@ -475,7 +475,8 @@ class ChatBot(commands.Bot):
             line["attachments"] = markers
 
         # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
-        # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel.
+        # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel
+        # (ou plusieurs, si leurs pièces jointes sont trop lourdes ensemble : voir fit_in_request).
         self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, line, extra, images))
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_main_channel)
@@ -483,46 +484,54 @@ class ChatBot(commands.Bot):
         await self.answer_main_channel(message.channel)
 
     async def answer_main_channel(self, channel: discord.abc.Messageable, late: Status | None = None) -> None:
-        """Répond en une fois aux messages en attente du salon dédié."""
+        """Répond aux messages en attente du salon dédié : en une fois, ou en plusieurs réponses à la suite
+        si leurs pièces jointes ne tiennent pas dans une seule requête."""
         pending = self._pending.setdefault(channel.id, [])
-        async with self.history.lock(channel.id):
-            if not pending:
-                return  # déjà parti avec un message précédent
-            batch = sorted(pending, key=lambda p: p.message.id)
-            pending.clear()
-            last = batch[-1].message
-            if len(batch) > 1:
-                logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
-            # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
-            parts = [(p.user_text, p.images) for p in batch]
-            lines = [p.line for p in batch]
-            notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
-            if note := self.presence_note():
-                notes.append(note)
-            for note in reversed(notes):
-                parts.insert(0, (note, []))
-                lines.insert(0, {"content": note})
-            try:
-                async with typing(channel):
-                    try:
-                        notes = await self.member_notes([p.message for p in batch])
-                        answer = await self.claude.ask(self.history.get(channel.id), parts,
-                                                       emojis=emoji_names(last.guild), member_notes=notes)
-                    except ClaudeError as exc:
-                        await self.safe_reply(last, exc.user_message)
-                        return
-                    except Exception:
-                        logger.exception("Erreur inattendue pendant le traitement d'un message")
-                        await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
-                        return
-            finally:
-                self.forget_waiting(*(p.message for p in batch))
-            await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
-        await self.send_answer(last, answer.text)
+        # Jusqu'au dernier message : une réponse différée est la seule tâche pour tous ceux de son attente.
+        while True:
+            async with self.history.lock(channel.id):
+                if not pending:
+                    return  # déjà parti avec un message précédent
+                pending.sort(key=lambda p: p.message.id)
+                count = fit_in_request([p.images for p in pending])
+                if count < len(pending):
+                    logger.info("Pièces jointes trop lourdes pour une seule réponse dans #%s : %s message(s) sur %s "
+                                "d'abord, les autres ensuite.", channel, count, len(pending))
+                batch = pending[:count]
+                del pending[:count]
+                last = batch[-1].message
+                if len(batch) > 1:
+                    logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
+                # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
+                parts = [(p.user_text, p.images) for p in batch]
+                lines = [p.line for p in batch]
+                notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
+                if note := self.presence_note():
+                    notes.append(note)
+                for note in reversed(notes):
+                    parts.insert(0, (note, []))
+                    lines.insert(0, {"content": note})
+                try:
+                    async with typing(channel):
+                        try:
+                            notes = await self.member_notes([p.message for p in batch])
+                            answer = await self.claude.ask(self.history.get(channel.id), parts,
+                                                           emojis=emoji_names(last.guild), member_notes=notes)
+                        except ClaudeError as exc:
+                            await self.safe_reply(last, exc.user_message)
+                            continue
+                        except Exception:
+                            logger.exception("Erreur inattendue pendant le traitement d'un message")
+                            await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
+                            continue
+                finally:
+                    self.forget_waiting(*(p.message for p in batch))
+                await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
+            await self.send_answer(last, answer.text)
 
     async def handle_mention(self, message: discord.Message) -> None:
         # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
-        # puis partent ensemble dans un seul appel.
+        # puis partent ensemble dans un seul appel (ou plusieurs, si leurs pièces jointes sont trop lourdes).
         self._mentions.setdefault(message.channel.id, []).append(message)
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_mentions)
@@ -544,18 +553,63 @@ class ChatBot(commands.Bot):
                 self.forget_waiting(*batch)
 
     async def answer_mention(self, mentions: list[discord.Message], late: Status | None = None) -> None:
-        """Hors du salon dédié : répond aux mentions d'un même salon en lisant les messages récents."""
+        """Hors du salon dédié : répond aux mentions d'un même salon en lisant les messages récents, en une
+        fois, ou en plusieurs réponses à la suite si leurs pièces jointes ne tiennent pas dans une seule requête."""
         channel = mentions[-1].channel
-        mention_ids = {m.id for m in mentions}
+        answered, parts = [], []
+        for message in mentions:
+            if part := await self.mention_part(message):
+                answered.append(message)
+                parts.append(part)
+        # Liste vide : pièces jointes refusées, les auteurs ont été prévenus.
+        while parts:
+            count = fit_in_request([images for _, images in parts])
+            if count < len(parts):
+                logger.info("Pièces jointes trop lourdes pour une seule réponse dans #%s : %s mention(s) sur %s "
+                            "d'abord, les autres ensuite.", channel, count, len(parts))
+            group, group_parts = answered[:count], parts[:count]
+            del answered[:count], parts[:count]
+            last = group[-1]
+
+            # Contexte jusqu'à maintenant, relu pour chaque réponse : elle voit celle que le bot vient d'envoyer
+            # (postée après ces mentions). En retard, jusqu'à la dernière mention : la discussion qui a suivi
+            # recouvrirait celle-ci.
+            lines = await self.mention_context(channel, {m.id for m in mentions}, before=mentions[-1] if late else None)
+            channel_name = f"#{channel.name}" if hasattr(channel, "name") else "un message privé"
+            header = []
+            if late:
+                header.append(self.presence.late_note(late, several=len(group_parts) > 1))
+            if note := self.presence_note():
+                header.append(note)
+            if lines:
+                header.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
+            text, images = group_parts[0]
+            group_parts[0] = ("\n\n".join([*header, text]), images)
+
+            async with typing(channel):
+                try:
+                    answer = await self.claude.ask([], group_parts, emojis=emoji_names(last.guild), cache_history=False,
+                                                   member_notes=await self.member_notes(group))
+                except ClaudeError as exc:
+                    await self.safe_reply(last, exc.user_message)
+                    continue
+                except Exception:
+                    logger.exception("Erreur inattendue pendant le traitement d'une mention")
+                    await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
+                    continue
+            # En retard, la réponse cite la dernière mention : on sait à quoi elle répond.
+            await self.send_answer(last, answer.text, reply=late is not None)
+
+    async def mention_context(self, channel: discord.abc.Messageable, mention_ids: set[int],
+                              before: discord.Message | None) -> list[str]:
+        """Derniers messages du salon avant before (ou jusqu'à maintenant), du plus ancien au plus récent,
+        sans les mentions auxquelles le bot répond : elles sont décrites à part, avec leurs pièces jointes."""
         lines: list[str] = []
-        # Jusqu'à maintenant : une réponse groupée voit celle que le bot vient d'envoyer (postée après ces
-        # mentions). En retard, jusqu'à la dernière mention : la discussion qui a suivi recouvrirait celle-ci.
-        before = mentions[-1] if late else None
         if self.settings.context_message_limit > 0:
             try:
                 async for msg in channel.history(limit=self.settings.context_message_limit, before=before):
                     if msg.id in mention_ids:
-                        continue  # décrite plus bas, avec ses pièces jointes
+                        continue
                     content = short_emojis(msg.clean_content.strip())
                     if msg.attachments:
                         content = (content + " [pièce jointe]").strip()
@@ -566,40 +620,7 @@ class ChatBot(commands.Bot):
             except discord.Forbidden:
                 logger.warning("Pas la permission de lire l'historique de #%s.", channel)
         lines.reverse()
-
-        answered, parts = [], []
-        for message in mentions:
-            if part := await self.mention_part(message):
-                answered.append(message)
-                parts.append(part)
-        if not parts:
-            return  # pièces jointes refusées, les auteurs ont été prévenus
-        last = answered[-1]
-
-        channel_name = f"#{channel.name}" if hasattr(channel, "name") else "un message privé"
-        header = []
-        if late:
-            header.append(self.presence.late_note(late, several=len(parts) > 1))
-        if note := self.presence_note():
-            header.append(note)
-        if lines:
-            header.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
-        text, images = parts[0]
-        parts[0] = ("\n\n".join([*header, text]), images)
-
-        async with typing(channel):
-            try:
-                answer = await self.claude.ask([], parts, emojis=emoji_names(last.guild), cache_history=False,
-                                               member_notes=await self.member_notes(answered))
-            except ClaudeError as exc:
-                await self.safe_reply(last, exc.user_message)
-                return
-            except Exception:
-                logger.exception("Erreur inattendue pendant le traitement d'une mention")
-                await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
-                return
-        # En retard, la réponse cite la dernière mention : on sait à quoi elle répond.
-        await self.send_answer(last, answer.text, reply=late is not None)
+        return lines
 
     async def mention_part(self, message: discord.Message) -> tuple[str, list[ImageData]] | None:
         """Une mention telle qu'elle est transmise à Claude, ou None si une pièce jointe est refusée
