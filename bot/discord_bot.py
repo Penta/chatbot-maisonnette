@@ -575,9 +575,12 @@ class ChatBot(commands.Bot):
         channel = mentions[-1].channel
         mention_ids = {m.id for m in mentions}
         lines: list[str] = []
+        # Jusqu'à maintenant : une réponse groupée voit celle que le bot vient d'envoyer (postée après ces
+        # mentions). En retard, jusqu'à la dernière mention : la discussion qui a suivi recouvrirait celle-ci.
+        before = mentions[-1] if late else None
         if self.settings.context_message_limit > 0:
             try:
-                async for msg in channel.history(limit=self.settings.context_message_limit, before=mentions[-1]):
+                async for msg in channel.history(limit=self.settings.context_message_limit, before=before):
                     if msg.id in mention_ids:
                         continue  # décrite plus bas, avec ses pièces jointes
                     content = short_emojis(msg.clean_content.strip())

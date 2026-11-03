@@ -46,7 +46,7 @@ def fake_channel(history: list) -> mock.Mock:
     channel.name = "général"
 
     async def read(limit, before):
-        for msg in reversed([m for m in history if m.id < before.id][-limit:]):
+        for msg in reversed([m for m in history if before is None or m.id < before.id][-limit:]):
             yield msg
     channel.history = read
     return channel
@@ -99,6 +99,34 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, "03/11/2026 18:00, membre4 te mentionne et écrit : réveille-toi")
         bot.member_notes.assert_awaited_once_with([history[1], history[3]])
         bot.send_answer.assert_awaited_once_with(history[3], "Coucou", reply=False)
+
+    async def test_grouped_answer_sees_previous_answer(self):
+        # La réponse à la 1re mention est postée après les mentions regroupées : elle doit être dans le contexte.
+        bot = fake_bot()
+        history = []
+        channel = fake_channel(history)
+        history += [fake_mention(1, "tu fais quoi ce soir ?", channel), fake_mention(2, "?", channel),
+                    fake_mention(3, "réponds !", channel),
+                    mock.Mock(id=4, clean_content="Je regarde un film !", attachments=[], stickers=[])]
+        history[3].author.display_name = history[3].author.name = "Rika"
+        await ChatBot.answer_mention(bot, history[1:3])
+        self.assertIn("Rika : Je regarde un film !", bot.claude.ask.await_args.args[1][0][0])
+
+    async def test_late_context_stops_at_last_mention(self):
+        # En retard, la discussion qui a suivi les mentions ne remplace pas celle qui les entoure.
+        bot = fake_bot()
+        history = []
+        channel = fake_channel(history)
+        history += [mock.Mock(id=1, clean_content="avant", attachments=[], stickers=[]),
+                    fake_mention(2, "tu es là ?", channel),
+                    mock.Mock(id=3, clean_content="après", attachments=[], stickers=[])]
+        for msg in history:
+            msg.author.display_name = msg.author.name = f"membre{msg.id}"
+        bot.presence.late_note.return_value = "(en retard)"
+        await ChatBot.answer_mention(bot, [history[1]], late=mock.Mock())
+        context = bot.claude.ask.await_args.args[1][0][0]
+        self.assertIn("avant", context)
+        self.assertNotIn("après", context)
 
     async def test_refused_attachment_drops_only_that_mention(self):
         bot = fake_bot()
