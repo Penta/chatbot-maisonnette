@@ -176,15 +176,46 @@ class ImagesAtOnceTest(unittest.IsolatedAsyncioTestCase):
                 running -= 1
             return ImageData("image/png", data)
 
-        reader = AttachmentReader(SimpleNamespace(max_image_size=10_000_000))
-        files = [SimpleNamespace(filename=f"{i}.png", content_type="image/png", size=10,
-                                 read=mock.AsyncMock(return_value=bytes([i])))
-                 for i in range(4)]
+        reader, files = self.reader_and_files(4)
         with mock.patch.object(attachments, "prepare_image", slow_prepare):
             results = await asyncio.gather(reader.download_images(files[:2]),
                                            reader.quoted_images(files[2:], "cité"))
         self.assertEqual(peak, attachments.MAX_IMAGES_AT_ONCE)  # tous messages confondus
         self.assertEqual([r.data for batch in results for r in batch], [b"\0", b"\1", b"\2", b"\3"])
+
+    async def test_slot_kept_until_cancelled_image_is_decoded(self):
+        # Annuler l'attente n'arrête pas le thread : sa place reste prise jusqu'à ce qu'il finisse.
+        started = []
+        release = threading.Event()
+
+        def blocking_prepare(data: bytes) -> ImageData:
+            started.append(data)
+            release.wait(5)
+            return ImageData("image/png", data)
+
+        reader, files = self.reader_and_files(2)
+        with mock.patch.object(attachments, "prepare_image", blocking_prepare):
+            try:
+                first = asyncio.create_task(reader.download_image(files[0]))
+                while not started:
+                    await asyncio.sleep(0.01)
+                first.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await first
+                second = asyncio.create_task(reader.download_image(files[1]))
+                await asyncio.sleep(0.1)
+                self.assertEqual(started, [b"\0"])  # la première décode encore : la deuxième attend
+            finally:
+                release.set()
+            self.assertEqual((await second).data, b"\1")
+
+    @staticmethod
+    def reader_and_files(count: int) -> tuple[AttachmentReader, list[SimpleNamespace]]:
+        reader = AttachmentReader(SimpleNamespace(max_image_size=10_000_000))
+        files = [SimpleNamespace(filename=f"{i}.png", content_type="image/png", size=10,
+                                 read=mock.AsyncMock(return_value=bytes([i])))
+                 for i in range(count)]
+        return reader, files
 
 
 def pdf(pages: int, password: str | None = None, owner_password: str | None = None) -> bytes:

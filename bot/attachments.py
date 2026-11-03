@@ -139,8 +139,17 @@ class AttachmentReader:
 
         # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot),
         # une à la fois pour borner la mémoire. Les téléchargements, eux, restent en parallèle.
-        async with self._image_slots:
-            return await asyncio.to_thread(prepare_image, data)
+        await self._image_slots.acquire()
+        preparing = asyncio.ensure_future(asyncio.to_thread(prepare_image, data))
+        # Place rendue à la fin du thread, pas de l'attente : si l'attente est annulée,
+        # le thread, lui, continue de décoder.
+        preparing.add_done_callback(self._release_image_slot)
+        return await asyncio.shield(preparing)
+
+    def _release_image_slot(self, preparing: asyncio.Future) -> None:
+        self._image_slots.release()
+        if not preparing.cancelled():
+            preparing.exception()  # lue : après une annulation, personne d'autre ne la lira
 
     async def download_images(self, attachments: list[discord.Attachment]) -> list[ImageData]:
         """Télécharge plusieurs images en parallèle et les prépare (lève ImageError si l'une pose problème).
