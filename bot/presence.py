@@ -242,6 +242,9 @@ class PresenceManager:
             saved_at = datetime.fromisoformat(data["saved_at"])
             step_end = datetime.fromisoformat(data["step_end"])
             status_end = datetime.fromisoformat(data["status_end"]) if data.get("status_end") else None
+            if any(date and date.tzinfo is None for date in (saved_at, step_end, status_end)):
+                # Fichier modifié à la main : comparée à l'heure actuelle, une telle date lèverait TypeError.
+                raise ValueError("date sans fuseau horaire")
         except FileNotFoundError:
             return
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:

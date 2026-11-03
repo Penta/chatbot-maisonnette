@@ -298,11 +298,7 @@ class RestoreTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(manager.status, Status(Kind.ONLINE))
                 self.assertEqual(manager.program, [])
 
-    @unittest.expectedFailure
     def test_date_without_timezone(self):
-        # BUG : une date sans fuseau (« 2026-11-03T09:10:00 », fichier modifié à la main) est lue
-        # sans erreur, puis comparée à l'heure actuelle (avec fuseau) en dehors du try de restore :
-        # TypeError, et le bot ne démarre pas, au lieu d'ignorer le fichier comme un fichier illisible.
         self.save(Status(Kind.GAME, title="Celeste"), 60)
         valid = json.loads(self.state_file.read_text(encoding="utf-8"))
         self.state_file.write_text(json.dumps({**valid, "step_end": "2026-11-03T10:00:00"}), encoding="utf-8")
