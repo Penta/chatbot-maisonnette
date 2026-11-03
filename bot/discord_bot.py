@@ -25,7 +25,7 @@ from .images import ImageError, prepare_image
 from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
 from .memory_views import MemoryCard, member_target, reply_error, see_user, server_target
-from .models import display_name, is_known
+from .models import display_name, is_known, thinking_off
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .presence import PresenceManager, Status
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
@@ -220,8 +220,12 @@ class ChatBot(commands.Bot):
             await asyncio.to_thread(self.memory.index)
         s = self.settings
         memory = "off" if not s.memory else f"on ({s.memory_dir})" if self.memory else "coupée (registre illisible)"
+        thinking = "on" if s.thinking else "off"
+        if not s.thinking and thinking_off(s.model) is None:
+            # Ce modèle réfléchit toujours : seul EFFORT en règle la quantité.
+            thinking = "impossible à couper sur ce modèle (règle EFFORT)"
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
-                    s.model, "on" if s.thinking else "off", s.effort or "par défaut",
+                    s.model, thinking, s.effort or "par défaut",
                     "on" if s.web_search else "off", memory)
         if not is_known(s.model):
             # Un nom mal écrit ne serait sinon découvert qu'au premier message (erreur 404).

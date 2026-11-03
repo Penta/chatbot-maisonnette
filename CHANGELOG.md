@@ -16,6 +16,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Corrections
 
+- **« Réflexion : off » n'est plus affiché à tort.** Sur un modèle dont la réflexion ne peut pas être coupée (Opus 5.5), `THINKING=off` laissait la réflexion active alors que le journal de démarrage affichait « off ». Il indique maintenant « impossible à couper sur ce modèle (règle EFFORT) ».
+
 - **Documentation des réglages alignée.** `.env.exemple` et le README précisent qu'un `THINKING` vide ou absent vaut `off` (l'exemple propose `on`) ; le README indique que `xhigh` et `max` nécessitent `THINKING=on` ; la phrase sur `MAX_TOKENS` parle du plus grand des deux plafonds de mémoire, comme la vérification ; le tableau du README reprend les valeurs proposées de `.env.exemple` pour `MAX_TOKENS` (6000) et `API_TIMEOUT` (90).
 
 - **« Modifier » ne signale plus de faux conflit.** Quand l'écriture sur le disque prenait plus de 3 secondes, Discord considérait l'envoi comme échoué alors que le texte était enregistré : la fenêtre restait ouverte, et un second clic répondait que le fichier avait changé entre-temps. Le bot répond maintenant tout de suite à Discord, avant d'enregistrer, et un même texte envoyé deux fois est accepté.
