@@ -102,6 +102,14 @@ class AllErrorsTest(unittest.TestCase):
                      "DISCORD_TOKEN est obligatoire"):
             self.assertIn(text, str(ctx.exception))
 
+    def test_empty_quotes_count_as_missing(self):
+        # docker run --env-file garde les guillemets : DISCORD_TOKEN="" ne doit pas passer pour une valeur.
+        for name in ("DISCORD_TOKEN", "ANTHROPIC_API_KEY", "CHANNEL_ID"):
+            for raw in ('""', "''", '" "'):
+                with self.subTest(name=name, raw=raw), self.assertRaises(ConfigError) as ctx:
+                    settings(**{name: raw})
+                self.assertIn(f"{name} est obligatoire", str(ctx.exception))
+
     def test_invalid_value_not_reused_in_other_checks(self):
         # MAX_TOKENS illisible : pas de second message sur la mémoire, ni pour THINKING invalide avec EFFORT=max.
         with self.assertRaises(ConfigError) as ctx:

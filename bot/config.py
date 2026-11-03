@@ -41,16 +41,16 @@ class ConfigError(Exception):
 
 
 def _get_str(name: str, default: str | None = None, required: bool = False) -> str | None:
-    value = os.getenv(name)
-    if value is None or value.strip() == "":
-        if required:
-            raise ConfigError(f"La variable {name} est obligatoire mais absente du fichier .env.")
-        return default
-    value = value.strip()
+    value = (os.getenv(name) or "").strip()
     # docker run --env-file garde les guillemets que python-dotenv retire : DISCORD_TOKEN="abc".
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         value = value[1:-1].strip()
-    return value or default
+    # Après les guillemets : DISCORD_TOKEN="" est vide, pas une valeur.
+    if not value:
+        if required:
+            raise ConfigError(f"La variable {name} est obligatoire mais absente ou vide dans le fichier .env.")
+        return default
+    return value
 
 
 def _get_int(name: str, default: int | None = None, required: bool = False, minimum: int | None = None,
