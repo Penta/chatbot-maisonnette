@@ -12,6 +12,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une image aux dimensions énormes ne fait plus tomber le bot.** Un fichier léger mais de dizaines de milliers de pixels de côté pouvait occuper plus d'1 Go de mémoire une fois décodé, et faire redémarrer le bot. Il est maintenant refusé d'emblée au-delà de 40 millions de pixels (120 millions pour la plupart des photos JPEG), et les images sont préparées une à la fois.
 
+- **Une coupure réseau pendant un téléchargement ne fait plus ignorer le message.** Si une pièce jointe ne se télécharge pas (connexion coupée, ou plus de 30 secondes), Rika demande de réessayer ; une image illisible dans un message cité ou transféré est simplement ignorée. Avant, le message restait sans réponse.
+
 ---
 
 ## Version 5.12

@@ -12,6 +12,7 @@ import zlib
 from types import SimpleNamespace
 from unittest import mock
 
+import aiohttp
 from PIL import Image
 from pypdf import PdfWriter
 
@@ -216,6 +217,42 @@ class ImagesAtOnceTest(unittest.IsolatedAsyncioTestCase):
                                  read=mock.AsyncMock(return_value=bytes([i])))
                  for i in range(count)]
         return reader, files
+
+
+class DownloadFailureTest(unittest.IsolatedAsyncioTestCase):
+    """Une coupure réseau ou un délai dépassé pendant le téléchargement prévient le membre au lieu de tout faire échouer."""
+
+    def setUp(self):
+        self.reader = AttachmentReader(SimpleNamespace(max_image_size=10_000_000, pdf_max_pages=10))
+
+    @staticmethod
+    def file(name: str, read) -> SimpleNamespace:
+        return SimpleNamespace(filename=name, content_type=None, size=10, read=read)
+
+    def broken(self, name: str) -> SimpleNamespace:
+        return self.file(name, mock.AsyncMock(side_effect=aiohttp.ClientConnectionError("connexion réinitialisée")))
+
+    async def test_connection_error_asks_to_retry(self):
+        for name, error in (("photo.png", ImageError), ("doc.pdf", PdfError), ("notes.txt", TextFileError)):
+            with self.subTest(name), self.assertLogs("chatbot.discord", "ERROR"):
+                with self.assertRaises(error) as caught:
+                    await self.reader.read([self.broken(name)])
+                self.assertIn("réessaie", caught.exception.user_message)
+
+    async def test_quoted_image_unreadable_is_ignored(self):
+        good = self.file("ok.png", mock.AsyncMock(return_value=b"ok"))
+        with mock.patch.object(attachments, "prepare_image", lambda data: ImageData("image/png", data)), \
+                self.assertLogs("chatbot.discord", "WARNING"):
+            result = await self.reader.quoted_images([self.broken("ko.png"), good], "cité")
+        self.assertEqual([r.data for r in result], [b"ok"])
+
+    async def test_download_timeout(self):
+        async def never_ends():
+            await asyncio.sleep(10)
+
+        with mock.patch.object(attachments, "DOWNLOAD_TIMEOUT", 0.01), self.assertLogs("chatbot.discord", "ERROR"):
+            with self.assertRaises(ImageError):
+                await self.reader.download_image(self.file("lente.png", never_ends))
 
 
 def pdf(pages: int, password: str | None = None, owner_password: str | None = None) -> bytes:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import aiohttp
 import discord
 
 from .config import Settings
@@ -23,10 +24,22 @@ MAX_IMAGES = 4
 # Images décodées à la fois, tous messages confondus : chacune peut occuper jusqu'à 400 Mo
 # le temps d'être réduite, pour une fraction de seconde.
 MAX_IMAGES_AT_ONCE = 1
+# Délai d'un téléchargement depuis Discord, en secondes (sinon c'est celui d'aiohttp : 5 minutes).
+DOWNLOAD_TIMEOUT = 30
 
 
 class AttachmentRefused(UserFacingError):
     """Pièces jointes refusées avant téléchargement (type non pris en charge, trop nombreuses…)."""
+
+
+async def fetch(attachment: discord.Attachment, kind: str, error: type[UserFacingError]) -> bytes:
+    """Télécharge une pièce jointe (`kind` : « image », « PDF », « fichier »). En cas d'échec
+    (erreur HTTP, coupure réseau, délai dépassé), lève `error` qui demande de réessayer."""
+    try:
+        return await asyncio.wait_for(attachment.read(), DOWNLOAD_TIMEOUT)
+    except (discord.HTTPException, aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        logger.error("Téléchargement impossible (%s « %s ») : %r", kind, attachment.filename, exc)
+        raise error(f"Je n'ai pas réussi à télécharger ton {kind}, réessaie.")
 
 
 def looks_like_image(attachment: discord.Attachment) -> bool:
@@ -103,12 +116,7 @@ class AttachmentReader:
         if attachment.size > TEXT_FILE_MAX_BYTES:
             raise TextFileError(f"Ce fichier texte est trop long (maximum {TEXT_FILE_MAX_BYTES // 1000} Ko).")
 
-        try:
-            data = await attachment.read()
-        except discord.HTTPException as exc:
-            logger.error("Téléchargement du fichier texte impossible : %s", exc)
-            raise TextFileError("Je n'ai pas réussi à télécharger ton fichier, réessaie.")
-
+        data = await fetch(attachment, "fichier", TextFileError)
         return attachment.filename, decode_text_file(data)
 
     async def download_pdf(self, attachment: discord.Attachment) -> ImageData:
@@ -116,12 +124,7 @@ class AttachmentReader:
         if attachment.size > PDF_MAX_BYTES:
             raise PdfError(f"Ce PDF est trop lourd (maximum {PDF_MAX_BYTES // 1_000_000} Mo).")
 
-        try:
-            data = await attachment.read()
-        except discord.HTTPException as exc:
-            logger.error("Téléchargement du PDF impossible : %s", exc)
-            raise PdfError("Je n'ai pas réussi à télécharger ton PDF, réessaie.")
-
+        data = await fetch(attachment, "PDF", PdfError)
         # Lecture du PDF dans un thread : ne bloque pas le bot.
         return await asyncio.to_thread(prepare_pdf, attachment.filename, data, self.settings.pdf_max_pages)
 
@@ -131,12 +134,7 @@ class AttachmentReader:
             max_mb = self.settings.max_image_size / 1_000_000
             raise ImageError(f"Cette image est trop lourde (maximum {max_mb:.2f} Mo).")
 
-        try:
-            data = await attachment.read()
-        except discord.HTTPException as exc:
-            logger.error("Téléchargement de l'image impossible : %s", exc)
-            raise ImageError("Je n'ai pas réussi à télécharger ton image, réessaie.")
-
+        data = await fetch(attachment, "image", ImageError)
         # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot),
         # une à la fois pour borner la mémoire. Les téléchargements, eux, restent en parallèle.
         await self._image_slots.acquire()
