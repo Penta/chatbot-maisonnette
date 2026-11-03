@@ -2,7 +2,15 @@
 
 Les versions les plus récentes sont en haut. Chaque entrée commence par un résumé en gras, suivi du détail.
 
-**Versions :** [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500) · [Avant la 5.0](#avant-la-version-50)
+**Versions :** [5.13](#version-513) · [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500) · [Avant la 5.0](#avant-la-version-50)
+
+---
+
+## Version 5.13
+
+### Corrections
+
+- **Une image aux dimensions énormes ne fait plus tomber le bot.** Un fichier léger mais de dizaines de milliers de pixels de côté pouvait occuper plus d'1 Go de mémoire une fois décodé, et faire redémarrer le bot. Il est maintenant refusé d'emblée au-delà de 40 millions de pixels (120 millions pour la plupart des photos JPEG), et les images sont préparées une à la fois.
 
 ---
 

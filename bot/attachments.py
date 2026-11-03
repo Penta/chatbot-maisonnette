@@ -20,6 +20,9 @@ logger = logging.getLogger("chatbot.discord")  # même nom qu'avant : le journal
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
 # Images lues par message : chacune coûte jusqu'à ~1 600 tokens.
 MAX_IMAGES = 4
+# Images décodées à la fois, tous messages confondus : chacune peut occuper jusqu'à 400 Mo
+# le temps d'être réduite, pour une fraction de seconde.
+MAX_IMAGES_AT_ONCE = 1
 
 
 class AttachmentRefused(UserFacingError):
@@ -60,6 +63,7 @@ class AttachmentReader:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._image_slots = asyncio.Semaphore(MAX_IMAGES_AT_ONCE)
 
     async def read(
         self, attachments: list[discord.Attachment]
@@ -133,11 +137,13 @@ class AttachmentReader:
             logger.error("Téléchargement de l'image impossible : %s", exc)
             raise ImageError("Je n'ai pas réussi à télécharger ton image, réessaie.")
 
-        # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot).
-        return await asyncio.to_thread(prepare_image, data)
+        # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot),
+        # une à la fois pour borner la mémoire. Les téléchargements, eux, restent en parallèle.
+        async with self._image_slots:
+            return await asyncio.to_thread(prepare_image, data)
 
     async def download_images(self, attachments: list[discord.Attachment]) -> list[ImageData]:
-        """Télécharge et prépare plusieurs images en parallèle (lève ImageError si l'une pose problème).
+        """Télécharge plusieurs images en parallèle et les prépare (lève ImageError si l'une pose problème).
 
         Si plusieurs échouent, l'erreur nomme la première dans l'ordre du message, pas la plus rapide.
         """

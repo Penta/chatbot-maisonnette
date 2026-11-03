@@ -17,8 +17,14 @@ logger = logging.getLogger("chatbot.images")
 MAX_DIMENSION = 1568
 # Limite de l'API : 5 Mo une fois encodé en base64, soit environ 3,75 Mo bruts.
 API_MAX_BYTES = 3_750_000
-# Protection contre les images piégées (des milliards de pixels qui saturent la mémoire).
-Image.MAX_IMAGE_PIXELS = 80_000_000
+# Protection contre les images piégées : un petit fichier peut cacher des centaines de millions
+# de pixels, qui saturent la mémoire une fois décodés. Refusées dès la lecture de l'en-tête,
+# avant tout décodage (Pillow, lui, ne refuse qu'au double de sa limite et avertit seulement entre les deux).
+MAX_PIXELS = 40_000_000
+# JPEG classique (non progressif) : décodé directement en petit, il coûte peu même très grand
+# (photos de 50 à 108 Mpx des téléphones récents). Un JPEG progressif, lui, est gardé en entier.
+MAX_JPEG_PIXELS = 120_000_000
+Image.MAX_IMAGE_PIXELS = MAX_JPEG_PIXELS
 
 _DIRECT_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif", "WEBP": "image/webp"}
 # Formats sans perte (captures d'écran, dessins…) : PNG essayé avant le JPEG.
@@ -36,23 +42,33 @@ def prepare_image(data: bytes) -> ImageData:
     Fonction bloquante (calculs sur l'image) : à appeler via asyncio.to_thread.
     """
     try:
-        img = Image.open(io.BytesIO(data))
+        img = Image.open(io.BytesIO(data))  # ne lit que l'en-tête
+        fmt = (img.format or "").upper()
+        baseline_jpeg = fmt in ("JPEG", "MPO") and not img.info.get("progressive")
+        if img.width * img.height > (MAX_JPEG_PIXELS if baseline_jpeg else MAX_PIXELS):
+            raise Image.DecompressionBombError
+        as_is = fmt in _DIRECT_FORMATS and len(data) <= API_MAX_BYTES and max(img.size) <= MAX_DIMENSION
+        original_size, original_dims = len(data), img.size
+        if not as_is:
+            # JPEG : décodé directement à 1/2, 1/4 ou 1/8 de sa taille, sans passer sous la taille
+            # finale (sans effet sur les autres formats).
+            ratio = MAX_DIMENSION / max(img.size)
+            img.draft("RGB", (max(1, int(img.width * ratio)), max(1, int(img.height * ratio))))
         img.load()
     except Image.DecompressionBombError:
         raise ImageError("Cette image est beaucoup trop grande (en pixels) pour que je puisse la lire.")
     except (UnidentifiedImageError, OSError, ValueError):
         raise ImageError("Je n'arrive pas à lire cette image. Formats conseillés : JPEG, PNG, GIF ou WebP.")
 
-    fmt = (img.format or "").upper()
-    if fmt in _DIRECT_FORMATS and len(data) <= API_MAX_BYTES and max(img.size) <= MAX_DIMENSION:
+    if as_is:
         return ImageData(media_type=_DIRECT_FORMATS[fmt], data=data)  # déjà parfaite : envoyée telle quelle
 
-    original_size, original_dims = len(data), img.size
     img.seek(0)                      # GIF ou WebP animé : première image uniquement
-    img = ImageOps.exif_transpose(img)  # respecte l'orientation des photos de téléphone
     if img.mode in ("1", "P"):  # sinon réduite au plus proche voisin, qui abîme le texte
         img = img.convert("RGBA" if "transparency" in img.info else "RGB")
     img.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
+    # Après la réduction : la copie éventuelle est petite. Respecte l'orientation des photos de téléphone.
+    img = ImageOps.exif_transpose(img)
 
     has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
     result: ImageData | None = None

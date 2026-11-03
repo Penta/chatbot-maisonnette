@@ -1,16 +1,24 @@
 """Tests de la préparation des pièces jointes (images, PDF, fichiers texte). Lancer depuis la racine du projet : python -m unittest"""
 
+import asyncio
 import codecs
 import io
 import random
+import struct
+import threading
+import time
 import unittest
+import zlib
+from types import SimpleNamespace
 from unittest import mock
 
 from PIL import Image
 from pypdf import PdfWriter
 
-from bot import images
-from bot.images import MAX_DIMENSION, ImageError, prepare_image
+from bot import attachments, images
+from bot.attachments import AttachmentReader
+from bot.images import MAX_DIMENSION, MAX_PIXELS, ImageError, prepare_image
+from bot.media import ImageData
 from bot.pdf_files import PdfError, prepare_pdf
 from bot.text_files import TextFileError, decode_text_file
 
@@ -31,6 +39,14 @@ def opened(data: bytes) -> Image.Image:
     img = Image.open(io.BytesIO(data))
     img.load()
     return img
+
+
+def png_header(width: int, height: int) -> bytes:
+    """PNG qui annonce ses dimensions mais ne contient aucun pixel."""
+    def chunk(kind: bytes, content: bytes) -> bytes:
+        return struct.pack(">I", len(content)) + kind + content + struct.pack(">I", zlib.crc32(kind + content))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", b""))
 
 
 class PrepareImageTest(unittest.TestCase):
@@ -98,11 +114,77 @@ class PrepareImageTest(unittest.TestCase):
                 prepare_image(data)
             self.assertIn("Je n'arrive pas à lire cette image", ctx.exception.user_message)
 
-    def test_too_many_pixels(self):
-        # Seuil abaissé pour ne pas fabriquer une vraie image géante.
+    def test_too_many_pixels_refused_before_decoding(self):
+        # En-tête seul, sans pixels : refusée d'après l'en-tête, sinon le décodage échouerait.
+        with self.assertRaises(ImageError) as ctx:
+            prepare_image(png_header(MAX_PIXELS // 1000 + 1, 1000))
+        self.assertIn("beaucoup trop grande", ctx.exception.user_message)
+        with self.assertRaises(ImageError) as ctx:  # juste à la limite : décodage tenté
+            prepare_image(png_header(MAX_PIXELS // 1000, 1000))
+        self.assertIn("Je n'arrive pas à lire", ctx.exception.user_message)
+
+    def test_pillow_limit_also_refused(self):
         with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 1000), self.assertRaises(ImageError) as ctx:
             prepare_image(encode(Image.new("RGB", (100, 100)), "PNG"))
         self.assertIn("beaucoup trop grande", ctx.exception.user_message)
+
+    def test_baseline_jpeg_allowed_more_pixels(self):
+        # Seuils abaissés pour ne pas fabriquer une vraie image géante.
+        img = Image.new("RGB", (3136, 1000), "green")
+        with mock.patch.object(images, "MAX_PIXELS", 1000):
+            self.assertEqual(opened(prepare_image(encode(img, "JPEG")).data).size, (MAX_DIMENSION, 500))
+            with self.assertRaises(ImageError) as ctx:  # progressif : gardé en entier au décodage
+                prepare_image(encode(img, "JPEG", progressive=True))
+            self.assertIn("beaucoup trop grande", ctx.exception.user_message)
+        with mock.patch.object(images, "MAX_JPEG_PIXELS", 1000), self.assertRaises(ImageError):
+            prepare_image(encode(img, "JPEG"))
+
+    def test_jpeg_decoded_small(self):
+        # Panorama : réduit au décodage d'après son grand côté, pas son petit.
+        decoded_sizes = []
+        thumbnail = Image.Image.thumbnail
+
+        def spy(img, *args, **kwargs):
+            decoded_sizes.append(img.size)
+            return thumbnail(img, *args, **kwargs)
+
+        with mock.patch.object(Image.Image, "thumbnail", autospec=True, side_effect=spy):
+            result = prepare_image(encode(Image.new("RGB", (4 * MAX_DIMENSION, 1000), "green"), "JPEG"))
+        self.assertEqual(decoded_sizes, [(MAX_DIMENSION, 250)])
+        self.assertEqual(opened(result.data).size, (MAX_DIMENSION, 250))
+
+    def test_exif_orientation_applied(self):
+        img = Image.new("RGB", (3136, 1000), "green")
+        exif = img.getexif()
+        exif[0x0112] = 6  # photo prise téléphone tourné : à pivoter d'un quart de tour
+        result = prepare_image(encode(img, "JPEG", exif=exif))
+        self.assertEqual(opened(result.data).size, (500, MAX_DIMENSION))
+
+
+class ImagesAtOnceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_images_prepared_one_at_a_time(self):
+        running = peak = 0
+        lock = threading.Lock()
+
+        def slow_prepare(data: bytes) -> ImageData:
+            nonlocal running, peak
+            with lock:
+                running += 1
+                peak = max(peak, running)
+            time.sleep(0.05)
+            with lock:
+                running -= 1
+            return ImageData("image/png", data)
+
+        reader = AttachmentReader(SimpleNamespace(max_image_size=10_000_000))
+        files = [SimpleNamespace(filename=f"{i}.png", content_type="image/png", size=10,
+                                 read=mock.AsyncMock(return_value=bytes([i])))
+                 for i in range(4)]
+        with mock.patch.object(attachments, "prepare_image", slow_prepare):
+            results = await asyncio.gather(reader.download_images(files[:2]),
+                                           reader.quoted_images(files[2:], "cité"))
+        self.assertEqual(peak, attachments.MAX_IMAGES_AT_ONCE)  # tous messages confondus
+        self.assertEqual([r.data for batch in results for r in batch], [b"\0", b"\1", b"\2", b"\3"])
 
 
 def pdf(pages: int, password: str | None = None, owner_password: str | None = None) -> bytes:
