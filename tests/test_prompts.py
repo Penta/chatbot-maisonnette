@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from bot.claude_client import DEFAULT_PERSONALITY, MEMBER_MEMORY_NOTE, ClaudeClient
+from bot.claude_client import ClaudeClient
+from bot.prompts import DEFAULT_PERSONALITY, MEMBER_MEMORY_NOTE
 
 
 class PromptsTest(unittest.TestCase):

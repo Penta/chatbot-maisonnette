@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import codecs
 
+from .errors import UserFacingError
+
 # Fichiers lus comme du texte brut : notes, données, sous-titres, configuration et code.
 TEXT_EXTENSIONS = (
     ".txt", ".md", ".log", ".csv", ".tsv", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
@@ -15,12 +17,8 @@ TEXT_EXTENSIONS = (
 TEXT_FILE_MAX_BYTES = 100_000
 
 
-class TextFileError(Exception):
+class TextFileError(UserFacingError):
     """Fichier texte illisible ou refusé, avec un message affichable sur Discord."""
-
-    def __init__(self, user_message: str):
-        super().__init__(user_message)
-        self.user_message = user_message
 
 
 def decode_text_file(data: bytes) -> str:

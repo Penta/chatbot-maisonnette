@@ -181,6 +181,7 @@ main.py                  lancement et logs
 bot/config.py            lecture et validation du .env
 bot/models.py            particularités de chaque modèle Claude (réflexion, tarifs)
 bot/claude_client.py     appels à l'API de Claude, personnalité
+bot/prompts.py           textes du prompt de Claude (personnalité par défaut, notes techniques)
 bot/history.py           mémoire des conversations
 bot/members.py           registre des membres (noms, anciens pseudos, réglages de la mémoire)
 bot/memory.py            fiches des membres et fichier général : outil « memoire » de Claude
@@ -192,6 +193,8 @@ bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)
 bot/images.py            préparation des images (taille, format)
 bot/pdf_files.py         vérification des PDF joints (pages, mot de passe)
 bot/text_files.py        lecture des fichiers texte joints
+bot/media.py             pièce jointe prête pour Claude (image ou PDF)
+bot/errors.py            base des erreurs dont le message s'affiche sur Discord
 bot/text_utils.py        découpage des longues réponses, réflexion affichée retirée
 bot/files.py             écriture des fichiers sur le disque, sans fichier à moitié écrit
 tests/                   tests automatisés : python -m unittest

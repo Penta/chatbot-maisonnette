@@ -17,11 +17,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import VERSION
-from .claude_client import ClaudeClient, ClaudeError, ImageData
+from .claude_client import ClaudeClient, ClaudeError
 from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import ConversationHistory, images_marker, render_line
 from .images import ImageError, prepare_image
+from .media import ImageData
 from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
 from .memory_views import MemoryCard, member_target, reply_error, see_user, server_target

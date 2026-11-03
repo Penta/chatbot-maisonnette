@@ -7,7 +7,8 @@ import logging
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from .claude_client import ImageData
+from .errors import UserFacingError
+from .media import ImageData
 
 logger = logging.getLogger("chatbot.images")
 
@@ -25,12 +26,8 @@ _LOSSLESS_FORMATS = {"PNG", "GIF", "BMP", "TIFF"}
 _PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels en PNG
 
 
-class ImageError(Exception):
+class ImageError(UserFacingError):
     """Image illisible ou impossible à préparer, avec un message affichable sur Discord."""
-
-    def __init__(self, user_message: str):
-        super().__init__(user_message)
-        self.user_message = user_message
 
 
 def prepare_image(data: bytes) -> ImageData:

@@ -7,7 +7,8 @@ import logging
 
 from pypdf import PdfReader
 
-from .claude_client import PDF_MEDIA_TYPE, ImageData
+from .errors import UserFacingError
+from .media import PDF_MEDIA_TYPE, ImageData
 
 logger = logging.getLogger("chatbot.pdf")
 logging.getLogger("pypdf").setLevel(logging.ERROR)  # avertissements sur les PDF mal formés, sans gravité
@@ -17,12 +18,8 @@ PDF_EXTENSIONS = (".pdf",)
 PDF_MAX_BYTES = 20_000_000
 
 
-class PdfError(Exception):
+class PdfError(UserFacingError):
     """PDF illisible ou refusé, avec un message affichable sur Discord."""
-
-    def __init__(self, user_message: str):
-        super().__init__(user_message)
-        self.user_message = user_message
 
 
 def prepare_pdf(name: str, data: bytes, max_pages: int) -> ImageData:
