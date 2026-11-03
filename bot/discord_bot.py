@@ -202,6 +202,12 @@ class ChatBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         # Exécuté une seule fois au démarrage (contrairement à on_ready).
+        if problem := await self.claude.check_access():
+            # Sinon le bot s'annoncerait « En ligne » puis échouerait sur chaque message.
+            logger.critical("Erreur de configuration : %s", problem)
+            self.config_error = problem
+            await self.close()  # connect() voit le bot fermé et rend la main à main.py
+            return
         self.tree.add_command(reset_command)
         if self.presence:
             self.tree.add_command(skip_command)

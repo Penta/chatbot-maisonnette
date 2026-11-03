@@ -51,7 +51,9 @@ def main() -> None:
             "Discord (onglet Bot > Privileged Gateway Intents)."
         )
         sys.exit(1)
-    if bot.config_error:  # salon dédié inutilisable (voir ChatBot.announce), déjà expliqué dans le journal
+    # Clé API ou modèle refusés (ChatBot.setup_hook), salon dédié inutilisable (ChatBot.announce) :
+    # déjà expliqué dans le journal.
+    if bot.config_error:
         sys.exit(1)
 
 

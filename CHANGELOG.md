@@ -34,6 +34,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Un `CHANNEL_ID` faux arrête le bot.** Si le salon était introuvable (ID du serveur ou d'un autre salon collé par erreur), le bot restait connecté sans répondre nulle part : sur OpenShift, le pod paraissait « Running » alors que Rika était muette. Un ID de catégorie ou de forum faisait planter le message de démarrage, et une permission manquante n'était pas signalée. Le bot vérifie maintenant au démarrage que `CHANNEL_ID` désigne un salon textuel où il peut voir, écrire et lire l'historique, et sinon s'arrête avec un message « Erreur de configuration » qui dit quoi corriger. Si un serveur est seulement indisponible chez Discord (panne), il patiente et s'annonce dès son retour.
 
+- **Une clé Anthropic ou un modèle faux arrête le bot.** Une `ANTHROPIC_API_KEY` révoquée ou mal recopiée, ou un `CLAUDE_MODEL` inexistant, ne se voyait qu'au premier message : le bot s'annonçait « En ligne », puis répondait « Je suis mal configuré » à chaque message. Il vérifie maintenant la clé et le modèle au démarrage, sans consommer de tokens, et sinon s'arrête avec un message « Erreur de configuration » qui dit quoi corriger. Si l'API est seulement injoignable, il démarre quand même et le signale dans le journal. Un crédit épuisé ne peut pas être détecté gratuitement : il ne se voit toujours qu'au premier message.
+
 ---
 
 ## Version 5.11

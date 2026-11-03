@@ -203,6 +203,24 @@ class ClaudeClient:
     async def close(self) -> None:
         await self._client.close()
 
+    async def check_access(self) -> str | None:
+        """Vérifie au démarrage la clé API et CLAUDE_MODEL, par un appel gratuit (aucun token consommé).
+        Renvoie le problème à corriger si le bot ne peut pas fonctionner, None sinon. Une panne passagère
+        de l'API n'empêche pas le démarrage. Un crédit épuisé ne se voit qu'au premier message."""
+        model = self.settings.model
+        try:
+            await asyncio.wait_for(self._client.models.retrieve(model), min(self.settings.api_timeout, 15))
+        except anthropic.AuthenticationError:
+            return "clé API Anthropic invalide : vérifie ANTHROPIC_API_KEY dans le .env."
+        except anthropic.PermissionDeniedError as exc:
+            return f"accès refusé par l'API Anthropic (clé désactivée ou sans accès ?) : {self._api_message(exc)}"
+        except anthropic.NotFoundError:
+            return f"modèle {model} introuvable chez Anthropic : vérifie CLAUDE_MODEL dans le .env."
+        except (anthropic.APIError, asyncio.TimeoutError) as exc:
+            logger.warning("Clé API et modèle non vérifiés au démarrage (API injoignable ?) : %s",
+                           str(exc) or "délai dépassé")
+        return None
+
     # ------------------------------------------------------------ personnalité
 
     def personality(self) -> str:
