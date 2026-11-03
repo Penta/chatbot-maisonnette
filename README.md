@@ -102,12 +102,12 @@ Tous les réglages se trouvent dans le `.env`, et chacun est expliqué dans `.en
 | Réglage | Rôle | Valeur proposée |
 | --- | --- | --- |
 | `CLAUDE_MODEL` | Modèle utilisé : `claude-sonnet-5-5` (recommandé), `claude-haiku-5-5` (bien moins cher) ou `claude-opus-5-5` (plus capable, plus cher) | `claude-sonnet-5-5` |
-| `THINKING` | Réflexion avant de répondre : `on` (plus réfléchi, plus lent et plus cher) ou `off` | `on` |
-| `EFFORT` | Niveau d'effort : `low`, `medium`, `high`, `xhigh` ou `max` ; vide = valeur du modèle | `medium` |
-| `MAX_TOKENS` | Longueur maximale d'une réponse (réflexion et notes de mémoire comprises), en tokens ; ne coûte que si elle est atteinte. Avec la mémoire, de quoi réécrire un fichier plein après la réflexion (voir `.env.exemple`) : le bot refuse de démarrer sous le minimum, et prévient dans le message « En ligne » si la réflexion risque de ne pas tenir | `4000` |
+| `THINKING` | Réflexion avant de répondre : `on` (plus réfléchi, plus lent et plus cher) ou `off` (vide = `off`) | `on` |
+| `EFFORT` | Niveau d'effort : `low`, `medium`, `high`, `xhigh` ou `max` (`xhigh` et `max` nécessitent `THINKING=on`, sauf sur `claude-opus-5-5`) ; vide = valeur du modèle | `medium` |
+| `MAX_TOKENS` | Longueur maximale d'une réponse (réflexion et notes de mémoire comprises), en tokens ; ne coûte que si elle est atteinte. Avec la mémoire, de quoi réécrire un fichier plein après la réflexion (voir `.env.exemple`) : le bot refuse de démarrer sous le minimum, et prévient dans le message « En ligne » si la réflexion risque de ne pas tenir | `6000` |
 | `MAX_HISTORY_LENGTH` | Messages gardés en mémoire dans le salon dédié (jusqu'à la moitié de plus avant d'y revenir d'un coup, ce qui garde la mémoire en cache) | `10` |
 | `CONTEXT_MESSAGE_LIMIT` | Messages lus autour d'une mention (100 au plus) | `20` |
-| `API_TIMEOUT` | Attente maximale d'une réponse, en secondes, relances comprises (une requête trop lente n'est pas relancée) ; le bot prévient au démarrage s'il est trop court pour `MAX_TOKENS` | `60` |
+| `API_TIMEOUT` | Attente maximale d'une réponse, en secondes, relances comprises (une requête trop lente n'est pas relancée) ; le bot prévient au démarrage s'il est trop court pour `MAX_TOKENS` | `90` |
 | `WEB_SEARCH` | Recherche web et lecture de liens (`on` ou `off`) ; prévois alors un `API_TIMEOUT` d'au moins 90 secondes | `off` |
 | `PRESENCE` | Statut Discord et absences (`on` ou `off`) ; les `PRESENCE_*` règlent les chances de chaque statut et la nuit | `on` |
 | `MEMORY` | Mémoire des membres (`on` ou `off`) ; `MEMORY_MEMBER_LIMIT` et `MEMORY_SERVER_LIMIT` règlent la taille des fiches et du fichier général (3000 et 5000 caractères) | `off` |
