@@ -167,7 +167,56 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(second[0][0].endswith("et ça"))
         self.assertEqual(bot.member_notes.await_args_list, [mock.call([history[1]]), mock.call([history[2]])])
         self.assertEqual(bot.send_answer.await_args_list,
-                         [mock.call(history[1], "Coucou", reply=False), mock.call(history[2], "Coucou", reply=False)])
+                         [mock.call(history[1], "Coucou", reply=True), mock.call(history[2], "Coucou", reply=True)])
+
+    def heavy_split_setup(self, late: bool):
+        """Deux mentions trop lourdes pour une seule requête, suivies d'un message d'un membre ;
+        chaque réponse du bot est ajoutée au salon."""
+        bot = fake_bot()
+        history = []
+        channel = fake_channel(history)
+        history += [fake_mention(1, "lis ça", channel), fake_mention(2, "et ça", channel)]
+        heavy = ImageData(PDF_MEDIA_TYPE, bytes(15_000_000), name="doc.pdf")
+        bot.mention_part = mock.AsyncMock(side_effect=[("lis ça", [heavy]), ("et ça", [heavy])])
+        bot.presence.late_note.return_value = "(en retard)"
+        for message in history:
+            message.guild.me.display_name = message.guild.me.name = "Rika"
+        if late:
+            history.append(mock.Mock(id=3, clean_content="après", attachments=[], stickers=[]))
+            history[2].author.display_name = history[2].author.name = "membre3"
+        answers = iter(["Réponse un", "Réponse deux"])
+        bot.claude.ask = mock.AsyncMock(side_effect=lambda *a, **k: mock.Mock(text=next(answers)))
+
+        async def post(message, text, reply=False):
+            answer = mock.Mock(id=len(history) + 1, clean_content=text, attachments=[], stickers=[])
+            answer.author.display_name = answer.author.name = "Rika"
+            history.append(answer)
+        bot.send_answer = mock.AsyncMock(side_effect=post)
+        return bot, history[:2]
+
+    async def test_heavy_split_next_group_sees_answered_mention(self):
+        # La 2e réponse voit la 1re mention (déjà traitée) comme un message normal, et la réponse du bot.
+        bot, mentions = self.heavy_split_setup(late=False)
+        await ChatBot.answer_mention(bot, mentions)
+        first, second = (call.args[1][0][0] for call in bot.claude.ask.await_args_list)
+        self.assertNotIn("membre1 : ", first)
+        self.assertNotIn("membre2 : ", first)
+        self.assertIn("membre1 : @Rika lis ça", second)
+        self.assertNotIn("membre2 : ", second)  # la mention en cours reste décrite à part
+        self.assertIn("Rika : Réponse un", second)
+
+    async def test_late_heavy_split_next_group_sees_previous_answer(self):
+        # En retard, le contexte s'arrête à la dernière mention, mais la 2e réponse voit quand même
+        # la 1re mention et la réponse que le bot vient d'y faire.
+        bot, mentions = self.heavy_split_setup(late=True)
+        await ChatBot.answer_mention(bot, mentions, late=mock.Mock())
+        first, second = (call.args[1][0][0] for call in bot.claude.ask.await_args_list)
+        self.assertNotIn("Réponse un", first)
+        self.assertIn("membre1 : @Rika lis ça", second)
+        self.assertIn("Rika : Réponse un", second)
+        self.assertNotIn("membre2 : ", second)
+        self.assertNotIn("après", second)
+        self.assertLess(second.index("membre1 : @Rika lis ça"), second.index("Rika : Réponse un"))
 
     async def test_all_refused_no_call(self):
         bot = fake_bot()

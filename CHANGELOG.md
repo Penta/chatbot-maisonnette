@@ -14,7 +14,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une coupure réseau pendant un téléchargement ne fait plus ignorer le message.** Si une pièce jointe ne se télécharge pas (connexion coupée, ou plus de 30 secondes), Rika demande de réessayer ; une image illisible dans un message cité ou transféré est simplement ignorée. Avant, le message restait sans réponse.
 
-- **Plusieurs gros fichiers envoyés pendant que Rika écrit ne font plus échouer sa réponse.** Ils partaient tous dans un seul appel à Claude, qui pouvait dépasser ses limites. Quand leurs PDF et images sont trop lourds ensemble (plus de 18 Mo, ou plus de 100 pages et images), Rika répond maintenant en plusieurs fois, dans l'ordre.
+- **Plusieurs gros fichiers envoyés pendant que Rika écrit ne font plus échouer sa réponse.** Ils partaient tous dans un seul appel à Claude, qui pouvait dépasser ses limites. Quand leurs PDF et images sont trop lourds ensemble (plus de 18 Mo, ou plus de 100 pages et images), Rika répond maintenant en plusieurs fois, dans l'ordre, chaque réponse citant le message auquel elle répond.
 
 ---
 

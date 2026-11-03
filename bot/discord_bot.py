@@ -487,6 +487,7 @@ class ChatBot(commands.Bot):
         """Répond aux messages en attente du salon dédié : en une fois, ou en plusieurs réponses à la suite
         si leurs pièces jointes ne tiennent pas dans une seule requête."""
         pending = self._pending.setdefault(channel.id, [])
+        split = False  # réponse découpée : chaque morceau cite son dernier message
         # Jusqu'au dernier message : une réponse différée est la seule tâche pour tous ceux de son attente.
         while True:
             async with self.history.lock(channel.id):
@@ -495,6 +496,7 @@ class ChatBot(commands.Bot):
                 pending.sort(key=lambda p: p.message.id)
                 count = fit_in_request([p.images for p in pending])
                 if count < len(pending):
+                    split = True
                     logger.info("Pièces jointes trop lourdes pour une seule réponse dans #%s : %s message(s) sur %s "
                                 "d'abord, les autres ensuite.", channel, count, len(pending))
                 batch = pending[:count]
@@ -527,7 +529,7 @@ class ChatBot(commands.Bot):
                 finally:
                     self.forget_waiting(*(p.message for p in batch))
                 await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
-            await self.send_answer(last, answer.text)
+            await self.send_answer(last, answer.text, reply=split)
 
     async def handle_mention(self, message: discord.Message) -> None:
         # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
@@ -561,10 +563,15 @@ class ChatBot(commands.Bot):
             if part := await self.mention_part(message):
                 answered.append(message)
                 parts.append(part)
+        # Mentions à pièce jointe refusée : leurs auteurs ont été prévenus, elles restent hors du contexte.
+        refused = {m.id for m in mentions} - {m.id for m in answered}
+        sent: list[str] = []  # en retard, réponses déjà envoyées (postées après la fin du contexte)
+        split = False  # réponse découpée : chaque morceau cite sa dernière mention
         # Liste vide : pièces jointes refusées, les auteurs ont été prévenus.
         while parts:
             count = fit_in_request([images for _, images in parts])
             if count < len(parts):
+                split = True
                 logger.info("Pièces jointes trop lourdes pour une seule réponse dans #%s : %s mention(s) sur %s "
                             "d'abord, les autres ensuite.", channel, count, len(parts))
             group, group_parts = answered[:count], parts[:count]
@@ -573,8 +580,10 @@ class ChatBot(commands.Bot):
 
             # Contexte jusqu'à maintenant, relu pour chaque réponse : elle voit celle que le bot vient d'envoyer
             # (postée après ces mentions). En retard, jusqu'à la dernière mention : la discussion qui a suivi
-            # recouvrirait celle-ci.
-            lines = await self.mention_context(channel, {m.id for m in mentions}, before=mentions[-1] if late else None)
+            # recouvrirait celle-ci ; les réponses déjà envoyées sont alors ajoutées à la fin.
+            # Seules les mentions pas encore traitées sont décrites à part : les autres sont des messages normaux.
+            pending = refused | {m.id for m in group} | {m.id for m in answered}
+            lines = await self.mention_context(channel, pending, before=mentions[-1] if late else None) + sent
             channel_name = f"#{channel.name}" if hasattr(channel, "name") else "un message privé"
             header = []
             if late:
@@ -597,8 +606,11 @@ class ChatBot(commands.Bot):
                     logger.exception("Erreur inattendue pendant le traitement d'une mention")
                     await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
                     continue
-            # En retard, la réponse cite la dernière mention : on sait à quoi elle répond.
-            await self.send_answer(last, answer.text, reply=late is not None)
+            # En retard ou découpée, la réponse cite la dernière mention : on sait à quoi elle répond.
+            await self.send_answer(last, answer.text, reply=late is not None or split)
+            if late:
+                me = last.guild.me if last.guild else self.user
+                sent.append(f"{author_name(me)} : {short_emojis(answer.text)}")
 
     async def mention_context(self, channel: discord.abc.Messageable, mention_ids: set[int],
                               before: discord.Message | None) -> list[str]:

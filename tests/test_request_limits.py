@@ -93,6 +93,8 @@ class MainChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asked_texts(bot), [[text(1)], [text(2)]])
         self.assertEqual(bot.history.add_exchange.await_count, 2)
         self.assertEqual([call.args[0].id for call in bot.send_answer.await_args_list], [1, 2])
+        # Réponse découpée : chacune cite son message, pour qu'on sache à quoi elle répond.
+        self.assertEqual([call.kwargs["reply"] for call in bot.send_answer.await_args_list], [True, True])
         self.assertEqual(bot._pending[CHANNEL_ID], [])
 
     async def test_light_messages_grouped(self):
@@ -101,7 +103,7 @@ class MainChannelTest(unittest.IsolatedAsyncioTestCase):
         bot._pending[CHANNEL_ID] = [pending(2, channel, [pdf(5)]), pending(1, channel, [pdf(5)])]
         await ChatBot.answer_main_channel(bot, channel)
         self.assertEqual(asked_texts(bot), [[text(1), text(2)]])
-        bot.send_answer.assert_awaited_once()
+        bot.send_answer.assert_awaited_once_with(mock.ANY, mock.ANY, reply=False)
 
     async def test_page_limit(self):
         # 3 PDF de 40 pages : les deux premiers ensemble (80 pages), le troisième ensuite.
@@ -119,7 +121,7 @@ class MainChannelTest(unittest.IsolatedAsyncioTestCase):
         bot.claude.ask.side_effect = [ClaudeError("Erreur."), mock.Mock(text="Réponse", web_used=False)]
         await ChatBot.answer_main_channel(bot, channel)
         bot.safe_reply.assert_awaited_once_with(first.message, "Erreur.")
-        bot.send_answer.assert_awaited_once_with(second.message, "Réponse")
+        bot.send_answer.assert_awaited_once_with(second.message, "Réponse", reply=True)
         bot.history.add_exchange.assert_awaited_once()
         self.assertEqual(bot.forget_waiting.call_args_list, [mock.call(first.message), mock.call(second.message)])
 
