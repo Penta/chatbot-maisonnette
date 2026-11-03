@@ -93,7 +93,7 @@ Le bot ne sert qu'un serveur, celui du salon `CHANNEL_ID` : ailleurs (autre serv
    ```
    python main.py
    ```
-   Il annonce son arrivée dans son salon avec sa version. En cas d'erreur de configuration (variable manquante, token invalide, intent non activé), il s'arrête en expliquant quoi corriger.
+   Il annonce son arrivée dans son salon avec sa version. En cas d'erreur de configuration (variable manquante, token invalide, intent non activé, `CHANNEL_ID` qui ne désigne pas un salon textuel où le bot peut écrire, permission manquante), il s'arrête en expliquant quoi corriger. Seule exception : si l'un de ses serveurs est indisponible chez Discord au démarrage (panne), il patiente et s'annonce dès le retour du serveur.
 
 ## Configuration
 

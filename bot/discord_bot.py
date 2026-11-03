@@ -66,6 +66,35 @@ def looks_like_pdf(attachment: discord.Attachment) -> bool:
     return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
 
 
+def channel_problem(client: discord.Client, channel_id: int) -> str | None:
+    """Pourquoi le salon dédié (CHANNEL_ID) est inutilisable, ou None s'il convient."""
+    channel = client.get_channel(channel_id)
+    if channel is None:
+        if client.get_guild(channel_id):
+            return (f"CHANNEL_ID ({channel_id}) est l'identifiant du serveur, pas du salon : fais un clic droit "
+                    "sur le salon > Copier l'identifiant du salon.")
+        return (f"Salon {channel_id} introuvable : vérifie CHANNEL_ID (clic droit sur le salon > Copier l'identifiant "
+                "du salon, avec le mode développeur de Discord) et que le bot est bien invité sur ce serveur.")
+    guild = getattr(channel, "guild", None)
+    if guild is None or not isinstance(channel, discord.abc.Messageable):
+        kind = ("une catégorie" if isinstance(channel, discord.CategoryChannel)
+                else "un forum" if isinstance(channel, discord.ForumChannel)
+                else "une conversation privée" if guild is None else "un salon où l'on ne peut pas écrire")
+        return f"CHANNEL_ID ({channel_id}) désigne {kind} : donne l'identifiant d'un salon textuel."
+    permissions = channel.permissions_for(guild.me)
+    in_thread = isinstance(channel, discord.Thread)
+    needed = (("view_channel", "Voir les salons"),
+              ("send_messages_in_threads" if in_thread else "send_messages",
+               "Envoyer des messages dans les fils" if in_thread else "Envoyer des messages"),
+              ("read_message_history", "Voir les anciens messages"))
+    if missing := [label for name, label in needed if not getattr(permissions, name)]:
+        names = ", ".join(f"« {label} »" for label in missing)
+        plural = "les permissions" if len(missing) > 1 else "la permission"
+        return (f"Il manque au bot {plural} {names} dans #{channel} : ajoute-{'les' if len(missing) > 1 else 'la'} "
+                "à son rôle ou dans les permissions du salon.")
+    return None
+
+
 @contextlib.asynccontextmanager
 async def typing(channel: discord.abc.Messageable):
     """« En train d'écrire… » pendant le bloc, sans empêcher la réponse si Discord le refuse."""
@@ -156,6 +185,7 @@ class ChatBot(commands.Bot):
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._announced = False
+        self.config_error: str | None = None  # salon dédié inutilisable : main.py sort en erreur
         self._memory_warning = memory_warning(settings) if self.memory else None
         self.presence =PresenceManager(self, self.claude, settings) if settings.presence else None
         # Absent ou en « Ne pas déranger » : réponses différées, par salon.
@@ -233,16 +263,30 @@ class ChatBot(commands.Bot):
         logger.info("Connecté en tant que %s (version %s)", self.user, VERSION)
         if self.presence:
             await self.presence.apply()  # une reconnexion complète efface le statut
-        if self._announced:
-            return  # simple reconnexion : on ne reposte pas le message de démarrage
+        if not self._announced:  # simple reconnexion : on ne reposte pas le message de démarrage
+            await self.announce()
+
+    async def on_guild_available(self, guild: discord.Guild) -> None:
+        # Serveur du salon indisponible au démarrage (panne Discord), revenu depuis : le bot s'annonce enfin.
+        if self.is_ready() and not self._announced and self.home_guild_id() == guild.id:
+            await self.announce()
+
+    async def announce(self) -> None:
+        """Vérifie le salon dédié, puis y poste le message de démarrage. Un salon inutilisable arrête le bot."""
+        if problem := channel_problem(self, self.settings.channel_id):
+            if self.get_channel(self.settings.channel_id) is None and any(g.unavailable for g in self.guilds):
+                # Le salon est peut-être sur ce serveur : Discord n'en envoie le contenu qu'à son retour.
+                logger.warning("Salon %s introuvable pour l'instant : un serveur du bot est indisponible chez "
+                               "Discord. Le bot s'annoncera dès son retour.", self.settings.channel_id)
+                return
+            logger.critical("Erreur de configuration : %s", problem)
+            self.config_error = problem
+            await self.close()
+            return
         self._announced = True
         self._replay_task = asyncio.create_task(self.replay_waiting())  # référence gardée : pas de ramasse-miettes
 
         channel = self.get_channel(self.settings.channel_id)
-        if channel is None:
-            logger.error("Salon %s introuvable : vérifie CHANNEL_ID et les permissions du bot. "
-                         "En attendant, le bot ne répond nulle part.", self.settings.channel_id)
-            return
         if others := [guild for guild in self.guilds if guild.id != self.home_guild_id()]:
             logger.warning("Le bot est aussi sur %d autre(s) serveur(s), où il ne répond pas : %s. Retire-le de ces "
                            "serveurs, et décoche Public Bot dans le portail Discord (voir le README).", len(others),

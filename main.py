@@ -51,6 +51,8 @@ def main() -> None:
             "Discord (onglet Bot > Privileged Gateway Intents)."
         )
         sys.exit(1)
+    if bot.config_error:  # salon dédié inutilisable (voir ChatBot.announce), déjà expliqué dans le journal
+        sys.exit(1)
 
 
 if __name__ == "__main__":

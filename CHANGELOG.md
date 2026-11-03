@@ -32,6 +32,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Un dossier absent est signalé au démarrage.** Si le dossier de `LOG_FILE`, de `HISTORY_FILE` ou de `MEMORY_DIR` n'existe pas (volume Docker mal monté, faute de frappe) ou n'est pas accessible en écriture, le bot refuse de démarrer avec un message « Erreur de configuration » clair, au lieu d'une trace Python (`LOG_FILE`) ou de tourner sans jamais rien sauvegarder (`HISTORY_FILE`). L'historique est aussi enregistré comme les autres fichiers : envoyé jusqu'au disque avant de remplacer l'ancien, pour ne pas finir vide après une coupure de courant.
 
+- **Un `CHANNEL_ID` faux arrête le bot.** Si le salon était introuvable (ID du serveur ou d'un autre salon collé par erreur), le bot restait connecté sans répondre nulle part : sur OpenShift, le pod paraissait « Running » alors que Rika était muette. Un ID de catégorie ou de forum faisait planter le message de démarrage, et une permission manquante n'était pas signalée. Le bot vérifie maintenant au démarrage que `CHANNEL_ID` désigne un salon textuel où il peut voir, écrire et lire l'historique, et sinon s'arrête avec un message « Erreur de configuration » qui dit quoi corriger. Si un serveur est seulement indisponible chez Discord (panne), il patiente et s'annonce dès son retour.
+
 ---
 
 ## Version 5.11
