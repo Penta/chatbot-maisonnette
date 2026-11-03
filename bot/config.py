@@ -36,7 +36,11 @@ def _get_str(name: str, default: str | None = None, required: bool = False) -> s
         if required:
             raise ConfigError(f"La variable {name} est obligatoire mais absente du fichier .env.")
         return default
-    return value.strip()
+    value = value.strip()
+    # docker run --env-file garde les guillemets que python-dotenv retire : DISCORD_TOKEN="abc".
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1].strip()
+    return value or default
 
 
 def _get_int(name: str, default: int | None = None, required: bool = False, minimum: int | None = None,

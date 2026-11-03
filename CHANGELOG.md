@@ -16,6 +16,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Corrections
 
+- **Un `.env` entre guillemets marche aussi sous Docker.** `docker run --env-file` garde les guillemets que le bot retire en local : `DISCORD_TOKEN="abc"` donnait « Token Discord invalide » sous Docker. Le bot retire maintenant lui-même une paire de guillemets autour d'une valeur. Le README précise que `--env-file` ne retire pas les commentaires en fin de ligne, et que le `.env` est prioritaire sur une variable passée en ligne de commande.
+
 - **« Réflexion : off » n'est plus affiché à tort.** Sur un modèle dont la réflexion ne peut pas être coupée (Opus 5.5), `THINKING=off` laissait la réflexion active alors que le journal de démarrage affichait « off ». Il indique maintenant « impossible à couper sur ce modèle (règle EFFORT) ».
 
 - **Documentation des réglages alignée.** `.env.exemple` et le README précisent qu'un `THINKING` vide ou absent vaut `off` (l'exemple propose `on`) ; le README indique que `xhigh` et `max` nécessitent `THINKING=on` ; la phrase sur `MAX_TOKENS` parle du plus grand des deux plafonds de mémoire, comme la vérification ; le tableau du README reprend les valeurs proposées de `.env.exemple` pour `MAX_TOKENS` (6000) et `API_TIMEOUT` (90).

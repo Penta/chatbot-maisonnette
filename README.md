@@ -140,6 +140,8 @@ docker run -d --name chatbot \
   <compte>/chatbot-maisonnette:latest
 ```
 
+`--env-file` ne lit pas le `.env` comme le bot : il ne retire pas les commentaires en fin de ligne. Écris donc les valeurs sans guillemets et mets les commentaires sur leur propre ligne. Hors Docker, le fichier `.env` est prioritaire : une variable passée en ligne de commande (`MEMORY=on python main.py`) est ignorée si le `.env` la définit aussi.
+
 Pour une personnalité personnelle, monte le fichier dans le conteneur et indique son chemin dans `PERSONALITY_FILE`.
 
 ## Coûts et logs
