@@ -1,0 +1,162 @@
+"""Pièces jointes des messages : reconnaissance, vérification et téléchargement."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+
+import discord
+
+from .config import Settings
+from .errors import UserFacingError
+from .history import images_marker
+from .images import ImageError, prepare_image
+from .media import ImageData
+from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
+from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
+
+logger = logging.getLogger("chatbot.discord")  # même nom qu'avant : le journal ne change pas
+
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
+# Images lues par message : chacune coûte jusqu'à ~1 600 tokens.
+MAX_IMAGES = 4
+
+
+class AttachmentRefused(UserFacingError):
+    """Pièces jointes refusées avant téléchargement (type non pris en charge, trop nombreuses…)."""
+
+
+def looks_like_image(attachment: discord.Attachment) -> bool:
+    return (attachment.content_type or "").startswith("image/") or attachment.filename.lower().endswith(IMAGE_EXTENSIONS)
+
+
+def looks_like_text(attachment: discord.Attachment) -> bool:
+    return attachment.filename.lower().endswith(TEXT_EXTENSIONS)
+
+
+def looks_like_pdf(attachment: discord.Attachment) -> bool:
+    return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
+
+
+def text_file_prompt(name: str, content: str) -> str:
+    """Contenu d'un fichier .txt tel qu'il est transmis à Claude."""
+    return f"\n\n[Contenu du fichier joint « {name} » :]\n{content}\n[Fin du fichier « {name} »]"
+
+
+def text_file_marker(name: str) -> str:
+    """Remplace un fichier texte dans la mémoire (son contenu n'est pas conservé)."""
+    return f"[fichier texte joint « {name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
+
+
+def attachments_marker(attachments: list[ImageData]) -> str:
+    """Remplace les images ou le PDF d'un message dans la mémoire (leur contenu n'est pas conservé)."""
+    if attachments[0].is_pdf:
+        return f"[PDF joint « {attachments[0].name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
+    return images_marker(len(attachments))
+
+
+class AttachmentReader:
+    """Télécharge et prépare les pièces jointes, selon les limites du .env (taille des images, pages des PDF)."""
+
+    def __init__(self, settings: Settings):
+        self.settings = settings
+
+    async def read(
+        self, attachments: list[discord.Attachment]
+    ) -> tuple[list[ImageData], tuple[str, str] | None]:
+        """Vérifie les pièces jointes du salon dédié, puis télécharge les images (ou le PDF) et le fichier texte.
+
+        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) du fichier texte ou None).
+        Lève AttachmentRefused, ImageError, PdfError ou TextFileError si l'envoi est refusé.
+        """
+        if not attachments:
+            return [], None
+
+        images = [a for a in attachments if looks_like_image(a)]
+        pdfs = [a for a in attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
+        texts = [a for a in attachments if looks_like_text(a)]
+        others = [a.filename for a in attachments if a not in images + pdfs + texts]
+        if others:
+            kinds = "des images, des PDF" if self.settings.pdf_max_pages else "des images"
+            raise AttachmentRefused(f"Je ne peux lire que {kinds} et des fichiers texte (.txt, .md, .csv, code…). "
+                                    f"Fichier(s) non pris en charge : {', '.join(others)}.")
+        if len(images) > MAX_IMAGES:
+            raise AttachmentRefused(f"{MAX_IMAGES} images par message au maximum, s'il te plaît.")
+        if pdfs and (images or len(pdfs) > 1):
+            raise AttachmentRefused("Un seul PDF par message, sans image, s'il te plaît.")
+        if len(texts) > 1:
+            raise AttachmentRefused("Un seul fichier texte par message, s'il te plaît.")
+
+        if images:
+            files = await self.download_images(images)
+        else:
+            files = [await self.download_pdf(pdfs[0])] if pdfs else []
+        text_file = await self.download_text_file(texts[0]) if texts else None
+        return files, text_file
+
+    async def download_text_file(self, attachment: discord.Attachment) -> tuple[str, str]:
+        """Télécharge un fichier texte et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
+        if attachment.size > TEXT_FILE_MAX_BYTES:
+            raise TextFileError(f"Ce fichier texte est trop long (maximum {TEXT_FILE_MAX_BYTES // 1000} Ko).")
+
+        try:
+            data = await attachment.read()
+        except discord.HTTPException as exc:
+            logger.error("Téléchargement du fichier texte impossible : %s", exc)
+            raise TextFileError("Je n'ai pas réussi à télécharger ton fichier, réessaie.")
+
+        return attachment.filename, decode_text_file(data)
+
+    async def download_pdf(self, attachment: discord.Attachment) -> ImageData:
+        """Télécharge et vérifie un PDF (lève PdfError en cas de problème)."""
+        if attachment.size > PDF_MAX_BYTES:
+            raise PdfError(f"Ce PDF est trop lourd (maximum {PDF_MAX_BYTES // 1_000_000} Mo).")
+
+        try:
+            data = await attachment.read()
+        except discord.HTTPException as exc:
+            logger.error("Téléchargement du PDF impossible : %s", exc)
+            raise PdfError("Je n'ai pas réussi à télécharger ton PDF, réessaie.")
+
+        # Lecture du PDF dans un thread : ne bloque pas le bot.
+        return await asyncio.to_thread(prepare_pdf, attachment.filename, data, self.settings.pdf_max_pages)
+
+    async def download_image(self, attachment: discord.Attachment) -> ImageData:
+        """Télécharge et prépare une image (lève ImageError en cas de problème)."""
+        if attachment.size > self.settings.max_image_size:
+            max_mb = self.settings.max_image_size / 1_000_000
+            raise ImageError(f"Cette image est trop lourde (maximum {max_mb:.2f} Mo).")
+
+        try:
+            data = await attachment.read()
+        except discord.HTTPException as exc:
+            logger.error("Téléchargement de l'image impossible : %s", exc)
+            raise ImageError("Je n'ai pas réussi à télécharger ton image, réessaie.")
+
+        # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot).
+        return await asyncio.to_thread(prepare_image, data)
+
+    async def download_images(self, attachments: list[discord.Attachment]) -> list[ImageData]:
+        """Télécharge et prépare plusieurs images en parallèle (lève ImageError si l'une pose problème).
+
+        Si plusieurs échouent, l'erreur nomme la première dans l'ordre du message, pas la plus rapide.
+        """
+        results = await asyncio.gather(*(self.download_image(a) for a in attachments), return_exceptions=True)
+        for attachment, result in zip(attachments, results):
+            if isinstance(result, ImageError) and len(attachments) > 1:
+                # précise laquelle, sinon « cette image » est ambigu
+                raise ImageError(f"« {attachment.filename} » : {result.user_message}")
+            if isinstance(result, BaseException):
+                raise result
+        return list(results)
+
+    async def quoted_images(self, attachments: list[discord.Attachment], kind: str) -> list[ImageData]:
+        """Télécharge les MAX_IMAGES premières images d'un message cité ou transféré (les illisibles sont ignorées)."""
+        images = [a for a in attachments if looks_like_image(a)][:MAX_IMAGES]
+        results = await asyncio.gather(*(self.download_image(a) for a in images), return_exceptions=True)
+        for result in results:
+            if isinstance(result, ImageError):
+                logger.warning("Image du message %s ignorée : %s", kind, result.user_message)
+            elif isinstance(result, BaseException):
+                raise result
+        return [r for r in results if isinstance(r, ImageData)]

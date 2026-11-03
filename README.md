@@ -186,7 +186,9 @@ bot/history.py           mémoire des conversations
 bot/members.py           registre des membres (noms, anciens pseudos, réglages de la mémoire)
 bot/memory.py            fiches des membres et fichier général : outil « memoire » de Claude
 bot/memory_views.py      /memoire et /memoire-serveur : affichage, fenêtre « Modifier », confirmations
-bot/discord_bot.py       événements Discord, réponses, commandes slash
+bot/discord_bot.py       événements Discord, réponses, messages cités ou transférés, réactions
+bot/commands.py          commandes slash (/reset, /skip, /memoire, /memoire-serveur)
+bot/attachments.py       pièces jointes des messages : vérification et téléchargement
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py          statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)

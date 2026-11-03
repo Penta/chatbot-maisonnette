@@ -11,7 +11,7 @@ from unittest import mock
 import discord
 
 from bot.members import MemberRegistry, with_username
-from bot.discord_bot import memory_command
+from bot.commands import memory_command
 from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, MODAL_TIMEOUT, EditModal, MemoryCard, Target, input_sizes,
                               member_target, reply_error, split_for_inputs)
 from bot import memory

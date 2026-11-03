@@ -1,4 +1,4 @@
-"""Le bot Discord : événements, commandes et réactions."""
+"""Le bot Discord : événements, réponses et réactions (commandes slash dans commands.py)."""
 
 from __future__ import annotations
 
@@ -17,32 +17,32 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import VERSION
+from .attachments import (MAX_IMAGES, AttachmentReader, AttachmentRefused, attachments_marker, looks_like_image,
+                          looks_like_pdf, looks_like_text, text_file_marker, text_file_prompt)
 from .claude_client import ClaudeClient, ClaudeError
+from .commands import memory_command, reset_command, server_memory_command, skip_command
 from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
-from .history import ConversationHistory, images_marker, render_line
-from .images import ImageError, prepare_image
+from .history import ConversationHistory, render_line
+from .images import ImageError
 from .media import ImageData
 from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
-from .memory_views import MemoryCard, member_target, reply_error, see_user, server_target
+from .memory_views import reply_error, see_user
 from .models import display_name, is_known, thinking_off
-from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
+from .pdf_files import PdfError
 from .presence import PresenceManager, Status
-from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
+from .text_files import TextFileError
 from .text_utils import split_message
 
 logger = logging.getLogger("chatbot.discord")
 
 CUSTOM_EMOJI_ONLY = re.compile(r"^<a?:\w+:\d+>$")
 USER_MENTION = re.compile(r"<@!?(\d+)>")
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
 # Couleur du message de démarrage : le vert du statut « en ligne » de Discord.
 ONLINE_COLOR = discord.Color(0x23A55A)
 # Longueur maximale du texte d'un message cité ou transféré transmis à Claude.
 QUOTE_MAX_LENGTH = 500
-# Images lues par message : chacune coûte jusqu'à ~1 600 tokens.
-MAX_IMAGES = 4
 # Messages écrits par quelqu'un ; les autres types sont des messages système
 # (arrivée d'un membre, message épinglé, boost, fil créé…).
 USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
@@ -57,18 +57,6 @@ BOT_STREAK_RESET = timedelta(minutes=10)
 def author_name(user: discord.User | discord.Member) -> str:
     """Nom d'un auteur pour Claude, avec son nom d'utilisateur (voir with_username)."""
     return with_username(user.display_name, user.name)
-
-
-def looks_like_image(attachment: discord.Attachment) -> bool:
-    return (attachment.content_type or "").startswith("image/") or attachment.filename.lower().endswith(IMAGE_EXTENSIONS)
-
-
-def looks_like_text(attachment: discord.Attachment) -> bool:
-    return attachment.filename.lower().endswith(TEXT_EXTENSIONS)
-
-
-def looks_like_pdf(attachment: discord.Attachment) -> bool:
-    return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
 
 
 def channel_problem(client: discord.Client, channel_id: int) -> str | None:
@@ -114,23 +102,6 @@ async def typing(channel: discord.abc.Messageable):
     finally:
         if indicator is not None:
             await indicator.__aexit__(None, None, None)
-
-
-def text_file_prompt(name: str, content: str) -> str:
-    """Contenu d'un fichier .txt tel qu'il est transmis à Claude."""
-    return f"\n\n[Contenu du fichier joint « {name} » :]\n{content}\n[Fin du fichier « {name} »]"
-
-
-def text_file_marker(name: str) -> str:
-    """Remplace un fichier texte dans la mémoire (son contenu n'est pas conservé)."""
-    return f"[fichier texte joint « {name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
-
-
-def attachments_marker(attachments: list[ImageData]) -> str:
-    """Remplace les images ou le PDF d'un message dans la mémoire (leur contenu n'est pas conservé)."""
-    if attachments[0].is_pdf:
-        return f"[PDF joint « {attachments[0].name} » : tu l'as lu à ce moment-là, mais son contenu n'est plus conservé en mémoire]"
-    return images_marker(len(attachments))
 
 
 @dataclass
@@ -207,6 +178,7 @@ class ChatBot(commands.Bot):
         self.memory = MemoryStore(settings.memory_dir, self.members, settings.memory_member_limit,
                                   settings.memory_server_limit, settings.timezone) if self.members else None
         self.claude = ClaudeClient(settings, self.memory)
+        self.attachments = AttachmentReader(settings)
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._bot_streaks = BotStreaks()
@@ -639,9 +611,9 @@ class ChatBot(commands.Bot):
         pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
         try:
             if image_files:
-                images = await self.download_images(image_files)
+                images = await self.attachments.download_images(image_files)
             else:
-                images = [await self.download_pdf(pdfs[0])] if pdfs else []
+                images = [await self.attachments.download_pdf(pdfs[0])] if pdfs else []
         except (ImageError, PdfError) as exc:
             await self.safe_reply(message, exc.user_message)
             return None
@@ -656,7 +628,7 @@ class ChatBot(commands.Bot):
         text_files = [a for a in message.attachments if looks_like_text(a)]
         if text_files:
             try:
-                prompt += text_file_prompt(*await self.download_text_file(text_files[0]))
+                prompt += text_file_prompt(*await self.attachments.download_text_file(text_files[0]))
             except TextFileError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return None
@@ -797,99 +769,13 @@ class ChatBot(commands.Bot):
     async def read_attachments(
         self, message: discord.Message
     ) -> tuple[list[ImageData], tuple[str, str] | None] | bool:
-        """Vérifie les pièces jointes, puis télécharge les images (ou le PDF) et le fichier texte.
-
-        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) du fichier texte ou None),
-        ou False si l'envoi est refusé (l'utilisateur est alors prévenu).
-        """
-        if not message.attachments:
-            return [], None
-
-        images = [a for a in message.attachments if looks_like_image(a)]
-        pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
-        texts = [a for a in message.attachments if looks_like_text(a)]
-        others = [a.filename for a in message.attachments if a not in images + pdfs + texts]
-        if others:
-            kinds = "des images, des PDF" if self.settings.pdf_max_pages else "des images"
-            await self.safe_reply(message, f"Je ne peux lire que {kinds} et des fichiers texte (.txt, .md, .csv, code…). "
-                                           f"Fichier(s) non pris en charge : {', '.join(others)}.")
-            return False
-        if len(images) > MAX_IMAGES:
-            await self.safe_reply(message, f"{MAX_IMAGES} images par message au maximum, s'il te plaît.")
-            return False
-        if pdfs and (images or len(pdfs) > 1):
-            await self.safe_reply(message, "Un seul PDF par message, sans image, s'il te plaît.")
-            return False
-        if len(texts) > 1:
-            await self.safe_reply(message, "Un seul fichier texte par message, s'il te plaît.")
-            return False
-
+        """Pièces jointes du message (voir AttachmentReader.read), ou False si l'envoi est refusé :
+        l'utilisateur est alors prévenu."""
         try:
-            if images:
-                files = await self.download_images(images)
-            else:
-                files = [await self.download_pdf(pdfs[0])] if pdfs else []
-            text_file = await self.download_text_file(texts[0]) if texts else None
-        except (ImageError, PdfError, TextFileError) as exc:
+            return await self.attachments.read(message.attachments)
+        except (AttachmentRefused, ImageError, PdfError, TextFileError) as exc:
             await self.safe_reply(message, exc.user_message)
             return False
-        return files, text_file
-
-    async def download_text_file(self, attachment: discord.Attachment) -> tuple[str, str]:
-        """Télécharge un fichier texte et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
-        if attachment.size > TEXT_FILE_MAX_BYTES:
-            raise TextFileError(f"Ce fichier texte est trop long (maximum {TEXT_FILE_MAX_BYTES // 1000} Ko).")
-
-        try:
-            data = await attachment.read()
-        except discord.HTTPException as exc:
-            logger.error("Téléchargement du fichier texte impossible : %s", exc)
-            raise TextFileError("Je n'ai pas réussi à télécharger ton fichier, réessaie.")
-
-        return attachment.filename, decode_text_file(data)
-
-    async def download_pdf(self, attachment: discord.Attachment) -> ImageData:
-        """Télécharge et vérifie un PDF (lève PdfError en cas de problème)."""
-        if attachment.size > PDF_MAX_BYTES:
-            raise PdfError(f"Ce PDF est trop lourd (maximum {PDF_MAX_BYTES // 1_000_000} Mo).")
-
-        try:
-            data = await attachment.read()
-        except discord.HTTPException as exc:
-            logger.error("Téléchargement du PDF impossible : %s", exc)
-            raise PdfError("Je n'ai pas réussi à télécharger ton PDF, réessaie.")
-
-        # Lecture du PDF dans un thread : ne bloque pas le bot.
-        return await asyncio.to_thread(prepare_pdf, attachment.filename, data, self.settings.pdf_max_pages)
-
-    async def download_image(self, attachment: discord.Attachment) -> ImageData:
-        """Télécharge et prépare une image (lève ImageError en cas de problème)."""
-        if attachment.size > self.settings.max_image_size:
-            max_mb = self.settings.max_image_size / 1_000_000
-            raise ImageError(f"Cette image est trop lourde (maximum {max_mb:.2f} Mo).")
-
-        try:
-            data = await attachment.read()
-        except discord.HTTPException as exc:
-            logger.error("Téléchargement de l'image impossible : %s", exc)
-            raise ImageError("Je n'ai pas réussi à télécharger ton image, réessaie.")
-
-        # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot).
-        return await asyncio.to_thread(prepare_image, data)
-
-    async def download_images(self, attachments: list[discord.Attachment]) -> list[ImageData]:
-        """Télécharge et prépare plusieurs images en parallèle (lève ImageError si l'une pose problème).
-
-        Si plusieurs échouent, l'erreur nomme la première dans l'ordre du message, pas la plus rapide.
-        """
-        results = await asyncio.gather(*(self.download_image(a) for a in attachments), return_exceptions=True)
-        for attachment, result in zip(attachments, results):
-            if isinstance(result, ImageError) and len(attachments) > 1:
-                # précise laquelle, sinon « cette image » est ambigu
-                raise ImageError(f"« {attachment.filename} » : {result.user_message}")
-            if isinstance(result, BaseException):
-                raise result
-        return list(results)
 
     # ------------------------------------------- message cité ou transféré
 
@@ -924,7 +810,7 @@ class ChatBot(commands.Bot):
         if cited is None:
             return None, []
 
-        images = await self.quoted_images(cited.attachments, "cité") if want_images else []
+        images = await self.attachments.quoted_images(cited.attachments, "cité") if want_images else []
         description = self.describe_quoted(cited.clean_content, images, cited.attachments, cited.stickers)
 
         who = "à ton message" if cited.author == self.user else f"au message de {author_name(cited.author)}"
@@ -940,24 +826,13 @@ class ChatBot(commands.Bot):
             return None, []
         snapshot = message.message_snapshots[0]
 
-        images = await self.quoted_images(snapshot.attachments, "transféré")
+        images = await self.attachments.quoted_images(snapshot.attachments, "transféré")
         # Contrairement à un message normal, le contenu transféré garde ses mentions brutes (<@123>).
         content = self.clean_mentions(snapshot.content)
         description = self.describe_quoted(content, images, snapshot.attachments, snapshot.stickers)
         if not description:
             return None, []
         return f"du {self.timestamp(snapshot)} : {description}", images
-
-    async def quoted_images(self, attachments: list[discord.Attachment], kind: str) -> list[ImageData]:
-        """Télécharge les MAX_IMAGES premières images d'un message cité ou transféré (les illisibles sont ignorées)."""
-        images = [a for a in attachments if looks_like_image(a)][:MAX_IMAGES]
-        results = await asyncio.gather(*(self.download_image(a) for a in images), return_exceptions=True)
-        for result in results:
-            if isinstance(result, ImageError):
-                logger.warning("Image du message %s ignorée : %s", kind, result.user_message)
-            elif isinstance(result, BaseException):
-                raise result
-        return [r for r in results if isinstance(r, ImageData)]
 
     @staticmethod
     def describe_quoted(content: str, images: list[ImageData], attachments: list, stickers: list) -> str:
@@ -1021,114 +896,3 @@ class ChatBot(commands.Bot):
                 await message.channel.send(text)
             except discord.HTTPException as exc:
                 logger.error("Impossible d'envoyer un message : %s", exc)
-
-
-# ------------------------------------------------------------- commandes slash
-
-async def allowed(interaction: discord.Interaction) -> bool:
-    """Commande réservée aux administrateurs : prévient les autres et renvoie False."""
-    # Vérification côté bot, au cas où un admin aurait ouvert la commande à tous dans les paramètres du serveur.
-    if interaction.permissions.administrator:
-        return True
-    logger.info("Tentative de /%s refusée pour %s dans le salon %s",
-                interaction.command.name if interaction.command else "?", interaction.user, interaction.channel_id)
-    await interaction.response.send_message(
-        "Seuls les administrateurs du serveur peuvent utiliser cette commande.",
-        ephemeral=True,
-    )
-    return False
-
-
-@app_commands.command(name="reset", description="Réinitialise la mémoire du bot dans ce salon")
-@app_commands.guild_only()
-# Masque la commande aux membres qui n'ont pas la permission Administrateur.
-@app_commands.default_permissions(administrator=True)
-async def reset_command(interaction: discord.Interaction) -> None:
-    if not await allowed(interaction):
-        return
-    bot: ChatBot = interaction.client  # type: ignore[assignment]
-    # Le reset attend la fin d'une éventuelle réponse en cours, ce qui peut dépasser
-    # les 3 secondes accordées par Discord pour répondre à une commande.
-    await interaction.response.defer()
-    await bot.history.reset(interaction.channel_id)
-    logger.info("Historique réinitialisé dans le salon %s par %s", interaction.channel_id, interaction.user)
-    await interaction.followup.send("L'historique de conversation a été réinitialisé.")
-
-
-@app_commands.command(name="skip", description="Passe tout de suite au statut Discord suivant du bot")
-@app_commands.guild_only()
-@app_commands.default_permissions(administrator=True)  # comme /reset
-async def skip_command(interaction: discord.Interaction) -> None:
-    if not await allowed(interaction):
-        return
-    bot: ChatBot = interaction.client  # type: ignore[assignment]
-    # Une pensée ou une raison d'absence est écrite par Claude : plus de 3 secondes possibles.
-    await interaction.response.defer(ephemeral=True)
-    try:
-        status = await bot.presence.skip()
-    except Exception:
-        logger.exception("Erreur inattendue pendant /skip")
-        await interaction.followup.send("Le statut n'a pas pu être changé, regarde les logs.", ephemeral=True)
-        return
-    if status is None:
-        await interaction.followup.send("C'est la nuit : le bot dort, il n'y a pas de statut à passer.", ephemeral=True)
-        return
-    logger.info("Statut passé par %s", interaction.user)
-    remaining = bot.presence.remaining()
-    duration = f", pendant environ {remaining}" if remaining else ""
-    await interaction.followup.send(f"Nouveau statut : {status.label()}{duration}.", ephemeral=True)
-
-
-MEMORY_OFF = "La mémoire des membres est désactivée sur ce bot (MEMORY=off)."
-MEMORY_BROKEN = ("La mémoire des membres est coupée pour l'instant, à cause d'une erreur du bot. "
-                 "Préviens l'administrateur du bot.")
-
-
-def memory_off(bot: ChatBot) -> str:
-    """Pourquoi /memoire est indisponible : MEMORY=off, ou registre des membres illisible."""
-    return MEMORY_BROKEN if bot.settings.memory else MEMORY_OFF
-
-
-def bot_name(interaction: discord.Interaction) -> str:
-    return interaction.guild.me.display_name if interaction.guild else interaction.client.user.name
-
-
-@app_commands.command(name="memoire", description="Voir, modifier ou effacer ce que le bot a retenu sur toi")
-@app_commands.describe(membre="Réservé aux administrateurs : la fiche d'un autre membre, ou son identifiant s'il est parti")
-@app_commands.guild_only()
-# discord.User plutôt que discord.Member : un membre parti du serveur reste accepté (Discord le résout par
-# son identifiant), pour que sa fiche puisse encore être effacée.
-async def memory_command(interaction: discord.Interaction, membre: discord.User | None = None) -> None:
-    bot: ChatBot = interaction.client  # type: ignore[assignment]
-    if bot.memory is None:
-        await interaction.response.send_message(memory_off(bot), ephemeral=True)
-        return
-    target = membre or interaction.user
-    if target.bot:
-        await interaction.response.send_message("Les bots n'ont pas de fiche.", ephemeral=True)
-        return
-    if target.id != interaction.user.id and not interaction.permissions.administrator:
-        logger.info("/memoire sur %s refusé pour %s", target, interaction.user)
-        await interaction.response.send_message(
-            "Seuls les administrateurs peuvent voir la fiche d'un autre membre.", ephemeral=True)
-        return
-    await see_user(bot.members, target)  # un membre qui n'a encore jamais écrit peut déjà activer la mémoire
-    if target.id != interaction.user.id:
-        # Lecture tracée, sans le contenu : un administrateur ne peut pas lire les fiches sans laisser de trace.
-        logger.info("/memoire : fiche de %s ouverte par %s", target, interaction.user)
-    card = MemoryCard(bot.memory, member_target(bot.memory, target, interaction.user.id),
-                      interaction.user.id, bot_name(interaction))
-    await card.send(interaction)
-
-
-@app_commands.command(name="memoire-serveur", description="Voir ou modifier le fichier général du bot sur le serveur")
-@app_commands.guild_only()
-@app_commands.default_permissions(administrator=True)  # comme /reset
-async def server_memory_command(interaction: discord.Interaction) -> None:
-    if not await allowed(interaction):
-        return
-    bot: ChatBot = interaction.client  # type: ignore[assignment]
-    if bot.memory is None:
-        await interaction.response.send_message(memory_off(bot), ephemeral=True)
-        return
-    await MemoryCard(bot.memory, server_target(), interaction.user.id, bot_name(interaction)).send(interaction)
