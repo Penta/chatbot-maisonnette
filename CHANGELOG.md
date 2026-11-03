@@ -18,6 +18,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Corrections
 
+- **Deux bots ne tournent plus en boucle.** Rika répond aux autres bots quand ils la mentionnent ou répondent à l'un de ses messages, sans aucune limite : face à un bot qui répond à tout avec « Répondre » (et donc la pinge), chaque réponse déclenchait la suivante, avec un appel à Claude toutes les quelques secondes jusqu'à ce que quelqu'un coupe un des bots. Elle ne répond plus à plus de 5 messages de bots d'affilée dans un salon ; le compte repart de zéro au premier message d'un membre dans ce salon, ou après 10 minutes sans message de bot. Le journal le signale une fois par série.
+
 - **Erreurs de démarrage : toutes d'un coup, et dans `bot.log`.** Le bot s'arrêtait à la première variable fausse du `.env` : avec trois erreurs, il fallait trois redémarrages. Il les liste maintenant toutes. Le message n'était écrit que sur la console : il va aussi dans `bot.log` quand `LOG_FILE` est utilisable, pour qu'un redémarrage raté y laisse une trace. Enfin, un PC hors ligne ou une panne de Discord au démarrage donnaient une longue trace technique ; le bot dit maintenant « Impossible de joindre Discord : vérifie la connexion Internet » ou « Discord semble en panne ».
 
 - **Un `.env` entre guillemets marche aussi sous Docker.** `docker run --env-file` garde les guillemets que le bot retire en local : `DISCORD_TOKEN="abc"` donnait « Token Discord invalide » sous Docker. Le bot retire maintenant lui-même une paire de guillemets autour d'une valeur. Le README précise que `--env-file` ne retire pas les commentaires en fin de ligne, et que le `.env` est prioritaire sur une variable passée en ligne de commande.

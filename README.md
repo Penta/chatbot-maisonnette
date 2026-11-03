@@ -13,7 +13,7 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 - **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et ses images. Il lit aussi les messages transférés dans son salon.
 - **Messages modifiés ou supprimés** : sa mémoire suit. Un message supprimé est oublié, un message modifié prend son nouveau texte.
 - **Recherche web** (en option, `WEB_SEARCH=on`) : il peut chercher sur Internet et lire un lien partagé quand la question porte sur l'actualité ou des informations précises.
-- **Autres bots** : il les ignore, sauf quand ils le mentionnent ou répondent à l'un de ses messages : deux bots peuvent ainsi discuter ensemble.
+- **Autres bots** : il les ignore, sauf quand ils le mentionnent ou répondent à l'un de ses messages : deux bots peuvent ainsi discuter ensemble. Pour éviter une boucle sans fin (et un appel à Claude à chaque tour), il ne répond pas à plus de 5 messages de bots d'affilée dans un salon ; le compte repart de zéro au premier message d'un membre, ou après 10 minutes sans message de bot.
 
 ### Pièces jointes
 

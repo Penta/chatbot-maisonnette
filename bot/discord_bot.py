@@ -47,6 +47,10 @@ MAX_IMAGES = 4
 USER_MESSAGE_TYPES = (discord.MessageType.default, discord.MessageType.reply)
 # En passant absent ou en « Ne pas déranger », le bot prévient son salon si on y a parlé depuis moins de :
 DEPARTURE_WINDOW = timedelta(minutes=3)
+# Messages de bots auxquels le bot répond d'affilée dans un salon, sans message d'un membre entre deux.
+MAX_BOT_REPLIES = 5
+# Passé ce délai sans message d'un bot dans le salon, le compte repart de zéro.
+BOT_STREAK_RESET = timedelta(minutes=10)
 
 
 def author_name(user: discord.User | discord.Member) -> str:
@@ -143,6 +147,26 @@ class PendingMessage:
         return render_line(line) + self.extra
 
 
+class BotStreaks:
+    """Messages de bots reçus d'affilée, par salon. Deux bots qui se répondent tourneraient sans fin,
+    avec un appel à Claude à chaque tour : au-delà de MAX_BOT_REPLIES, le bot ne leur répond plus."""
+
+    def __init__(self) -> None:
+        self._streaks: dict[int, tuple[int, datetime]] = {}  # salon : (messages, date du dernier)
+
+    def human_spoke(self, channel_id: int) -> None:
+        self._streaks.pop(channel_id, None)
+
+    def count(self, channel_id: int, when: datetime) -> int:
+        """Compte un message de bot adressé au bot et renvoie son rang dans la série (1 pour le premier).
+        Un message ignoré compte aussi : un bot qui relance sans cesse reste ignoré."""
+        count, last = self._streaks.get(channel_id, (0, when))
+        if when - last > BOT_STREAK_RESET:
+            count = 0
+        self._streaks[channel_id] = (count + 1, when)
+        return count + 1
+
+
 class HomeTree(app_commands.CommandTree):
     """Commandes slash acceptées seulement sur le serveur du bot (voir ChatBot.home_guild_id) : un
     administrateur d'un autre serveur où le bot a été invité ne peut ni lire ni modifier la mémoire."""
@@ -184,6 +208,7 @@ class ChatBot(commands.Bot):
         self.claude = ClaudeClient(settings, self.memory)
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
+        self._bot_streaks = BotStreaks()
         self._announced = False
         self.config_error: str | None = None  # salon dédié inutilisable : main.py sort en erreur
         self._memory_warning = memory_warning(settings) if self.memory else None
@@ -356,8 +381,17 @@ class ChatBot(commands.Bot):
         if message.type not in USER_MESSAGE_TYPES:
             return  # message système
         # Les autres bots ne sont écoutés que lorsqu'ils s'adressent au bot : mention,
-        # ou réponse à l'un de ses messages. Deux bots peuvent ainsi discuter ensemble.
-        if message.author.bot and self.user not in message.mentions and not await self.replies_to_me(message):
+        # ou réponse à l'un de ses messages. Deux bots peuvent ainsi discuter ensemble, mais pas sans fin.
+        if not message.author.bot:
+            self._bot_streaks.human_spoke(message.channel.id)
+        elif self.user not in message.mentions and not await self.replies_to_me(message):
+            return
+        elif (rank := self._bot_streaks.count(message.channel.id, message.created_at)) > MAX_BOT_REPLIES:
+            if rank == MAX_BOT_REPLIES + 1:
+                logger.warning("#%s : %s réponses à des bots d'affilée (dernier : %s). Le bot ne leur répond plus "
+                               "jusqu'au prochain message d'un membre, ou après %s minutes sans message de bot.",
+                               message.channel, MAX_BOT_REPLIES, message.author,
+                               BOT_STREAK_RESET.seconds // 60)
             return
 
         in_main_channel = message.channel.id == self.settings.channel_id
