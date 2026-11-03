@@ -18,6 +18,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Corrections
 
+- **`EFFORT` invalide avec la mémoire : un message clair.** Avec `MEMORY=on` et la réflexion active (`THINKING=on`, ou un modèle Opus), une valeur inconnue comme `EFFORT=ultra` faisait planter le démarrage avec une trace Python (`KeyError: 'ultra'`) au lieu du message « Erreur de configuration ». La valeur fausse n'est plus réutilisée dans la vérification de `MAX_TOKENS`.
+
 - **Erreurs de démarrage : toutes d'un coup, et dans `bot.log`.** Le bot s'arrêtait à la première variable fausse du `.env` : avec trois erreurs, il fallait trois redémarrages. Il les liste maintenant toutes. Le message n'était écrit que sur la console : il va aussi dans `bot.log` quand `LOG_FILE` est utilisable, pour qu'un redémarrage raté y laisse une trace. Enfin, un PC hors ligne ou une panne de Discord au démarrage donnaient une longue trace technique ; le bot dit maintenant « Impossible de joindre Discord : vérifie la connexion Internet » ou « Discord semble en panne ».
 
 - **Un `.env` entre guillemets marche aussi sous Docker.** `docker run --env-file` garde les guillemets que le bot retire en local : `DISCORD_TOKEN="abc"` donnait « Token Discord invalide » sous Docker. Le bot retire maintenant lui-même une paire de guillemets autour d'une valeur. Le README précise que `--env-file` ne retire pas les commentaires en fin de ligne, et que le `.env` est prioritaire sur une variable passée en ligne de commande.

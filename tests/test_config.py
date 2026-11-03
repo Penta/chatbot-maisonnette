@@ -108,6 +108,14 @@ class AllErrorsTest(unittest.TestCase):
             settings(MAX_TOKENS="beaucoup", THINKING="oui", EFFORT="max")
         self.assertEqual(len(ctx.exception.errors), 2)
 
+    def test_invalid_effort_with_memory(self):
+        # EFFORT inconnu avec la mémoire : un message clair, pas une KeyError dans memory_max_tokens.
+        for env in ({"THINKING": "on"}, {"CLAUDE_MODEL": "claude-opus-5-5"}):
+            with self.subTest(**env), self.assertRaises(ConfigError) as ctx:
+                settings(EFFORT="ultra", **env)
+            self.assertEqual(len(ctx.exception.errors), 1)
+            self.assertIn("EFFORT doit valoir", str(ctx.exception))
+
     def test_log_file_given_when_usable(self):
         with tempfile.TemporaryDirectory() as folder:
             log = Path(folder) / "bot.log"

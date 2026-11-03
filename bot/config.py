@@ -243,6 +243,8 @@ def load_settings() -> Settings:
         effort = effort.lower()
         if effort not in EFFORT_LEVELS:
             errors.append(f"EFFORT doit valoir {', '.join(EFFORT_LEVELS)} (valeur actuelle : {effort!r}).")
+            # memory_max_tokens lit REFLECTION_TOKENS[effort] : une valeur inconnue y lèverait KeyError.
+            effort = None
         # Couper la réflexion n'est accepté qu'avec un effort high ou moins.
         elif thinking_raw == "off" and effort in ("xhigh", "max") and thinking_off(model) is not None:
             errors.append(f"EFFORT={effort} nécessite THINKING=on avec le modèle {model}.")
