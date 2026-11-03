@@ -135,6 +135,23 @@ class TrimTest(HistoryTestCase):
                 self.assertEqual(sizes[first_cut], max_length)
                 self.assertGreaterEqual(min(sizes[first_cut:]), max_length)
 
+    async def test_odd_length(self):
+        # N impair : la coupe tomberait sur une réponse du bot, retirée pour commencer par un message
+        # de l'utilisateur. Il reste donc N - 1 messages, ce qui est voulu.
+        for max_length, cut_to in ((3, 2), (5, 4), (11, 10)):
+            with self.subTest(max_length=max_length):
+                self.path.unlink(missing_ok=True)
+                history = self.load(max_length)
+                sizes = []
+                for i in range(3 * max_length):
+                    await self.exchanges(history, 1, start=i)
+                    messages = history.get(CHANNEL)
+                    self.assertEqual(messages[0]["role"], "user")
+                    sizes.append(len(messages))
+                first_cut = next(i for i in range(1, len(sizes)) if sizes[i] < sizes[i - 1])
+                self.assertEqual(sizes[first_cut], cut_to)
+                self.assertGreaterEqual(min(sizes[first_cut:]), cut_to)
+
     async def test_trimmed_on_load(self):
         history = self.load(max_length=20)
         await self.exchanges(history, 10)
