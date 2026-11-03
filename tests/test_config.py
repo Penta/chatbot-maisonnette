@@ -78,5 +78,19 @@ class OutputPathsTest(unittest.TestCase):
         self.assertIn("Impossible d'écrire dans le dossier de LOG_FILE", str(ctx.exception))
 
 
+class MaximumTest(unittest.TestCase):
+    def test_values_above_maximum_refused(self):
+        for name, value in (("MAX_TOKENS", "64001"), ("WEB_MAX_USES", "11"), ("MEMORY_MAX_OPERATIONS", "21"),
+                            ("PDF_MAX_PAGES", "101"), ("PRESENCE_SPEED", "100.5")):
+            with self.subTest(name), self.assertRaises(ConfigError) as ctx:
+                settings(MEMORY="off", **{name: value})
+            self.assertIn(f"{name} ne peut pas dépasser", str(ctx.exception))
+
+    def test_maximum_accepted(self):
+        s = settings(MEMORY="off", MAX_TOKENS="64000", WEB_MAX_USES="10", MEMORY_MAX_OPERATIONS="20",
+                     PDF_MAX_PAGES="100", PRESENCE_SPEED="100")
+        self.assertEqual((s.max_tokens, s.pdf_max_pages, s.presence_speed), (64000, 100, 100))
+
+
 if __name__ == "__main__":
     unittest.main()

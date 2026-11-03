@@ -26,6 +26,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **`CONTEXT_MESSAGE_LIMIT` plafonné à 100.** Aucune limite n'empêchait d'y mettre 2000 : chaque mention demandait alors une vingtaine d'appels à Discord et envoyait environ 100 000 tokens à Claude (plusieurs dizaines de centimes par mention, ou un refus « prompt is too long »). Au-delà de 100, le bot refuse de démarrer avec un message « Erreur de configuration » clair.
 
+- **Les autres réglages ont aussi un plafond.** Une valeur trop grande n'était découverte qu'au premier message, avec un « Je suis mal configuré » sans explication (`MAX_TOKENS=200000`, `PDF_MAX_PAGES=300` alors que l'API refuse les PDF de plus de 100 pages), ou passait sans erreur mais coûtait cher (`WEB_MAX_USES=50`) ou saturait Discord (`PRESENCE_SPEED=100000`). Le bot refuse maintenant de démarrer avec un message « Erreur de configuration » clair au-delà de 64000 pour `MAX_TOKENS`, 10 pour `WEB_MAX_USES`, 20 pour `MEMORY_MAX_OPERATIONS`, 100 pour `PDF_MAX_PAGES` et 100 pour `PRESENCE_SPEED`. Les bornes sont indiquées dans `.env.exemple`.
+
 - **Un dossier absent est signalé au démarrage.** Si le dossier de `LOG_FILE`, de `HISTORY_FILE` ou de `MEMORY_DIR` n'existe pas (volume Docker mal monté, faute de frappe) ou n'est pas accessible en écriture, le bot refuse de démarrer avec un message « Erreur de configuration » clair, au lieu d'une trace Python (`LOG_FILE`) ou de tourner sans jamais rien sauvegarder (`HISTORY_FILE`). L'historique est aussi enregistré comme les autres fichiers : envoyé jusqu'au disque avant de remplacer l'ancien, pour ne pas finir vide après une coupure de courant.
 
 ---

@@ -55,7 +55,8 @@ def _get_int(name: str, default: int | None = None, required: bool = False, mini
     return value
 
 
-def _get_float(name: str, default: float | None = None, minimum: float | None = None) -> float | None:
+def _get_float(name: str, default: float | None = None, minimum: float | None = None,
+               maximum: float | None = None) -> float | None:
     raw = _get_str(name)
     if raw is None:
         return default
@@ -67,6 +68,8 @@ def _get_float(name: str, default: float | None = None, minimum: float | None = 
         raise ConfigError(f"La variable {name} doit être un nombre (valeur actuelle : {raw!r}).")
     if minimum is not None and value < minimum:
         raise ConfigError(f"La variable {name} doit être supérieure ou égale à {minimum:g} (valeur actuelle : {value:g}).")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"La variable {name} ne peut pas dépasser {maximum:g} (valeur actuelle : {value:g}).")
     return value
 
 
@@ -232,7 +235,8 @@ def load_settings() -> Settings:
     presence_raw = (_get_str("PRESENCE", default="on") or "on").lower()
     if presence_raw not in ("on", "off"):
         raise ConfigError(f"PRESENCE doit valoir « on » ou « off » (valeur actuelle : {presence_raw!r}).")
-    presence_speed = _get_float("PRESENCE_SPEED", default=1.0)
+    # Au-delà, le statut change trop souvent (écriture de presence_state.json, limites de débit de Discord).
+    presence_speed = _get_float("PRESENCE_SPEED", default=1.0, maximum=100)
     if presence_speed <= 0:
         raise ConfigError(f"PRESENCE_SPEED doit être supérieur à 0 (valeur actuelle : {presence_speed}).")
 
@@ -243,12 +247,14 @@ def load_settings() -> Settings:
         model=model,
         # Une limite haute ne coûte que si elle est atteinte ; trop basse, elle coupe la réécriture
         # d'un fichier de mémoire plein (voir memory_max_tokens).
-        max_tokens=_get_int("MAX_TOKENS", default=4000, minimum=1),
+        # Au-delà de 64000, l'API refuse la requête (limite de sortie des modèles).
+        max_tokens=_get_int("MAX_TOKENS", default=4000, minimum=1, maximum=64000),
         thinking=thinking,
         effort=effort,
         api_timeout=_get_float("API_TIMEOUT", default=60.0, minimum=1),
         web_search=web_search_raw == "on",
-        web_max_uses=_get_int("WEB_MAX_USES", default=3, minimum=1),
+        # Chaque recherche est facturée : au-delà de 10, une seule question peut coûter cher.
+        web_max_uses=_get_int("WEB_MAX_USES", default=3, minimum=1, maximum=10),
         max_history_length=_get_int("MAX_HISTORY_LENGTH", default=10, minimum=2),
         # Lus à chaque mention puis envoyés à Claude : au-delà, chaque mention coûte cher (ou dépasse la limite).
         context_message_limit=_get_int("CONTEXT_MESSAGE_LIMIT", default=20, minimum=0, maximum=100),
@@ -259,11 +265,12 @@ def load_settings() -> Settings:
         # Chaque fiche jointe est relue à chaque message : plus elle est longue, plus il coûte.
         memory_member_limit=memory_limits["MEMORY_MEMBER_LIMIT"],
         memory_server_limit=memory_limits["MEMORY_SERVER_LIMIT"],
-        memory_max_operations=_get_int("MEMORY_MAX_OPERATIONS", default=5, minimum=1),
+        memory_max_operations=_get_int("MEMORY_MAX_OPERATIONS", default=5, minimum=1, maximum=20),
         # Taille maximale acceptée depuis Discord ; les grosses images sont réduites avant l'envoi à Claude.
         max_image_size=_get_int("MAX_IMAGE_SIZE", default=25_000_000, minimum=1),
         # Chaque page coûte son texte et son image (souvent plusieurs milliers de tokens).
-        pdf_max_pages=_get_int("PDF_MAX_PAGES", default=20, minimum=0),
+        # L'API refuse les PDF de plus de 100 pages.
+        pdf_max_pages=_get_int("PDF_MAX_PAGES", default=20, minimum=0, maximum=100),
         presence=presence_raw == "on",
         presence_speed=presence_speed,
         presence_weights=_get_presence_weights(),
