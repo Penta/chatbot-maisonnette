@@ -131,6 +131,25 @@ class SplitMessageTest(unittest.TestCase):
                 self.assert_valid(chunks)
                 self.assertFalse(chunks[0].endswith("```py\n```"), chunks[0][-20:])
 
+    def test_closing_fence_at_end_of_chunk(self):
+        # La ligne qui ferme un bloc (```) entre dans un morceau presque plein : elle n'a pas à garder
+        # la place d'une fermeture artificielle, sinon le morceau suivant commence par un bloc vide.
+        for last in range(980, 992):
+            with self.subTest(last=last):
+                text = "```py\n" + "a" * 1000 + "\n" + "b" * last + "\n```\nSuite du message."
+                chunks = split_message(text)
+                self.assert_valid(chunks)
+                self.assertFalse(any(chunk.startswith("```py\n```") for chunk in chunks), chunks[-1][:20])
+
+    def test_long_closing_fence_line(self):
+        # Une ligne de fermeture trop longue est découpée : le bloc reste ouvert entre ses morceaux,
+        # qui doivent donc garder la place de le refermer.
+        for after in range(20, 60):
+            with self.subTest(after=after):
+                text = "```py\n" + "a" * 5 + "\n```" + "x" * after + " fin\nSuite."
+                for chunk in split_message(text, 40):
+                    self.assertLessEqual(len(chunk), 40, chunk)
+
 
 class StripReasoningTest(unittest.TestCase):
     def test_think_block_at_start_removed(self):

@@ -59,10 +59,17 @@ def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
 
     for line in text.split("\n"):
         match = _FENCE_RE.match(line)
-        # Une ligne qui ouvre un bloc doit laisser la place de le refermer.
-        room_to_close = len("\n```") if match and open_fence is None else closing_len()
         # Une ligne trop longue à elle seule est découpée en morceaux plus petits.
-        for piece in _split_long_line(line, limit - 10 - (len(open_fence) if open_fence else 0)):
+        pieces = _split_long_line(line, limit - 10 - (len(open_fence) if open_fence else 0))
+        # Une ligne qui ouvre un bloc doit laisser la place de le refermer. Celle qui le ferme n'en a pas
+        # besoin, sauf si elle est découpée : le bloc reste alors ouvert entre ses morceaux.
+        if match and open_fence is None:
+            room_to_close = len("\n```")
+        elif match and len(pieces) == 1:
+            room_to_close = 0
+        else:
+            room_to_close = closing_len()
+        for piece in pieces:
             addition = piece + "\n"
             if len(current) + len(addition) + room_to_close > limit:
                 flush()
