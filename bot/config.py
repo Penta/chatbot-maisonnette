@@ -95,11 +95,17 @@ def _get_presence_weights() -> dict[str, int]:
     raw = _get_str("PRESENCE_WEIGHTS")
     if raw is None:
         return weights
+    seen = set()
     for item in raw.split(","):
+        if not item.strip():
+            continue  # virgule finale ou doublée
         name, _, value = item.partition("=")
         name = name.strip().lower()
         if name not in weights:
             raise ConfigError(f"Statut inconnu dans PRESENCE_WEIGHTS : {name!r} (statuts possibles : {', '.join(weights)}).")
+        if name in seen:
+            raise ConfigError(f"PRESENCE_WEIGHTS : le statut {name} apparaît plusieurs fois.")
+        seen.add(name)
         try:
             weights[name] = int(value)
         except ValueError:
@@ -291,6 +297,12 @@ def load_settings() -> Settings:
             _check_output("MEMORY_DIR", settings.memory_dir, folder_only=True)
         else:
             _check_output("MEMORY_DIR", settings.memory_dir)
+    # Sans clé Steam, « jeu » est retiré au tirage : s'il était le seul statut possible, le bot resterait
+    # « en ligne » sans activité.
+    if settings.presence and not settings.steam_api_key and not any(
+            weight for name, weight in settings.presence_weights.items() if name != "jeu"):
+        raise ConfigError("PRESENCE_WEIGHTS : le statut jeu est le seul possible, mais il nécessite STEAM_API_KEY. "
+                          "Renseigne STEAM_API_KEY ou donne une valeur supérieure à 0 à un autre statut.")
     if settings.memory and settings.max_tokens < (minimum := memory_max_tokens(settings)[0]):
         raise ConfigError(f"MAX_TOKENS ({settings.max_tokens}) est trop petit pour la mémoire des membres : la "
                           f"réécriture d'un fichier plein serait coupée et la note perdue. Mets au moins {minimum}, "

@@ -28,6 +28,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les autres réglages ont aussi un plafond.** Une valeur trop grande n'était découverte qu'au premier message, avec un « Je suis mal configuré » sans explication (`MAX_TOKENS=200000`, `PDF_MAX_PAGES=300` alors que l'API refuse les PDF de plus de 100 pages), ou passait sans erreur mais coûtait cher (`WEB_MAX_USES=50`) ou saturait Discord (`PRESENCE_SPEED=100000`). Le bot refuse maintenant de démarrer avec un message « Erreur de configuration » clair au-delà de 64000 pour `MAX_TOKENS`, 10 pour `WEB_MAX_USES`, 20 pour `MEMORY_MAX_OPERATIONS`, 100 pour `PDF_MAX_PAGES` et 100 pour `PRESENCE_SPEED`. Les bornes sont indiquées dans `.env.exemple`.
 
+- **`PRESENCE_WEIGHTS` mieux vérifié.** Une virgule finale ou doublée ne donne plus « Statut inconnu dans PRESENCE_WEIGHTS : '' » : l'élément vide est ignoré. Un statut écrit deux fois n'est plus accepté en silence (la dernière valeur gagnait) : le bot refuse de démarrer. Enfin, si `jeu` est le seul statut possible sans `STEAM_API_KEY`, le bot ne reste plus « en ligne » sans activité ni avertissement : il refuse de démarrer avec un message « Erreur de configuration » clair.
+
 - **Un dossier absent est signalé au démarrage.** Si le dossier de `LOG_FILE`, de `HISTORY_FILE` ou de `MEMORY_DIR` n'existe pas (volume Docker mal monté, faute de frappe) ou n'est pas accessible en écriture, le bot refuse de démarrer avec un message « Erreur de configuration » clair, au lieu d'une trace Python (`LOG_FILE`) ou de tourner sans jamais rien sauvegarder (`HISTORY_FILE`). L'historique est aussi enregistré comme les autres fichiers : envoyé jusqu'au disque avant de remplacer l'ancien, pour ne pas finir vide après une coupure de courant.
 
 ---

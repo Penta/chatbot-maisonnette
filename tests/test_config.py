@@ -92,5 +92,27 @@ class MaximumTest(unittest.TestCase):
         self.assertEqual((s.max_tokens, s.pdf_max_pages, s.presence_speed), (64000, 100, 100))
 
 
+class PresenceWeightsTest(unittest.TestCase):
+    ONLY_GAME = "anime=0,musique=0,pensee=0,jeu=100,en_ligne=0,ne_pas_deranger=0,absent=0"
+
+    def test_empty_items_ignored(self):
+        s = settings(MEMORY="off", PRESENCE_WEIGHTS="anime=5,,musique=7,")
+        self.assertEqual((s.presence_weights["anime"], s.presence_weights["musique"]), (5, 7))
+
+    def test_duplicate_refused(self):
+        with self.assertRaises(ConfigError) as ctx:
+            settings(MEMORY="off", PRESENCE_WEIGHTS="anime=5,Anime=0")
+        self.assertIn("le statut anime apparaît plusieurs fois", str(ctx.exception))
+
+    def test_only_game_without_steam_key_refused(self):
+        with self.assertRaises(ConfigError) as ctx:
+            settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME)
+        self.assertIn("nécessite STEAM_API_KEY", str(ctx.exception))
+
+    def test_only_game_accepted_with_steam_key_or_presence_off(self):
+        settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME, STEAM_API_KEY="x")
+        settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME, PRESENCE="off")
+
+
 if __name__ == "__main__":
     unittest.main()
