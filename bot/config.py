@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 from .models import PRICES, thinking_off
 
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+# Tokens de réflexion à prévoir avant la réécriture d'un fichier de mémoire, selon EFFORT
+# (None : valeur par défaut du modèle, soit high).
+REFLECTION_TOKENS = {"low": 2000, "medium": 2000, "high": 4000, None: 4000, "xhigh": 8000, "max": 8000}
 
 # Chances (relatives) de chaque statut Discord lors d'un changement de statut.
 DEFAULT_PRESENCE_WEIGHTS = {
@@ -213,13 +216,13 @@ def load_settings() -> Settings:
     if presence_speed <= 0:
         raise ConfigError(f"PRESENCE_SPEED doit être supérieur à 0 (valeur actuelle : {presence_speed}).")
 
-    return Settings(
+    settings = Settings(
         discord_token=_get_str("DISCORD_TOKEN", required=True),
         anthropic_api_key=_get_str("ANTHROPIC_API_KEY", required=True),
         channel_id=_get_int("CHANNEL_ID", required=True),
         model=model,
         # Une limite haute ne coûte que si elle est atteinte ; trop basse, elle coupe la réécriture
-        # d'un fichier de mémoire plein (voir la vérification au démarrage, dans discord_bot.py).
+        # d'un fichier de mémoire plein (voir memory_max_tokens).
         max_tokens=_get_int("MAX_TOKENS", default=4000, minimum=1),
         thinking=thinking,
         effort=effort,
@@ -252,3 +255,29 @@ def load_settings() -> Settings:
         price_web_search_per_1000=_get_float("PRICE_WEB_SEARCH_PER_1000", default=10.0, minimum=0),
         log_file=Path(_get_str("LOG_FILE", default="bot.log")),
     )
+    if settings.memory and settings.max_tokens < (minimum := memory_max_tokens(settings)[0]):
+        raise ConfigError(f"MAX_TOKENS ({settings.max_tokens}) est trop petit pour la mémoire des membres : la "
+                          f"réécriture d'un fichier plein serait coupée et la note perdue. Mets au moins {minimum}, "
+                          f"ou baisse MEMORY_SERVER_LIMIT et MEMORY_MEMBER_LIMIT.")
+    return settings
+
+
+def memory_max_tokens(settings: Settings) -> tuple[int, int]:
+    """MAX_TOKENS nécessaire pour réécrire un fichier de mémoire plein d'un seul appel d'outil :
+    (minimum sans réflexion, valeur conseillée avec la réflexion attendue)."""
+    # Environ 2,5 caractères par token en français (estimation prudente), plus 2000 pour le reste de l'appel.
+    minimum = max(settings.memory_member_limit, settings.memory_server_limit) * 2 // 5 + 2000
+    # Sans THINKING=on, le modèle réfléchit quand même s'il ne permet pas de couper la réflexion.
+    if not settings.thinking and thinking_off(settings.model) is not None:
+        return minimum, minimum
+    return minimum, minimum + REFLECTION_TOKENS[settings.effort]
+
+
+def memory_warning(settings: Settings) -> str | None:
+    """Avertissement à afficher au démarrage quand MAX_TOKENS laisse trop peu de place à la réflexion
+    pour réécrire un fichier de mémoire plein (None : rien à signaler)."""
+    if not settings.memory or settings.max_tokens >= (advised := memory_max_tokens(settings)[1]):
+        return None
+    return (f"MAX_TOKENS ({settings.max_tokens}) laisse peu de place à la réflexion (effort "
+            f"{settings.effort or 'par défaut'}) : la réécriture d'un fichier de mémoire plein pourrait être "
+            f"coupée et la note perdue. Mets au moins {advised} dans le .env.")

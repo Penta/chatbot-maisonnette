@@ -18,7 +18,7 @@ from discord.ext import commands
 
 from . import VERSION
 from .claude_client import ClaudeClient, ClaudeError, ImageData
-from .config import Settings
+from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .history import ConversationHistory, images_marker, render_line
 from .images import ImageError, prepare_image
@@ -156,7 +156,8 @@ class ChatBot(commands.Bot):
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._announced = False
-        self.presence = PresenceManager(self, self.claude, settings) if settings.presence else None
+        self._memory_warning = memory_warning(settings) if self.memory else None
+        self.presence =PresenceManager(self, self.claude, settings) if settings.presence else None
         # Absent ou en « Ne pas déranger » : réponses différées, par salon.
         self._waiters: dict[int, asyncio.Task] = {}  # attente en cours
         self._mentions: dict[int, list[discord.Message]] = {}  # mentions en attente (hors salon dédié)
@@ -200,16 +201,8 @@ class ChatBot(commands.Bot):
             logger.warning("API_TIMEOUT (%g s) est court pour MAX_TOKENS=%s%s : une longue réponse serait "
                            "abandonnée (« Je mets trop de temps à répondre »). Mets au moins %s dans le .env.",
                            s.api_timeout, s.max_tokens, " avec la recherche web" if s.web_search else "", needed)
-        if self.memory:
-            # Un fichier plein se réécrit d'un seul appel d'outil, qui doit tenir dans MAX_TOKENS avec
-            # la réflexion : environ 2,5 caractères par token en français (estimation prudente),
-            # plus une marge pour la réflexion et la réponse.
-            needed = max(self.memory.member_limit, self.memory.server_limit) * 2 // 5 + 2000
-            if s.max_tokens < needed:
-                logger.warning("MAX_TOKENS (%s) est trop petit pour la mémoire des membres : la réécriture "
-                               "d'un fichier plein serait coupée et la note perdue. Mets au moins %s dans "
-                               "le .env, ou baisse MEMORY_SERVER_LIMIT et MEMORY_MEMBER_LIMIT.",
-                               s.max_tokens, needed)
+        if self._memory_warning:
+            logger.warning("%s", self._memory_warning)  # rappelé dans le message « En ligne »
         if self.presence:
             self.presence.start()
 
@@ -268,6 +261,9 @@ class ChatBot(commands.Bot):
         embed.add_field(name="Version", value=f"`{VERSION}`")
         embed.add_field(name="Modèle", value=display_name(self.settings.model))
         embed.add_field(name="Démarrage", value=discord.utils.format_dt(started, "R"))
+        if self._memory_warning:
+            # Sur OpenShift, personne ne lit le journal de démarrage.
+            embed.add_field(name="⚠️ Réglage à revoir", value=self._memory_warning, inline=False)
         try:
             await channel.send(embed=embed)
         except discord.HTTPException as exc:
