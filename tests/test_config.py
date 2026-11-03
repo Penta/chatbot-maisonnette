@@ -118,6 +118,14 @@ class AllErrorsTest(unittest.TestCase):
                 settings(LOG_FILE=str(Path(folder) / "absent" / "bot.log"))
             self.assertIsNone(ctx.exception.log_file)
 
+    def test_log_file_off_and_level(self):
+        s = settings(LOG_FILE="OFF", LOG_LEVEL="debug")
+        self.assertIsNone(s.log_file)
+        self.assertEqual(s.log_level, "DEBUG")
+        with self.assertRaises(ConfigError) as ctx:
+            settings(LOG_LEVEL="bavard")
+        self.assertIn("LOG_LEVEL", str(ctx.exception))
+
 
 class PresenceWeightsTest(unittest.TestCase):
     ONLY_GAME = "anime=0,musique=0,pensee=0,jeu=100,en_ligne=0,ne_pas_deranger=0,absent=0"

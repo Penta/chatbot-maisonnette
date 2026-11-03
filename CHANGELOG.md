@@ -10,6 +10,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
+- **Journal réglable.** `LOG_LEVEL` choisit le détail du journal (`DEBUG` pour enquêter, `INFO` par défaut). `LOG_FILE=off` n'écrit que sur la console, utile en conteneur où elle est déjà collectée. Le démarrage affiche aussi `MAX_TOKENS`, `API_TIMEOUT` et les chemins complets du journal, de l'historique et de la personnalité.
+
 - **Plusieurs images dans un même message.** On peut envoyer jusqu'à 4 images à la fois : Rika les voit toutes, dans l'ordre, et peut les comparer ou parler de « la deuxième ». Les images d'un message cité ou transféré sont lues elles aussi, jusqu'à 4. Si une image pose problème, le message d'erreur dit laquelle (la première dans l'ordre du message si plusieurs échouent). Dans la mémoire, les images d'un message tiennent en un seul repère (« 4 images jointes »). Un PDF reste seul, sans image.
 
 - **Un message de démarrage plus soigné.** Le bloc « Bot en ligne » affiche maintenant l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage, sur le vert du statut « en ligne » de Discord.

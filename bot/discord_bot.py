@@ -227,6 +227,9 @@ class ChatBot(commands.Bot):
         logger.info("Modèle %s — réflexion : %s, effort : %s, recherche web : %s, mémoire des membres : %s",
                     s.model, thinking, s.effort or "par défaut",
                     "on" if s.web_search else "off", memory)
+        logger.info("MAX_TOKENS : %s, API_TIMEOUT : %g s, journal : %s (niveau %s)", s.max_tokens, s.api_timeout,
+                    s.log_file.resolve() if s.log_file else "console seulement", s.log_level)
+        logger.info("Historique : %s, personnalité : %s", s.history_file.resolve(), s.personality_file.resolve())
         if not is_known(s.model):
             # Un nom mal écrit ne serait sinon découvert qu'au premier message (erreur 404).
             prices = ""

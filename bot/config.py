@@ -30,10 +30,11 @@ class ConfigError(Exception):
     """Erreur de configuration (variable manquante ou invalide). Celle de load_settings rassemble toutes les
     erreurs trouvées (errors) et indique le fichier de journal s'il est utilisable (log_file, sinon None)."""
 
-    def __init__(self, *errors: str, log_file: Path | None = None):
+    def __init__(self, *errors: str, log_file: Path | None = None, log_level: str = "INFO"):
         super().__init__(*errors)
         self.errors = list(errors)
         self.log_file = log_file
+        self.log_level = log_level
 
     def __str__(self) -> str:
         return "\n".join(self.errors)
@@ -201,7 +202,11 @@ class Settings:
     price_input_per_mtok: float | None   # None = modèle absent de la table des tarifs
     price_output_per_mtok: float | None
     price_web_search_per_1000: float
-    log_file: Path
+    log_file: Path | None  # None = LOG_FILE=off, journal sur la console seulement
+    log_level: str
+
+
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 
 def load_settings() -> Settings:
@@ -267,6 +272,13 @@ def load_settings() -> Settings:
     if presence_speed is not None and presence_speed <= 0:
         errors.append(f"PRESENCE_SPEED doit être supérieur à 0 (valeur actuelle : {presence_speed}).")
 
+    log_level = (_get_str("LOG_LEVEL", default="INFO") or "INFO").upper()
+    if log_level not in LOG_LEVELS:
+        errors.append(f"LOG_LEVEL doit valoir {', '.join(LOG_LEVELS)} (valeur actuelle : {log_level!r}).")
+        log_level = "INFO"
+    # off : en conteneur, la console suffit (OpenShift et Docker la collectent déjà).
+    log_file_raw = _get_str("LOG_FILE", default="bot.log")
+
     # Une valeur invalide vaut None ici : l'erreur est notée, et la configuration n'est pas renvoyée.
     settings = Settings(
         discord_token=check(_get_str, "DISCORD_TOKEN", required=True),
@@ -309,10 +321,12 @@ def load_settings() -> Settings:
         price_input_per_mtok=check(_get_float, "PRICE_INPUT_PER_MTOK", default=default_input, minimum=0),
         price_output_per_mtok=check(_get_float, "PRICE_OUTPUT_PER_MTOK", default=default_output, minimum=0),
         price_web_search_per_1000=check(_get_float, "PRICE_WEB_SEARCH_PER_1000", default=10.0, minimum=0),
-        log_file=Path(_get_str("LOG_FILE", default="bot.log")),
+        log_file=None if log_file_raw.lower() == "off" else Path(log_file_raw),
+        log_level=log_level,
     )
     count = len(errors)
-    check(_check_output, "LOG_FILE", settings.log_file)
+    if settings.log_file is not None:
+        check(_check_output, "LOG_FILE", settings.log_file)
     # Journal utilisable : main.py y écrit les erreurs de configuration, pas seulement sur la console.
     log_file = settings.log_file if len(errors) == count else None
     check(_check_output, "HISTORY_FILE", settings.history_file)
@@ -334,7 +348,7 @@ def load_settings() -> Settings:
                       f"réécriture d'un fichier plein serait coupée et la note perdue. Mets au moins {minimum}, "
                       f"ou baisse MEMORY_SERVER_LIMIT et MEMORY_MEMBER_LIMIT.")
     if errors:
-        raise ConfigError(*errors, log_file=log_file)
+        raise ConfigError(*errors, log_file=log_file, log_level=log_level)
     return settings
 
 

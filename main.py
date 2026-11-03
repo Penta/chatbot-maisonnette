@@ -12,11 +12,11 @@ from bot.config import ConfigError, load_settings
 from bot.discord_bot import ChatBot
 
 
-def setup_logging(log_file: Path | None) -> None:
+def setup_logging(log_file: Path | None, level: str = "INFO") -> None:
     """Journal sur la console et dans log_file (seulement sur la console si log_file vaut None)."""
     formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s : %(message)s", "%Y-%m-%d %H:%M:%S")
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(level)
 
     handlers = [logging.StreamHandler()]
     if log_file is not None:
@@ -36,7 +36,7 @@ def main() -> None:
         settings = load_settings()
     except ConfigError as exc:
         # Aussi dans le fichier de journal quand LOG_FILE est utilisable : un redémarrage raté y laisse une trace.
-        setup_logging(exc.log_file)
+        setup_logging(exc.log_file, exc.log_level)
         if len(exc.errors) == 1:
             logging.critical("Erreur de configuration : %s", exc)
         else:
@@ -44,7 +44,7 @@ def main() -> None:
                              "\n".join(f"  - {error}" for error in exc.errors))
         sys.exit(1)
 
-    setup_logging(settings.log_file)
+    setup_logging(settings.log_file, settings.log_level)
     # Rika n'utilise pas le vocal : inutile de signaler l'absence de PyNaCl et de davey.
     discord.VoiceClient.warn_nacl = False
     discord.VoiceClient.warn_dave = False

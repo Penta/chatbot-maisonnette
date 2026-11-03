@@ -154,7 +154,7 @@ Chaque message envoyé à Claude est facturé selon le nombre de tokens lus (per
 - chaque page de PDF coûte souvent plusieurs milliers de tokens, et chaque recherche web est payante en plus ;
 - avec `MEMORY=on`, les fiches jointes (5 au plus par message) sont relues à chaque message, hors cache : environ 850 tokens par fiche pleine de 3000 caractères. Le prompt ne liste que les membres qui ont une fiche, mais chaque nouvelle fiche, changement de pseudo ou note dans le fichier général fait réécrire la conversation en cache au message suivant. Chaque note demande en plus un court appel, la conversation étant alors relue en cache.
 
-Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque appel les tokens utilisés et le coût estimé en dollars. Les tarifs de Sonnet, Haiku et Opus 5.5 sont connus du bot ; pour un autre modèle, renseigne `PRICE_INPUT_PER_MTOK` et `PRICE_OUTPUT_PER_MTOK`.
+Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque appel les tokens utilisés et le coût estimé en dollars. `LOG_LEVEL=DEBUG` le rend plus détaillé pour enquêter sur un problème. En conteneur, `LOG_FILE=off` n'écrit que sur la console, déjà collectée par Docker ou OpenShift. Au démarrage, le journal rappelle les réglages effectifs : modèle, `MAX_TOKENS`, `API_TIMEOUT`, et chemins complets des fichiers. Les tarifs de Sonnet, Haiku et Opus 5.5 sont connus du bot ; pour un autre modèle, renseigne `PRICE_INPUT_PER_MTOK` et `PRICE_OUTPUT_PER_MTOK`.
 
 ## Fichiers créés par le bot
 
