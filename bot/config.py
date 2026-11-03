@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -64,6 +65,22 @@ def _get_float(name: str, default: float | None = None, minimum: float | None = 
     if minimum is not None and value < minimum:
         raise ConfigError(f"La variable {name} doit être supérieure ou égale à {minimum:g} (valeur actuelle : {value:g}).")
     return value
+
+
+def _check_output(name: str, path: Path, folder_only: bool = False) -> None:
+    """Vérifie que le bot pourra écrire path (ou dans le dossier path si folder_only). Le dossier n'est pas
+    créé : avec Docker, un dossier absent signale en général un volume mal monté, et les fichiers écrits
+    dans le conteneur seraient perdus au redémarrage."""
+    if not folder_only and path.is_dir():
+        raise ConfigError(f"{name} désigne un dossier, pas un fichier : {path}.")
+    folder = path if folder_only else path.parent
+    if not folder.is_dir():
+        raise ConfigError(f"Le dossier de {name} n'existe pas : {folder.resolve()} (volume non monté ?).")
+    try:
+        with tempfile.TemporaryFile(dir=folder):
+            pass
+    except OSError as exc:
+        raise ConfigError(f"Impossible d'écrire dans le dossier de {name} ({folder.resolve()}) : {exc.strerror or exc}.")
 
 
 def _get_presence_weights() -> dict[str, int]:
@@ -255,6 +272,14 @@ def load_settings() -> Settings:
         price_web_search_per_1000=_get_float("PRICE_WEB_SEARCH_PER_1000", default=10.0, minimum=0),
         log_file=Path(_get_str("LOG_FILE", default="bot.log")),
     )
+    _check_output("LOG_FILE", settings.log_file)
+    _check_output("HISTORY_FILE", settings.history_file)
+    if settings.memory:
+        # Le dossier de la mémoire se crée au premier enregistrement : son parent doit déjà exister.
+        if settings.memory_dir.is_dir():
+            _check_output("MEMORY_DIR", settings.memory_dir, folder_only=True)
+        else:
+            _check_output("MEMORY_DIR", settings.memory_dir)
     if settings.memory and settings.max_tokens < (minimum := memory_max_tokens(settings)[0]):
         raise ConfigError(f"MAX_TOKENS ({settings.max_tokens}) est trop petit pour la mémoire des membres : la "
                           f"réécriture d'un fichier plein serait coupée et la note perdue. Mets au moins {minimum}, "

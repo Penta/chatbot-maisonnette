@@ -1,6 +1,8 @@
-"""Tests de la configuration (MAX_TOKENS et mémoire). Lancer depuis la racine du projet : python -m unittest"""
+"""Tests de la configuration (MAX_TOKENS, mémoire et fichiers écrits). Lancer depuis la racine du projet : python -m unittest"""
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from bot.config import ConfigError, load_settings, memory_max_tokens, memory_warning
@@ -42,6 +44,38 @@ class MemoryMaxTokensTest(unittest.TestCase):
         self.assertIn("au moins 8000", memory_warning(s))
         self.assertIsNone(memory_warning(settings(MAX_TOKENS="8000", THINKING="on", EFFORT="high")))
         self.assertIsNone(memory_warning(settings(MAX_TOKENS="4000", THINKING="off")))
+
+
+
+class OutputPathsTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+
+    def test_existing_folders_accepted(self):
+        s = settings(LOG_FILE=str(self.root / "bot.log"), HISTORY_FILE=str(self.root / "h.json"))
+        self.assertEqual(s.memory_dir, self.root / "memories")
+
+    def test_missing_folder_refused(self):
+        # Le scénario de l'audit : volume non monté sur /data.
+        for name in ("LOG_FILE", "HISTORY_FILE", "MEMORY_DIR"):
+            with self.subTest(name), self.assertRaises(ConfigError) as ctx:
+                settings(**{name: str(self.root / "absent" / "x")})
+            self.assertIn(f"Le dossier de {name} n'existe pas", str(ctx.exception))
+
+    def test_memory_dir_unchecked_when_off(self):
+        settings(MEMORY="off", MEMORY_DIR=str(self.root / "absent" / "x"))
+
+    def test_file_path_is_folder_refused(self):
+        with self.assertRaises(ConfigError) as ctx:
+            settings(HISTORY_FILE=str(self.root))
+        self.assertIn("HISTORY_FILE désigne un dossier", str(ctx.exception))
+
+    def test_unwritable_folder_refused(self):
+        with mock.patch("bot.config.tempfile.TemporaryFile", side_effect=PermissionError(13, "Permission denied")),                 self.assertRaises(ConfigError) as ctx:
+            settings()
+        self.assertIn("Impossible d'écrire dans le dossier de LOG_FILE", str(ctx.exception))
 
 
 if __name__ == "__main__":

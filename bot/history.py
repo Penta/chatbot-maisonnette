@@ -10,6 +10,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from .files import write_atomic
 from .text_utils import strip_reasoning
 
 logger = logging.getLogger("chatbot.history")
@@ -305,12 +306,6 @@ class ConversationHistory:
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         async with self._save_lock:
             try:
-                await asyncio.to_thread(self._write_atomic, text)
+                await asyncio.to_thread(write_atomic, self.file_path, text)
             except OSError as exc:
                 logger.error("Impossible de sauvegarder l'historique : %s", exc)
-
-    def _write_atomic(self, text: str) -> None:
-        # Écrit dans un fichier temporaire puis le renomme : jamais de fichier à moitié écrit.
-        tmp = self.file_path.with_suffix(self.file_path.suffix + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, self.file_path)
