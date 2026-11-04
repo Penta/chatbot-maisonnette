@@ -459,9 +459,21 @@ class DecodeTextFileTest(unittest.TestCase):
         data = "Café, élève, à bientôt".encode("utf-8") + b"\xff"
         self.assertEqual(decode_text_file(data), "Café, élève, à bientôtÿ")
 
+    def test_windows_1252_with_bytes_that_look_like_utf8(self):
+        # « é », espace insécable et « » » font E9 A0 BB : de l'UTF-8 valide par hasard (« 頻 »).
+        for text in ("C’est l’été », dit-il", "Rendez-vous à « midi »", "ÉTÉ’"):
+            with self.subTest(text):
+                self.assertEqual(decode_text_file(text.encode("cp1252")), text)
+
     def test_utf8_and_windows_1252_lines(self):
-        data = "Ligne en UTF-8 : élève\n".encode("utf-8") + "Ligne en ANSI : été".encode("cp1252")
-        self.assertEqual(decode_text_file(data), "Ligne en UTF-8 : élève\nLigne en ANSI : été")
+        # Fichier surtout en UTF-8 auquel un vieux logiciel a ajouté une ligne en Windows-1252.
+        data = "Ligne en UTF-8 : élève, déjà vu\n".encode("utf-8") + "Ligne en ANSI : été".encode("cp1252")
+        self.assertEqual(decode_text_file(data), "Ligne en UTF-8 : élève, déjà vu\nLigne en ANSI : été")
+
+    def test_utf8_with_bom_and_invalid_bytes(self):
+        # Le BOM UTF-8 dit que le fichier est en UTF-8 : il n'est jamais relu en entier en Windows-1252.
+        data = codecs.BOM_UTF8 + "Été".encode("utf-8") + b" \xe9\xe9"
+        self.assertEqual(decode_text_file(data), "Été éé")
 
     def test_utf8_cut_in_the_middle_of_a_character(self):
         # Seul le caractère coupé est abîmé, le reste du texte garde ses accents.

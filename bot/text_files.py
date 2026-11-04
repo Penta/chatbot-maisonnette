@@ -24,9 +24,8 @@ class TextFileError(UserFacingError):
 def _cp1252_fallback(error: UnicodeDecodeError) -> tuple[str, int]:
     """Relit en Windows-1252 les seuls octets qui ne sont pas de l'UTF-8 valide.
 
-    Un fichier d'un ancien éditeur Windows (Bloc-notes « ANSI ») est ainsi lu
-    correctement, accent par accent, et un octet isolé dans un fichier UTF-8
-    n'abîme que lui-même au lieu de déformer tous les accents du fichier.
+    Un octet isolé dans un fichier UTF-8 n'abîme ainsi que lui-même au lieu de
+    déformer tous les accents du fichier.
     """
     return error.object[error.start:error.end].decode("cp1252", errors="replace"), error.end
 
@@ -34,8 +33,26 @@ def _cp1252_fallback(error: UnicodeDecodeError) -> tuple[str, int]:
 codecs.register_error("rika_cp1252_fallback", _cp1252_fallback)
 
 
+def _decode_invalid_utf8(data: bytes) -> str:
+    """Décode un fichier qui n'est pas de l'UTF-8 valide : Windows-1252 en entier, ou mélangé.
+
+    Dans un vrai fichier Windows-1252 (Bloc-notes « ANSI »), chaque accent est un octet
+    invalide en UTF-8, mais deux ou trois octets voisins forment parfois un caractère
+    UTF-8 valide par hasard (« é », espace insécable et « » » donnent « 頻 »). Le fichier
+    n'est donc lu en mélangé (UTF-8, octets invalides en Windows-1252) que s'il a plus
+    de caractères UTF-8 valides que d'octets invalides, ou s'il commence par un BOM UTF-8.
+    """
+    if not data.startswith(codecs.BOM_UTF8):
+        lenient = data.decode("utf-8", errors="replace")  # un « � » par suite d'octets invalides
+        invalid = lenient.count("�")
+        valid = sum(1 for char in lenient if char > "\x7f") - invalid
+        if invalid >= valid:
+            return data.decode("cp1252", errors="replace")
+    return data.decode("utf-8-sig", errors="rika_cp1252_fallback")
+
+
 def decode_text_file(data: bytes) -> str:
-    """Décode le contenu d'un fichier .txt (UTF-16 avec BOM, sinon UTF-8 avec les octets invalides en Windows-1252)."""
+    """Décode le contenu d'un fichier .txt (UTF-16 avec BOM, UTF-8, sinon Windows-1252 ou mélangé)."""
     if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         # « Unicode » du Bloc-notes : deux octets par caractère, dont beaucoup de \x00.
         try:
@@ -43,7 +60,10 @@ def decode_text_file(data: bytes) -> str:
         except UnicodeDecodeError:
             raise TextFileError("Ce fichier ne contient pas du texte lisible.")
     else:
-        text = data.decode("utf-8-sig", errors="rika_cp1252_fallback")
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = _decode_invalid_utf8(data)
     if "\x00" in text:
         raise TextFileError("Ce fichier ne contient pas du texte lisible.")
     text = text.replace("\r\n", "\n").strip()
