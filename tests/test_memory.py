@@ -405,6 +405,80 @@ class ForgetTest(MemoryTestCase):
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
 
 
+class MemberRefTest(MemoryTestCase):
+    """Une source est gardée par l'identifiant du membre (« <@222> ») : Claude l'écrit et la lit avec le nom
+    d'utilisateur (« @alice »), les membres voient son nom, et personne ne la fabrique à la main."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        await self.members.see(222, "alice", "Alice")
+        self.fiche = f"membres/{MEMBER_ID}.md"
+
+    def raw(self, name: str) -> str:
+        return (self.root / "memories" / name).read_text(encoding="utf-8").strip()
+
+    async def test_written_as_id(self):
+        await self.tool(fichier=self.fiche, texte="part à Rome (d'après @alice.)")
+        self.assertEqual(self.raw(self.fiche), "part à Rome (d'après <@222>.)")
+
+    async def test_unknown_or_ambiguous_username_left_as_is(self):
+        # Nom d'utilisateur libéré par un compte puis repris par un autre : deux entrées le portent.
+        await self.members.see(333, "carl", "Carl")
+        await self.members.see(444, "carl", "Carl bis")
+        await self.tool(fichier=self.fiche, texte="d'après @carl et @inconnu, écrit à bob@mail.fr")
+        self.assertEqual(self.raw(self.fiche), "d'après @carl et @inconnu, écrit à bob@mail.fr")
+
+    async def test_read_and_replaced_with_username(self):
+        self.write(self.fiche, "joue à Zelda (d'après <@222>)")
+        self.assertIn("joue à Zelda (d'après @alice)", self.store.notes_for([MEMBER_ID]))
+        self.assertIn("(d'après @alice)", (await self.tool(commande="lire", fichier=self.fiche)).content)
+        await self.tool(commande="remplacer", fichier=self.fiche, ancien="Zelda (d'après @alice)",
+                        texte="Elden Ring (d'après @alice)")
+        self.assertEqual(self.raw(self.fiche), "joue à Elden Ring (d'après <@222>)")
+
+    async def test_follows_name_change(self):
+        self.write(self.fiche, "joue à Zelda (d'après <@222>)")
+        await self.members.see(222, "alice_2", "Alicia")
+        self.assertIn("(d'après @alice_2)", self.store.notes_for([MEMBER_ID]))
+        self.assertEqual(self.store.with_names(self.store.read(self.fiche)), "joue à Zelda (d'après Alicia (alice_2))")
+
+    async def test_unknown_id_shown_as_a_member(self):
+        self.write(self.fiche, "joue à Zelda (d'après <@999>)")
+        self.assertIn("(d'après un membre)", self.store.notes_for([MEMBER_ID]))
+
+    async def test_manual_edit_keeps_existing_source(self):
+        self.write(self.fiche, "joue à Zelda (d'après <@222>)")
+        shown = self.store.with_usernames(self.store.read(self.fiche))
+        self.assertIsNone(await self.store.overwrite(self.fiche, shown.replace("Zelda", "Mario"), by="bob",
+                                                     expected=self.store.read(self.fiche)))
+        self.assertEqual(self.raw(self.fiche), "joue à Mario (d'après <@222>)")
+
+    async def test_manual_edit_cannot_add_source(self):
+        self.write(self.fiche, "habite à Lyon")
+        for text in ["habite à Lyon\naime Bob (d'après @alice)", "habite à Lyon\naime Bob (d'après <@222>)"]:
+            with self.subTest(text=text):
+                error = await self.store.overwrite(self.fiche, text, by="bob")
+                self.assertIn("@alice", error)
+                self.assertEqual(self.raw(self.fiche), "habite à Lyon")
+
+    async def test_edit_window_shows_usernames(self):
+        self.write(self.fiche, "joue à Zelda (d'après <@222>)")
+        target = Target(self.fiche, MEMBER_ID, "Bob", is_self=True)
+        card = MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika")
+        self.assertEqual(EditModal(card).inputs[0].default, "joue à Zelda (d'après @alice)")
+        self.assertIn("(d'après Alice)", card.embeds()[0].description)
+
+    async def test_forget_replaces_mentions_whatever_the_name(self):
+        # Bob a pris le pseudo d'Alice : sa mention à lui est retirée, celle d'Alice reste.
+        await self.members.see(MEMBER_ID, "bob", "Bob", nickname="Alice")
+        self.write("membres/222.md", "part à Rome (d'après <@111>)\njoue à Zelda (selon <@!111>)")
+        await self.members.set_memory(222, True)
+        self.write("membres/333.md", "habite à Lyon (d'après <@222>)")
+        self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
+        self.assertEqual(self.raw("membres/222.md"), "part à Rome (d'après un membre)\njoue à Zelda (selon un membre)")
+        self.assertEqual(self.raw("membres/333.md"), "habite à Lyon (d'après <@222>)")
+
+
 class ConfirmationTextsTest(MemoryTestCase):
     """Les questions de confirmation de /memoire ne promettent pas plus que ce qui est effacé."""
 

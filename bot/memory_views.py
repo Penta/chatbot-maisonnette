@@ -114,7 +114,8 @@ class MemoryCard:
                 embed.set_footer(text=note)
             return [embed]
         size = len(content)
-        if size > EMBEDS_TOTAL_MAX:  # seulement si MEMORY_*_LIMIT dépasse ce que Discord affiche
+        content = self.store.with_names(content)  # membres cités par leur nom actuel (« <@222> » → « Alice »)
+        if len(content) > EMBEDS_TOTAL_MAX:  # seulement si MEMORY_*_LIMIT dépasse ce que Discord affiche
             content = content[:EMBEDS_TOTAL_MAX] + "\n[…] (la suite est visible dans « Modifier »)"
         embeds = [discord.Embed(description=chunk, color=discord.Color.blurple())
                   for chunk in split_message(content, EMBED_MAX)]
@@ -162,7 +163,7 @@ class MemoryCard:
     # -------------------------------------------------------------- actions
 
     async def edit(self, interaction: discord.Interaction) -> None:
-        content = self.store.read(self.target.file)
+        content = self.store.with_usernames(self.store.read(self.target.file))  # tel que la fenêtre l'affiche
         if len(content) > INPUT_MAX * MAX_INPUTS:  # au-delà de ce qu'une fenêtre Discord peut contenir
             file = discord.File(io.BytesIO(content.encode("utf-8")), filename="contenu_complet.txt")
             limit = self.store.limit(self.target.file)
@@ -307,9 +308,11 @@ class EditModal(discord.ui.Modal):
         # s'agrandissent pour le contenir en entier, à raccourcir avant d'enregistrer. Tronqué, il serait
         # perdu en partie ; plus long que sa zone, Discord refuserait d'ouvrir la fenêtre.
         too_long = len(self.original) > limit
-        sizes = input_sizes(max(limit, len(self.original)))
+        # Membres cités par leur nom d'utilisateur (« @alice »), reconverti à l'enregistrement.
+        shown = card.store.with_usernames(self.original)
+        sizes = input_sizes(max(limit, len(shown)))
         count = len(sizes)
-        parts = split_for_inputs(self.original, sizes)
+        parts = split_for_inputs(shown, sizes)
         self.inputs = []
         for i in range(count):
             label = "Contenu" if count == 1 else f"Contenu ({i + 1}/{count})"
