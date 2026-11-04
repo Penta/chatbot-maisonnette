@@ -133,10 +133,14 @@ class PrepareImageTest(unittest.TestCase):
 
     def test_uniform_out_of_range_grey(self):
         # Image uniforme hors des plages connues : rien à voir, mais un gris moyen plutôt qu'un noir de trou.
-        for img in (Image.new("I", (200, 100), 100000), Image.new("F", (200, 100), -5.0)):
-            with self.subTest(mode=img.mode):
+        # Aussi pour de très grandes valeurs, où ajouter 1 ne change plus rien.
+        with_holes = Image.new("F", (200, 100), 1e19)
+        with_holes.paste(float("nan"), (0, 0, 100, 100))
+        for img in (Image.new("I", (200, 100), 100000), Image.new("F", (200, 100), -5.0),
+                    Image.new("F", (200, 100), 1e19), Image.new("F", (200, 100), -1e19), with_holes):
+            with self.subTest(mode=img.mode, value=img.getpixel((199, 0))):
                 result = opened(prepare_image(encode(img, "TIFF")).data)
-                self.assertEqual(result.convert("L").getpixel((0, 0)), 128)
+                self.assertEqual(result.convert("L").getpixel((199, 0)), 128)
 
     def test_transparency_kept(self):
         result = prepare_image(encode(Image.new("RGBA", (3000, 100), (255, 0, 0, 0)), "PNG"))

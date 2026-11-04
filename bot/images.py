@@ -150,7 +150,9 @@ def _to_8_bits(img: Image.Image) -> Image.Image:
         elif low >= 0 and high <= 65535 and img.mode != "F":  # flottants : mètres, degrés…, pas 16 bits
             low, high = 0, 65535
         elif high == low:  # image uniforme hors de ces plages : gris moyen, pas noir
-            low, high = low - 1, high + 1
+            # Écart proportionnel à la valeur : ajouter 1 à un très grand flottant ne le change plus.
+            margin = max(1.0, abs(low))
+            low, high = low - margin, high + margin
     img = img.convert("F")
     scale = 255 / (high - low)
     result = img.point(lambda v: (v - low) * scale + 0.5).convert("L")  # + 0.5 : arrondi, pas troncature
