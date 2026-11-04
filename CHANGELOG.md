@@ -16,6 +16,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Plusieurs gros fichiers envoyés pendant que Rika écrit ne font plus échouer sa réponse.** Ils partaient tous dans un seul appel à Claude, qui pouvait dépasser ses limites. Quand leurs PDF et images sont trop lourds ensemble (plus de 18 Mo, ou plus de 100 pages et images), Rika répond maintenant en plusieurs fois, dans l'ordre, chaque réponse citant le message auquel elle répond.
 
+- **Les PDF protégés seulement contre la modification sont lus.** Un PDF chiffré en AES sans mot de passe d'ouverture (courant avec Acrobat ou LibreOffice) était refusé comme « illisible ». Il est maintenant lu, grâce à la nouvelle dépendance `cryptography` installée avec les autres.
+
 ---
 
 ## Version 5.12

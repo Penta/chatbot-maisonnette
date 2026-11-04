@@ -16,7 +16,7 @@ import aiohttp
 from PIL import Image
 from pypdf import PdfWriter
 
-from bot import attachments, images
+from bot import attachments, images, pdf_files
 from bot.attachments import AttachmentReader
 from bot.images import MAX_DIMENSION, MAX_PIXELS, ImageError, prepare_image
 from bot.media import ImageData
@@ -255,12 +255,13 @@ class DownloadFailureTest(unittest.IsolatedAsyncioTestCase):
                 await self.reader.download_image(self.file("lente.png", never_ends))
 
 
-def pdf(pages: int, password: str | None = None, owner_password: str | None = None) -> bytes:
+def pdf(pages: int, password: str | None = None, owner_password: str | None = None,
+        algorithm: str | None = None) -> bytes:
     writer = PdfWriter()
     for _ in range(pages):
         writer.add_blank_page(width=200, height=200)
     if password is not None:
-        writer.encrypt(user_password=password, owner_password=owner_password or "propriétaire")
+        writer.encrypt(user_password=password, owner_password=owner_password or "propriétaire", algorithm=algorithm)
     buffer = io.BytesIO()
     writer.write(buffer)
     return buffer.getvalue()
@@ -294,6 +295,20 @@ class PreparePdfTest(unittest.TestCase):
     def test_owner_password_only(self):
         # Chiffré sans mot de passe d'ouverture (seulement des droits limités) : lisible.
         self.assertTrue(prepare_pdf("protégé.pdf", pdf(1, password=""), max_pages=3).is_pdf)
+
+    def test_owner_password_only_aes(self):
+        # Chiffrement AES-256 (Acrobat, LibreOffice récents) : pypdf a besoin de la bibliothèque cryptography.
+        data = pdf(2, password="", owner_password="propriétaire", algorithm="AES-256")
+        self.assertEqual(prepare_pdf("protégé.pdf", data, max_pages=3).pages, 2)
+
+    def test_missing_decryption_library(self):
+        # Sans bibliothèque de déchiffrement, pypdf refuse le PDF : le dire clairement, et le signaler à l'administrateur.
+        error = pdf_files.DependencyError("cryptography>=3.1 is required for AES algorithm")
+        with mock.patch.object(pdf_files, "PdfReader", side_effect=error), \
+                self.assertLogs("chatbot.pdf", "WARNING") as logs, self.assertRaises(PdfError) as ctx:
+            prepare_pdf("protégé.pdf", b"%PDF", max_pages=3)
+        self.assertIn("protégé", ctx.exception.user_message)
+        self.assertIn("cryptography", logs.output[0])
 
     def test_not_a_pdf(self):
         for data in (b"", b"bonjour, ceci n'est pas un PDF", encode(Image.new("RGB", (50, 50)), "PNG")):

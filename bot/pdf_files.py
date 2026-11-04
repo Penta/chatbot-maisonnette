@@ -6,6 +6,7 @@ import io
 import logging
 
 from pypdf import PdfReader
+from pypdf.errors import DependencyError
 
 from .errors import UserFacingError
 from .media import PDF_MEDIA_TYPE, ImageData
@@ -36,6 +37,9 @@ def prepare_pdf(name: str, data: bytes, max_pages: int) -> ImageData:
         pages = len(reader.pages)
     except PdfError:
         raise
+    except DependencyError as exc:  # chiffrement AES sans la bibliothèque cryptography : à corriger côté serveur
+        logger.warning("PDF %s chiffré illisible faute de bibliothèque de déchiffrement : %s", name, exc)
+        raise PdfError("Ce PDF est protégé et je ne peux pas l'ouvrir pour le moment.")
     except Exception as exc:  # fichier abîmé ou pas un PDF : pypdf lève des erreurs très variées
         logger.info("PDF %s illisible : %s", name, exc)
         raise PdfError("Je n'arrive pas à lire ce PDF.")
