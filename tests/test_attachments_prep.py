@@ -310,6 +310,15 @@ class PreparePdfTest(unittest.TestCase):
         self.assertIn("protégé", ctx.exception.user_message)
         self.assertIn("cryptography", logs.output[0])
 
+    def test_missing_other_library(self):
+        # Une autre bibliothèque manquante (brotli : compression rare) ne fait pas croire à un PDF protégé.
+        error = pdf_files.DependencyError("brotli is required for BrotliDecode. Install it with: pip install pypdf[brotli]")
+        with mock.patch.object(pdf_files, "PdfReader", side_effect=error), \
+                self.assertLogs("chatbot.pdf", "WARNING") as logs, self.assertRaises(PdfError) as ctx:
+            prepare_pdf("compressé.pdf", b"%PDF", max_pages=3)
+        self.assertNotIn("protégé", ctx.exception.user_message)
+        self.assertIn("brotli", logs.output[0])
+
     def test_not_a_pdf(self):
         for data in (b"", b"bonjour, ceci n'est pas un PDF", encode(Image.new("RGB", (50, 50)), "PNG")):
             with self.subTest(data=data[:10]), self.assertLogs("chatbot.pdf", "INFO"), \
