@@ -10,7 +10,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Corrections
 
-- **Désactiver la mémoire n'annonce plus un effacement qui n'a pas eu lieu.** Si des lignes du fichier général citent encore le membre (plus de 3, ou avec un surnom de sa fiche), `/memoire` le dit et invite à les faire vérifier avec `/memoire-serveur`. Un pseudo en lettres décorées (« 𝓑𝓸𝓫 ») est aussi cherché sous sa forme simple.
+- **Désactiver la mémoire ne touche plus au fichier général.** Rika n'y note rien sur les membres : seule la fiche est effacée, et le nom retiré des sources des autres fiches (aussi sous sa forme simple pour un pseudo décoré comme « 𝓑𝓸𝓫 »). `/memoire` invite le membre à faire vérifier le fichier général par un administrateur.
 
 ---
 

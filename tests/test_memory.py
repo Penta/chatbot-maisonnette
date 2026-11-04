@@ -15,7 +15,7 @@ from bot.commands import memory_command
 from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, MODAL_TIMEOUT, EditModal, MemoryCard, Target, input_sizes,
                               member_target, reply_error, split_for_inputs)
 from bot import memory
-from bot.memory import (EDITS_FILE, MAX_ATTACHED_NOTES, MAX_FORGOTTEN_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
+from bot.memory import (EDITS_FILE, MAX_ATTACHED_NOTES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
 
 MEMBER_ID = 111
@@ -277,12 +277,12 @@ class UnreadableFileTest(MemoryTestCase):
         self.assertEqual(self.store.nicknames(MEMBER_ID), ["Bobby"])
 
     async def test_forget_with_unreadable_server_file(self):
+        # Le fichier général n'est plus lu : illisible, il ne bloque pas la désactivation.
         before = self.write_latin1(SERVER_FILE, "Bob a gagné le tournoi")
         self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
-        with self.assertLogs("chatbot.memory", "ERROR"):
-            self.assertIsNotNone((await self.store.forget(MEMBER_ID, by="bob")).error)
-        self.assertTrue(self.members.memory_enabled(MEMBER_ID))
-        self.assertTrue(self.fiche().exists())
+        self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
+        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
+        self.assertFalse(self.fiche().exists())
         self.assertEqual((self.root / "memories" / SERVER_FILE).read_bytes(), before)
 
 
@@ -311,80 +311,21 @@ class NotEnabledTest(MemoryTestCase):
 
 
 class ForgetTest(MemoryTestCase):
-    async def test_file_and_citing_lines_erased(self):
-        await self.members.see(MEMBER_ID, "bob", "Bob", nickname="Bobby")  # Bob devient un ancien pseudo
+    async def test_server_file_untouched(self):
+        # Claude n'y note rien sur les membres : le membre est invité à le faire vérifier.
+        await self.members.see(MEMBER_ID, "bob", "Bob", nickname="Bobby")
         self.write(f"membres/{MEMBER_ID}.md", "Surnoms : le Grand B\nhabite à Lyon")
-        self.write(SERVER_FILE, "\n".join([
-            "soirée jeux le vendredi",
-            "Bob : adore les lasagnes (d'après Alice)",
-            "BOBBY a gagné le tournoi",
-            "concours de bobines en mai",
-        ]))
-        self.assertIsNone((await self.store.forget(MEMBER_ID, by="bob")).error)
+        self.write(SERVER_FILE, "soirée jeux le vendredi\nBob : adore les lasagnes")
+        self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
-        self.assertEqual(self.server_file(), "soirée jeux le vendredi\nconcours de bobines en mai")
-
-    async def test_file_nicknames_ignored(self):
-        # Le membre écrit lui-même ses surnoms avec /memoire : ils ne servent pas au nettoyage.
-        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : les, est, une")
-        self.write(SERVER_FILE, "soirée jeux tous les vendredis\nla blague du canard est récurrente")
-        with self.assertLogs("chatbot.memory", "WARNING"):
-            result = await self.store.forget(MEMBER_ID, by="bob")
-        self.assertEqual(self.server_file(), "soirée jeux tous les vendredis\nla blague du canard est récurrente")
-        self.assertEqual(result.remaining, 2)  # « les », « est » : signalées seulement
-
-    async def test_nickname_lines_reported(self):
-        # « pnt » n'est pas un nom Discord : la ligne reste, mais le membre et l'administrateur le savent.
-        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : pnt")
-        self.write(SERVER_FILE, "soirée jeux le vendredi\npnt a gagné le quiz")
-        with self.assertLogs("chatbot.memory", "WARNING") as logs:
-            result = await self.store.forget(MEMBER_ID, by="bob")
-        self.assertIsNone(result.error)
-        self.assertEqual(result.remaining, 1)
-        self.assertEqual(self.server_file(), "soirée jeux le vendredi\npnt a gagné le quiz")
-        self.assertTrue(any("surnom" in line and "pnt" in line for line in logs.output))
-        self.assertFalse(any("quiz" in line for line in logs.output))
-
-    async def test_nothing_remaining(self):
-        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : pnt")
-        self.write(SERVER_FILE, "soirée jeux le vendredi\nBob a gagné le quiz")
-        self.assertEqual(await self.store.forget(MEMBER_ID, by="bob"), memory.Forgotten())
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi\nBob : adore les lasagnes")
 
     async def test_decorated_name(self):
         # Claude écrit « Bob » pour un pseudo en lettres décorées.
         await self.members.see(MEMBER_ID, "b0b_42", "𝓑𝓸𝓫")
-        self.write(SERVER_FILE, "soirée jeux le vendredi\nBob a gagné le quiz")
         self.write("membres/222.md", "part à Rome (d'après Bob)")
-        self.assertEqual(await self.store.forget(MEMBER_ID, by="bob"), memory.Forgotten())
-        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
         self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
-
-    async def test_too_many_lines_nothing_removed(self):
-        await self.members.see(MEMBER_ID, "soleil", "Soleil")
-        lines = [f"le soleil se lève à {hour} h" for hour in range(5, 5 + MAX_FORGOTTEN_LINES + 1)]
-        self.write(SERVER_FILE, "\n".join(lines))
-        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
-        with self.assertLogs("chatbot.memory", "WARNING") as logs:
-            result = await self.store.forget(MEMBER_ID, by="soleil")
-        self.assertIsNone(result.error)
-        self.assertEqual(result.remaining, len(lines))
-        self.assertEqual(self.server_file(), "\n".join(lines))
-        self.assertTrue(any("aucune retirée" in line and "soleil" in line for line in logs.output))
-        self.assertFalse(any("se lève" in line for line in logs.output))
-        # Le reste de la désactivation a lieu.
-        self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
-        self.assertFalse(self.members.memory_enabled(MEMBER_ID))
-
-    async def test_short_names_ignored(self):
-        await self.members.see(MEMBER_ID, "jo", None)
-        self.write(SERVER_FILE, "Jo et Max au cinéma")
-        await self.store.forget(MEMBER_ID, by="jo")
-        self.assertEqual(self.server_file(), "Jo et Max au cinéma")
-
-    async def test_server_file_removed_when_emptied(self):
-        self.write(SERVER_FILE, "Bob : adore les lasagnes")
-        await self.store.forget(MEMBER_ID, by="bob")
-        self.assertFalse((self.root / "memories" / SERVER_FILE).exists())
 
     async def test_memory_disabled(self):
         await self.store.forget(MEMBER_ID, by="bob")
@@ -400,7 +341,7 @@ class ForgetTest(MemoryTestCase):
             tool = asyncio.create_task(self.store.run(
                 {"commande": "ajouter", "fichier": f"membres/{MEMBER_ID}.md", "texte": "habite à Lyon", "ancien": ""}))
             await asyncio.sleep(0)
-        self.assertIsNone((await forget).error)
+        self.assertIsNone(await forget)
         self.assertTrue((await tool).is_error)
         self.assertFalse(fiche.exists())
 
@@ -415,7 +356,7 @@ class ForgetTest(MemoryTestCase):
         self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
         with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")), \
                 self.assertLogs("chatbot.members", "ERROR"):
-            error = (await self.store.forget(MEMBER_ID, by="bob")).error
+            error = await self.store.forget(MEMBER_ID, by="bob")
         self.assertIn("désactivation n'a pas pu être enregistrée", error)
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
@@ -431,7 +372,7 @@ class ForgetTest(MemoryTestCase):
             "a battu Bob aux échecs",
         ]))
         self.write("membres/333.md", "habite à Lyon")
-        self.assertIsNone((await self.store.forget(MEMBER_ID, by="bob")).error)
+        self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
         self.assertEqual(self.store.read("membres/222.md"), "\n".join([
             "part à Rome en mai (d'après un membre)",
             "joue à Zelda, selon un membre",
@@ -445,18 +386,10 @@ class ForgetTest(MemoryTestCase):
         self.write("membres/222.md", "part à Rome (d'après Bob)")
         (self.root / "memories" / "membres" / "333.md").write_bytes("d'après Bob \xe0 Lyon".encode("latin-1"))
         with self.assertLogs("chatbot.memory", "WARNING") as logs:
-            self.assertIsNone((await self.store.forget(MEMBER_ID, by="bob")).error)
+            self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
         self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
         self.assertTrue(any("membres/333.md" in line and "sources" in line for line in logs.output))
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
-
-    async def test_removed_lines_not_logged(self):
-        self.write(SERVER_FILE, "Bob : adore les lasagnes")
-        with self.assertLogs("chatbot.memory", "INFO") as logs:
-            await self.store.forget(MEMBER_ID, by="bob")
-        self.assertFalse(any("lasagnes" in line for line in logs.output))
-        self.assertTrue(any("1 ligne(s) retirée(s)" in line for line in logs.output))
-
 
 class ConfirmationTextsTest(MemoryTestCase):
     """Les questions de confirmation de /memoire ne promettent pas plus que ce qui est effacé."""
@@ -486,6 +419,19 @@ class ConfirmationTextsTest(MemoryTestCase):
         text = await self.question(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True), "ask_disable")
         self.assertIn("retiré des sources", text)
         self.assertNotIn("plus rien ne sera retenu", text)
+        # Le fichier général n'est pas touché : rien n'est promis, le membre sait à qui s'adresser.
+        self.assertNotIn("lignes du fichier général", text)
+        self.assertIn("rapproche-toi d'un administrateur", text)
+
+    async def test_disable_done(self):
+        interaction = mock.Mock()
+        interaction.response.is_done.return_value = False
+        interaction.response.edit_message = mock.AsyncMock()
+        target = Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True)
+        await MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika").disable(interaction)
+        content = interaction.response.edit_message.call_args.kwargs["content"]
+        self.assertNotIn("fichier général ont été effacés", content)
+        self.assertIn("rapproche-toi d'un administrateur", content)
 
     async def test_enable(self):
         # Mémoire à activer soi-même : la confirmation est la seule présentation de la mémoire.
@@ -525,15 +471,14 @@ class EditWindowTest(MemoryTestCase):
         interaction.edit_original_response = mock.AsyncMock()
         return interaction
 
-    async def test_line_removed_by_forget_not_restored(self):
-        # Scénario de l'audit : un administrateur ouvre le fichier général, Bob désactive sa mémoire,
-        # l'administrateur ajoute une ligne et valide.
-        self.write(SERVER_FILE, "soirée jeux le vendredi\nBob adore le chocolat")
+    async def test_change_during_edit_not_overwritten(self):
+        # Un administrateur ouvre le fichier général, Claude y ajoute une note, l'administrateur valide.
+        self.write(SERVER_FILE, "soirée jeux le vendredi")
         window = self.window(Target(SERVER_FILE, None))
-        await self.store.forget(MEMBER_ID, by="bob")
-        interaction = self.submit(window, "soirée jeux le vendredi\nBob adore le chocolat\ntournoi en mai")
+        await self.tool(texte="barbecue en juin")
+        interaction = self.submit(window, "soirée jeux le vendredi\ntournoi en mai")
         await window.on_submit(interaction)
-        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi\nbarbecue en juin")
         message = interaction.followup.send.call_args
         self.assertIn("a changé pendant ta modification", message.args[0])
         self.assertIn(b"tournoi en mai", message.kwargs["file"].fp.getvalue())
@@ -841,7 +786,7 @@ class DepartedMemberTest(MemoryTestCase):
         await self.members.set_memory(MEMBER_ID, False)
         self.assertNotIn("Activer la mémoire", self.labels(self.card(in_guild=False)))
 
-    async def test_disable_erases_everything(self):
+    async def test_disable_erases_file_and_sources(self):
         self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
         self.write("membres/222.md", "part à Rome (d'après Bob)")
         self.write(SERVER_FILE, "soirée jeux le vendredi\nBob adore le chocolat")
@@ -855,24 +800,11 @@ class DepartedMemberTest(MemoryTestCase):
         await card.disable(interaction)
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
-        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi\nBob adore le chocolat")
         self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
-        self.assertIn("Mémoire désactivée pour Bob", interaction.response.edit_message.call_args.kwargs["content"])
-
-    async def test_disable_reports_remaining_lines(self):
-        self.write(f"membres/{MEMBER_ID}.md", "Surnoms : pnt")
-        self.write(SERVER_FILE, "soirée jeux le vendredi\npnt a gagné le quiz")
-        card = self.card(in_guild=False)
-        interaction = mock.Mock()
-        interaction.response.is_done.return_value = False
-        interaction.response.edit_message = mock.AsyncMock()
-        interaction.user.__str__ = lambda self: "admin"
-        with self.assertLogs("chatbot.memory", "WARNING"):
-            await card.disable(interaction)
         content = interaction.response.edit_message.call_args.kwargs["content"]
-        self.assertNotIn("dans le fichier général ont été effacés", content)
-        self.assertIn("1 ligne du fichier général parle peut-être encore de ce membre", content)
-
+        self.assertIn("Mémoire désactivée pour Bob", content)
+        self.assertIn("Vérifie avec /memoire-serveur", content)
 
 class AdminAccessTest(MemoryTestCase):
     """Les membres savent que les administrateurs voient leur fiche, et chaque consultation est tracée."""
