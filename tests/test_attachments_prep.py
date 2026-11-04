@@ -3,6 +3,7 @@
 import asyncio
 import codecs
 import io
+import math
 import random
 import struct
 import threading
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import aiohttp
-from PIL import Image
+from PIL import Image, ImageDraw
 from pypdf import PdfWriter
 
 from bot import attachments, images, pdf_files
@@ -115,21 +116,38 @@ class PrepareImageTest(unittest.TestCase):
         self.assertEqual(result.getextrema(), (0, 0))
 
     def test_huge_float_values_not_holes(self):
-        # De très grandes mesures, sous le seuil des trous : étalées comme les autres, pas noircies.
-        img = Image.new("F", (300, 100), 1e18)
-        img.paste(3e18, (100, 0, 200, 100))
-        img.paste(5e18, (200, 0, 300, 100))
+        # Densités de colonne en astronomie : de vraies mesures de 1e21 à 5e21, pas des trous à noircir.
+        img = Image.new("F", (300, 100), 1e21)
+        img.paste(3e21, (100, 0, 200, 100))
+        img.paste(5e21, (200, 0, 300, 100))
         result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
         for x, expected in ((50, 0), (150, 128), (250, 255)):
             self.assertAlmostEqual(result.getpixel((x, 0)), expected, delta=2)
 
     def test_float_hole_trace_not_a_measure(self):
-        # Au bout d'une fine bande de trous, la réduction laisse des traces bien plus petites que le trou
-        # (vers 1e26 ici) : elles ne doivent pas compter comme des mesures et écraser les gris du reste.
-        img = Image.new("F", (5003, 60), 0.5)
-        img.paste(3.4e38, (33, 10, 800, 18))
-        result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
-        self.assertEqual(result.getpixel((1000, 15)), 128)
+        # Réduits tels quels, les trous laisseraient autour d'eux des traces de toutes tailles (jusqu'à
+        # quelques dizaines), prises pour des mesures : les gris du reste seraient écrasés.
+        cases = []
+        band = Image.new("F", (5003, 60), 0.5)  # fine bande de trous
+        band.paste(3.4e38, (33, 10, 800, 18))
+        cases.append((band, (1000, 15), 128))
+        tiny = Image.new("F", (12057, 81), 0.5)  # un seul trou de 1×3 pixels
+        tiny.paste(-3.4028234663852886e38, (511, 40, 512, 43))
+        cases.append((tiny, (1000, 3), 128))
+        # Scène satellite inclinée, entourée de « sans donnée » : bords en escalier.
+        w, h, angle = 1794, 2854, math.radians(6)
+        corners = [(w / 2 + dx * math.cos(angle) - dy * math.sin(angle),
+                    h / 2 + dx * math.sin(angle) + dy * math.cos(angle))
+                   for dx, dy in ((-0.3 * w, -0.4 * h), (0.3 * w, -0.4 * h), (0.3 * w, 0.4 * h), (-0.3 * w, 0.4 * h))]
+        inside = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(inside).polygon(corners, fill=255)
+        tilted = Image.new("F", (w, h), -3.4028234663852886e38)
+        tilted.paste(100.0, mask=inside)
+        cases.append((tilted, (493, 784), 100))  # centre de l'image réduite
+        for img, pixel, expected in cases:
+            with self.subTest(size=img.size):
+                result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
+                self.assertEqual(result.getpixel(pixel), expected)
 
     def test_uniform_out_of_range_grey(self):
         # Image uniforme hors des plages connues : rien à voir, mais un gris moyen plutôt qu'un noir de trou.
