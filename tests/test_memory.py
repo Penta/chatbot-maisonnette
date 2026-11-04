@@ -391,6 +391,7 @@ class ForgetTest(MemoryTestCase):
         self.assertTrue(any("membres/333.md" in line and "sources" in line for line in logs.output))
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
 
+
 class ConfirmationTextsTest(MemoryTestCase):
     """Les questions de confirmation de /memoire ne promettent pas plus que ce qui est effacé."""
 
@@ -805,6 +806,7 @@ class DepartedMemberTest(MemoryTestCase):
         content = interaction.response.edit_message.call_args.kwargs["content"]
         self.assertIn("Mémoire désactivée pour Bob", content)
         self.assertIn("Vérifie avec /memoire-serveur", content)
+
 
 class AdminAccessTest(MemoryTestCase):
     """Les membres savent que les administrateurs voient leur fiche, et chaque consultation est tracée."""
