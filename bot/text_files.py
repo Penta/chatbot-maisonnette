@@ -21,8 +21,21 @@ class TextFileError(UserFacingError):
     """Fichier texte illisible ou refusé, avec un message affichable sur Discord."""
 
 
+def _cp1252_fallback(error: UnicodeDecodeError) -> tuple[str, int]:
+    """Relit en Windows-1252 les seuls octets qui ne sont pas de l'UTF-8 valide.
+
+    Un fichier d'un ancien éditeur Windows (Bloc-notes « ANSI ») est ainsi lu
+    correctement, accent par accent, et un octet isolé dans un fichier UTF-8
+    n'abîme que lui-même au lieu de déformer tous les accents du fichier.
+    """
+    return error.object[error.start:error.end].decode("cp1252", errors="replace"), error.end
+
+
+codecs.register_error("rika_cp1252_fallback", _cp1252_fallback)
+
+
 def decode_text_file(data: bytes) -> str:
-    """Décode le contenu d'un fichier .txt (UTF-16 avec BOM, UTF-8, sinon Windows-1252)."""
+    """Décode le contenu d'un fichier .txt (UTF-16 avec BOM, sinon UTF-8 avec les octets invalides en Windows-1252)."""
     if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         # « Unicode » du Bloc-notes : deux octets par caractère, dont beaucoup de \x00.
         try:
@@ -30,11 +43,7 @@ def decode_text_file(data: bytes) -> str:
         except UnicodeDecodeError:
             raise TextFileError("Ce fichier ne contient pas du texte lisible.")
     else:
-        try:
-            text = data.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            # Fichiers enregistrés par d'anciens éditeurs Windows (Bloc-notes, etc.).
-            text = data.decode("cp1252", errors="replace")
+        text = data.decode("utf-8-sig", errors="rika_cp1252_fallback")
     if "\x00" in text:
         raise TextFileError("Ce fichier ne contient pas du texte lisible.")
     text = text.replace("\r\n", "\n").strip()

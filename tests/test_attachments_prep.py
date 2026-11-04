@@ -454,6 +454,20 @@ class DecodeTextFileTest(unittest.TestCase):
     def test_bytes_undefined_in_windows_1252(self):
         self.assertEqual(decode_text_file(b"caf\xe9 \x81"), "café �")
 
+    def test_utf8_with_one_invalid_byte(self):
+        # Un octet isolé ne fait plus relire tout le fichier en Windows-1252 (« CafÃ© »).
+        data = "Café, élève, à bientôt".encode("utf-8") + b"\xff"
+        self.assertEqual(decode_text_file(data), "Café, élève, à bientôtÿ")
+
+    def test_utf8_and_windows_1252_lines(self):
+        data = "Ligne en UTF-8 : élève\n".encode("utf-8") + "Ligne en ANSI : été".encode("cp1252")
+        self.assertEqual(decode_text_file(data), "Ligne en UTF-8 : élève\nLigne en ANSI : été")
+
+    def test_utf8_cut_in_the_middle_of_a_character(self):
+        # Seul le caractère coupé est abîmé, le reste du texte garde ses accents.
+        data = "Café ".encode("utf-8") + "é".encode("utf-8")[:1] + " à bientôt".encode("utf-8")
+        self.assertEqual(decode_text_file(data), "Café Ã à bientôt")
+
     def test_utf16_with_bom(self):
         for encoding in ("utf-16-le", "utf-16-be"):
             with self.subTest(encoding):
