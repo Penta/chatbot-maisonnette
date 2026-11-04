@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+from array import array
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -30,6 +31,9 @@ _DIRECT_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif",
 # Formats sans perte (captures d'écran, dessins…) : PNG essayé avant le JPEG.
 _LOSSLESS_FORMATS = {"PNG", "GIF", "BMP", "TIFF"}
 _PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels en PNG
+# Image en flottants : une valeur infinie, NaN ou plus grande que ceci (en valeur absolue) n'est pas une
+# mesure mais un trou (zone « sans donnée » d'une carte, souvent ±3,4e38) ou sa trace après la réduction.
+_FLOAT_HOLE = 1e20
 
 
 class ImageError(UserFacingError):
@@ -110,22 +114,36 @@ def _to_8_bits(img: Image.Image) -> Image.Image:
 
     Les conversions de Pillow écrêtent au lieu de remettre à l'échelle : tout ce qui dépasse 255
     deviendrait blanc. L'échelle dépend des valeurs présentes : 0–255 gardé tel quel, 0–1 (flottants),
-    0–65 535 (16 bits), et au-delà, de la plus petite à la plus grande valeur.
+    0–65 535 (entiers 16 bits), sinon de la plus petite à la plus grande valeur ; gris moyen si l'image
+    est uniforme. Les trous d'une image flottante (voir _FLOAT_HOLE) ne comptent pas et deviennent noirs.
     """
+    holes = None
     if img.mode.startswith("I;16"):
         low, high = 0, 65535
     else:
-        img = img.convert("F")
-        low, high = img.getextrema()
+        if img.mode == "F":
+            values = array("f", img.tobytes())  # mode F : float32 natif
+            valid = [v for v in values if -_FLOAT_HOLE < v < _FLOAT_HOLE]  # NaN : comparaisons fausses
+            if len(valid) < len(values):
+                holes = Image.frombytes("L", img.size, bytes(0 if -_FLOAT_HOLE < v < _FLOAT_HOLE else 255
+                                                             for v in values))
+            low, high = (min(valid), max(valid)) if valid else (0, 0)
+        else:
+            low, high = img.getextrema()
         if low >= 0 and high <= 1:
             low, high = 0, 1
         elif low >= 0 and high <= 255:
             low, high = 0, 255
-        elif low >= 0 and high <= 65535:
+        elif low >= 0 and high <= 65535 and img.mode != "F":  # flottants : mètres, degrés…, pas 16 bits
             low, high = 0, 65535
+        elif high == low:  # image uniforme hors de ces plages : gris moyen, pas noir
+            low, high = low - 1, high + 1
     img = img.convert("F")
-    scale = 255 / (high - low) if high > low else 0
-    return img.point(lambda v: (v - low) * scale + 0.5).convert("L")  # + 0.5 : arrondi, pas troncature
+    scale = 255 / (high - low)
+    result = img.point(lambda v: (v - low) * scale + 0.5).convert("L")  # + 0.5 : arrondi, pas troncature
+    if holes:
+        result.paste(0, mask=holes)
+    return result
 
 
 def _encode(img: Image.Image, fmt: str, **options) -> bytes:

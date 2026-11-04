@@ -93,6 +93,28 @@ class PrepareImageTest(unittest.TestCase):
                 result = opened(prepare_image(encode(img, fmt)).data)
                 self.assertEqual(result.convert("L").getpixel((0, 0)), expected)
 
+    def test_float_holes_ignored(self):
+        # Carte d'altitude (120 à 850 m) dont un tiers est un trou : le trou devient noir, sans écraser
+        # l'échelle du reste, étalée de la plus basse à la plus haute altitude (pas lue comme du 16 bits).
+        for hole in (-3.4e38, float("inf"), float("-inf"), float("nan")):
+            with self.subTest(hole=hole):
+                img = Image.new("F", (3000, 100), 485.0)
+                img.paste(850.0, (1000, 0, 1500, 100))
+                img.paste(120.0, (2500, 0, 3000, 100))
+                img.paste(hole, (0, 0, 1000, 100))
+                result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
+                self.assertEqual(result.getpixel((0, 0)), 0)
+                # À quelques niveaux près : la réduction dépasse un peu 850 et 120 au bord des zones.
+                for x, expected in ((650, 255), (1050, 128), (1567, 0)):
+                    self.assertAlmostEqual(result.getpixel((x, 0)), expected, delta=12)
+
+    def test_uniform_out_of_range_grey(self):
+        # Image uniforme hors des plages connues : rien à voir, mais un gris moyen plutôt qu'un noir de trou.
+        for img in (Image.new("I", (200, 100), 100000), Image.new("F", (200, 100), -5.0)):
+            with self.subTest(mode=img.mode):
+                result = opened(prepare_image(encode(img, "TIFF")).data)
+                self.assertEqual(result.convert("L").getpixel((0, 0)), 128)
+
     def test_transparency_kept(self):
         result = prepare_image(encode(Image.new("RGBA", (3000, 100), (255, 0, 0, 0)), "PNG"))
         self.assertEqual(result.media_type, "image/png")
