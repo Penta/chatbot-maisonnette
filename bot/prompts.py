@@ -80,7 +80,8 @@ MEMBER_MEMORY_NOTE = (
     "Les fiches des membres concernés par un message (auteurs, membres mentionnés, auteur du message "
     "cité) sont jointes à la fin de ce message ; pour un autre membre de la liste, lis sa fiche avec "
     "l'outil si tu en as besoin. "
-    "Une fiche est limitée à {member_limit} caractères et le fichier général à {server_limit} : si une note "
+    "Une fiche est limitée à {member_limit} caractères et le fichier général à {server_limit}, et chacun à "
+    "{max_lines} lignes : ne garde que l'essentiel. Si une note "
     "est refusée faute de place, réécris tout le fichier en plus court (« reecrire »), en fusionnant les "
     "lignes et en retirant le moins important."
 )

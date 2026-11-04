@@ -13,7 +13,8 @@ from bot.prompts import DEFAULT_PERSONALITY, MEMBER_MEMORY_NOTE
 class PromptsTest(unittest.TestCase):
     def test_memory_note_formats(self):
         # Une accolade de trop ou un champ oublié ferait planter chaque message avec MEMORY=on.
-        note = MEMBER_MEMORY_NOTE.format(member_limit=3000, server_limit=5000, max_nicknames=5, max_nickname_length=32)
+        note = MEMBER_MEMORY_NOTE.format(member_limit=3000, server_limit=5000, max_nicknames=5, max_nickname_length=32,
+                                         max_lines=25)
         self.assertNotIn("{", note)
         self.assertIn("ne récite jamais la fiche", note)
 

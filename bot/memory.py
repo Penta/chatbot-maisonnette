@@ -60,6 +60,9 @@ NOTE_HEADER = re.compile(r"^[ \t]*[=＝]+", re.MULTILINE)
 # Réglage de la mémoire appliqué mais pas enregistré dans le registre (voir MemberRegistry.set_memory).
 NOT_SAVED = ("C'est fait, mais {setting} n'a pas pu être enregistrée, à cause d'une erreur du bot : elle "
              "serait perdue si le bot redémarrait avant qu'il puisse l'enregistrer. Préviens un administrateur.")
+# Lignes au plus dans un fichier : en ne gardant que l'essentiel, chacun tient dans un menu de Discord
+# (25 choix au plus), avec lequel /memoire en supprime des lignes.
+MAX_LINES = 25
 # Fiches jointes au plus à un message : un message qui mentionne 90 membres n'en joint pas 90.
 MAX_ATTACHED_NOTES = 5
 
@@ -157,9 +160,9 @@ class MemoryStore:
         return self._edits.get(name)
 
     def with_usernames(self, text: str) -> str:
-        """Fichier tel que Claude le lit, et tel qu'il s'ouvre dans la fenêtre « Modifier » : membres
-        cités par leur nom d'utilisateur (« <@222> » → « @alice »), reconverti à l'écriture (voir
-        _with_ids). Un membre inconnu du registre devient « un membre »."""
+        """Fichier tel que Claude le lit : membres cités par leur nom d'utilisateur (« <@222> » →
+        « @alice »), reconverti quand il écrit (voir _with_ids). Un membre inconnu du registre devient
+        « un membre »."""
         def username(match: re.Match) -> str:
             entry = self.members.get(match.group(1))
             return f"@{entry['username']}" if entry is not None else "un membre"
@@ -335,13 +338,12 @@ class MemoryStore:
 
             # Lignes vides laissées par une suppression : retirées.
             after = "\n".join(line.rstrip() for line in after.splitlines() if line.strip())
-            if len(after) > limit:
-                logger.info("Mémoire : %s refusé sur %s (%s), %d caractères pour %d au plus",
-                            action, name, label, len(after), limit)
+            if problem := self._too_big(name, after, before):
+                logger.info("Mémoire : %s refusé sur %s (%s) : %s", action, name, label, problem)
                 return ToolResult(
-                    f"Refusé : {name} ferait {len(after)} caractères pour {limit} au plus. Réécris tout le "
-                    f"fichier en plus court avec « reecrire », en fusionnant les lignes et en retirant le moins "
-                    f"important, puis ajoute la nouvelle information.", is_error=True)
+                    f"Refusé : {problem} Réécris tout le fichier en plus court avec « reecrire », en "
+                    f"fusionnant les lignes et en retirant le moins important, puis ajoute la nouvelle "
+                    f"information.", is_error=True)
             if after == before:
                 return ToolResult(f"Aucun changement : {name} contenait déjà cela.")
             try:
@@ -356,55 +358,96 @@ class MemoryStore:
             # qui y est écrit. Les fiches des membres, plus personnelles, ne sont pas recopiées.
             replaced = f" à la place de {old!r}" if action == "remplacer" else ""
             logger.info("Mémoire : texte écrit dans %s%s : %r", name, replaced, text)
-        return ToolResult(f"C'est fait. {name} : {len(after)}/{limit} caractères.")
+        return ToolResult(f"C'est fait. {name} : {len(after)}/{limit} caractères, "
+                          f"{len(after.splitlines())}/{MAX_LINES} lignes.")
 
     def limit(self, name: str) -> int:
         return self.server_limit if name == SERVER_FILE else self.member_limit
 
-    async def overwrite(self, name: str, text: str, by: str, expected: str | None = None) -> str | None:
-        """Remplace tout un fichier, ou le supprime si text est vide : modification faite par un membre
-        avec /memoire (by : son nom, pour les logs). Renvoie un message d'erreur, ou None.
+    def lines(self, name: str) -> list[str]:
+        """Lignes d'un fichier, telles que /memoire les propose à la suppression."""
+        return [line for line in self.read(name).splitlines() if line.strip()]
 
-        expected : le contenu (lu avec read) à partir duquel text a été écrit ; si le fichier a changé
-        depuis, rien n'est enregistré, pour ne pas remettre ce qui a été retiré entre-temps (forget) ni
-        perdre une note de Claude. Sauf s'il contient déjà text (même envoi validé deux fois).
+    async def delete_lines(self, name: str, indexes: list[int], by: str, expected: str) -> str | None:
+        """Supprime ces lignes (numérotées à partir de 0, voir lines) : modification faite avec /memoire
+        (by : son nom, pour les logs). Renvoie un message d'erreur, ou None.
 
-        text vient de la fenêtre « Modifier », avec les membres cités par leur nom d'utilisateur (voir
-        with_usernames) ; un membre qui n'était pas déjà cité ne peut pas être ajouté : on ne fabrique
-        pas à la main une information « d'après » quelqu'un."""
-        text = "\n".join(line.rstrip() for line in self._with_ids(text).splitlines() if line.strip())
-        limit = self.limit(name)
-        if len(text) > limit:
-            return f"Trop long : {len(text)} caractères pour {limit} au plus. Rien n'a été modifié."
-        path = self.root / name
+        Les fichiers ne se modifient à la main que ligne par ligne, sans pouvoir changer le texte d'une
+        ligne : personne ne peut fabriquer une information « d'après » quelqu'un. Toujours permis, même
+        si la mémoire n'est pas activée. expected : le contenu (lu avec read) d'où viennent les
+        numéros ; si le fichier a changé depuis, rien n'est supprimé, pour ne pas retirer la mauvaise ligne."""
         async with self._lock:
-            # Comme pour l'outil (_check) : rien n'est noté sur un membre qui n'a pas activé la mémoire,
-            # même par un administrateur, ni par une fenêtre ouverte avant la désactivation. Une fiche
-            # existante peut toujours être effacée.
-            if text and (match := MEMBER_FILE.match(name)) and not self.members.memory_enabled(match.group(1)):
-                return "La mémoire n'est pas activée pour ce membre : rien n'a été enregistré."
             current = self.read(name)
-            # Fichier qui contient déjà ce texte : même envoi validé deux fois, ce n'est pas un conflit.
-            if expected is not None and current != expected and current != text:
-                return ("Le fichier a changé pendant ta modification (nouvelle note, ou autre modification) : "
-                        "rien n'a été enregistré. Recommence avec « Modifier ».")
-            if added := set(MEMBER_REF.findall(text)) - set(MEMBER_REF.findall(current)):
-                names = ", ".join(sorted(self.with_usernames(f"<@{member_id}>") for member_id in added))
-                return (f"Tu ne peux pas citer ici un membre qui ne l'était pas déjà ({names}) : seul le bot "
-                        f"note une information d'après quelqu'un. Écris son nom sans « @ ». Rien n'a été modifié.")
-            try:
-                if text:
-                    await asyncio.to_thread(self._write_atomic, path, text)
-                else:
-                    path.unlink(missing_ok=True)
-                self._indexed(name, text)
-            except OSError as exc:
-                logger.error("Mémoire : impossible de modifier %s : %s", name, exc)
-                return "Modification impossible pour l'instant, à cause d'une erreur du bot."
-            if text != current:
-                await self._mark_edited(name)
-        logger.info("Mémoire : %s %s par %s (%d caractères)", name, "modifié" if text else "effacé", by, len(text))
-        return None
+            if current != expected:
+                return ("Le fichier a changé entre-temps (nouvelle note, ou autre modification) : rien n'a été "
+                        "supprimé. Recommence avec « Supprimer des lignes ».")
+            lines = [line for line in current.splitlines() if line.strip()]
+            removed = set(indexes)
+            kept = [line for i, line in enumerate(lines) if i not in removed]
+            error = await self._save_manual(name, "\n".join(kept), current)
+        if error is None:
+            logger.info("Mémoire : %d ligne(s) supprimée(s) de %s par %s", len(lines) - len(kept), name, by)
+        return error
+
+    async def add_lines(self, name: str, text: str, by: str) -> str | None:
+        """Ajoute des lignes au fichier général : un administrateur avec /memoire-serveur (by : son nom,
+        pour les logs). Les lignes déjà là ne se modifient pas, et les fiches des membres ne se
+        complètent pas à la main (voir delete_lines). Renvoie un message d'erreur, ou None."""
+        if name != SERVER_FILE:
+            return "Seul le fichier général peut être complété à la main."
+        new_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not new_lines:
+            return "Rien à ajouter."
+        # Une mention, même tapée à la main (« <@222> »), citerait un membre comme source.
+        if any(MEMBER_REF.search(line) for line in new_lines):
+            return "Une ligne ne peut pas citer un membre par une mention : écris son nom. Rien n'a été ajouté."
+        async with self._lock:
+            current = self.read(SERVER_FILE)
+            lines = [line for line in current.splitlines() if line.strip()]
+            existing = {line.strip() for line in lines}
+            lines += [line for line in dict.fromkeys(new_lines) if line not in existing]
+            after = "\n".join(lines)
+            if error := self._too_big(SERVER_FILE, after, current):
+                return error + " Rien n'a été ajouté."
+            error = await self._save_manual(SERVER_FILE, after, current)
+        if error is None:
+            # Comme pour l'outil : le fichier général va dans le prompt système, son texte est gardé au log.
+            logger.info("Mémoire : lignes ajoutées à %s par %s : %r", SERVER_FILE, by, "\n".join(new_lines))
+        return error
+
+    async def set_nicknames(self, member_id: int | str, text: str, by: str) -> str | None:
+        """Le membre écrit lui-même ses surnoms (séparés par des virgules) : la ligne « Surnoms : … » de
+        sa fiche est remplacée, en tête, ou retirée si text est vide. Seule ligne qu'il écrit (voir
+        delete_lines). Renvoie un message d'erreur, ou None."""
+        names = [n.strip() for n in re.split(r"[,;\n]", text) if n.strip()]
+        if len(names) > MAX_NICKNAMES:
+            return f"{MAX_NICKNAMES} surnoms au plus. Rien n'a été modifié."
+        if any(len(n) > MAX_NICKNAME_LENGTH for n in names):
+            return f"Un surnom fait {MAX_NICKNAME_LENGTH} caractères au plus. Rien n'a été modifié."
+        if any(MEMBER_REF.search(n) for n in names):
+            return "Un surnom ne peut pas être une mention. Rien n'a été modifié."
+        name = self.member_file(member_id)
+        async with self._lock:
+            if not self.members.memory_enabled(member_id):
+                return "La mémoire n'est pas activée : rien n'a été enregistré."
+            current = self.read(name)
+            others = [line for line in current.splitlines() if line.strip() and not NICKNAMES_LINE.match(line.strip())]
+            after = "\n".join(([f"Surnoms : {', '.join(names)}"] if names else []) + others)
+            if error := self._too_big(name, after, current):
+                return error + " Rien n'a été modifié."
+            error = await self._save_manual(name, after, current)
+        if error is None:
+            logger.info("Mémoire : surnoms de %s modifiés par %s", name, by)
+        return error
+
+    async def erase(self, name: str, by: str) -> str | None:
+        """Efface tout un fichier avec /memoire (by : son nom, pour les logs). Renvoie un message d'erreur,
+        ou None. Toujours permis, même si la mémoire n'est pas activée."""
+        async with self._lock:
+            error = await self._save_manual(name, "", self.read(name))
+        if error is None:
+            logger.info("Mémoire : %s effacé par %s", name, by)
+        return error
 
     async def forget(self, member_id: int | str, by: str) -> str | None:
         """Membre qui désactive la mémoire : efface sa fiche, remplace par « un membre » ses mentions dans
@@ -457,6 +500,34 @@ class MemoryStore:
         return None
 
     # ------------------------------------------------------------ internes
+
+    def _too_big(self, name: str, after: str, before: str) -> str | None:
+        """Pourquoi ce nouveau contenu dépasse la taille d'un fichier (caractères ou MAX_LINES lignes), ou
+        None. Un fichier qui avait déjà trop de lignes (écrit avant cette limite) peut garder les siennes."""
+        limit = self.limit(name)
+        if len(after) > limit:
+            return f"{name} ferait {len(after)} caractères pour {limit} au plus."
+        count = len(after.splitlines())
+        if count > MAX_LINES and count > len(before.splitlines()):
+            return f"{name} ferait {count} lignes pour {MAX_LINES} au plus."
+        return None
+
+    async def _save_manual(self, name: str, text: str, current: str) -> str | None:
+        """Écrit (ou supprime, si text est vide) un fichier modifié avec /memoire, et retient la date de
+        la modification (voir edited). Appelé sous le verrou. Renvoie un message d'erreur, ou None."""
+        if text == current:
+            return None
+        try:
+            if text:
+                await asyncio.to_thread(self._write_atomic, self.root / name, text)
+            else:
+                (self.root / name).unlink(missing_ok=True)
+            self._indexed(name, text)
+        except OSError as exc:
+            logger.error("Mémoire : impossible de modifier %s : %s", name, exc)
+            return "Modification impossible pour l'instant, à cause d'une erreur du bot."
+        await self._mark_edited(name)
+        return None
 
     def _with_ids(self, text: str) -> str:
         """Inverse de with_usernames : « @alice » → « <@222> » pour un nom d'utilisateur du registre.

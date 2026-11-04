@@ -15,7 +15,7 @@ from .config import Settings
 from .emojis import DISCORD_EMOJI, SHORT_EMOJI
 from .errors import UserFacingError
 from .media import ImageData
-from .memory import MAX_NICKNAME_LENGTH, MAX_NICKNAMES, MEMORY_TOOL, MemoryStore, ToolResult
+from .memory import MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, MEMORY_TOOL, MemoryStore, ToolResult
 from .models import thinking_off
 from .prompts import (CUSTOM_STATUS_PROMPT, CUSTOM_STATUS_REQUESTS, DEFAULT_PERSONALITY, EMOJI_NOTE, GROUP_NOTE,
                       MEMBER_MEMORY_NOTE, MEMORY_NOTE, OUTPUT_NOTE, PRESENCE_NOTE, TOOL_NOTE, WEB_NOTE)
@@ -168,7 +168,8 @@ class ClaudeClient:
             system += MEMBER_MEMORY_NOTE.format(member_limit=self.memory.member_limit,
                                                 server_limit=self.memory.server_limit,
                                                 max_nicknames=MAX_NICKNAMES,
-                                                max_nickname_length=MAX_NICKNAME_LENGTH)
+                                                max_nickname_length=MAX_NICKNAME_LENGTH,
+                                                max_lines=MAX_LINES)
         if self.settings.web_search or self.memory:
             system += TOOL_NOTE
         if self.settings.presence:
