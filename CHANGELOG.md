@@ -22,6 +22,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Un octet abîmé ne déforme plus tous les accents d'un fichier texte.** Dans un `.txt`, `.log` ou `.csv` en UTF-8, un seul octet invalide faisait lire tout le fichier en Windows-1252 (« CafÃ© »). Seul cet octet est maintenant relu ainsi, si le fichier est surtout en UTF-8 ; les fichiers « ANSI » restent bien lus.
 
+- **Le journal dit pourquoi un bot qui mentionne Rika est ignoré.** Quand un autre bot écrit @Rika, une ligne indique si Discord a bien transmis la mention et si le message est pris en compte ou ignoré (mention absente, ou limite de réponses aux bots d'affilée).
+
 ---
 
 ## Version 5.12

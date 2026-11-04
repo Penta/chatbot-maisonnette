@@ -357,15 +357,28 @@ class ChatBot(commands.Bot):
         # ou réponse à l'un de ses messages. Deux bots peuvent ainsi discuter ensemble, mais pas sans fin.
         if not message.author.bot:
             self._bot_streaks.human_spoke(message.channel.id)
-        elif self.user not in message.mentions and not await self.replies_to_me(message):
-            return
-        elif (rank := self._bot_streaks.count(message.channel.id, message.created_at)) > MAX_BOT_REPLIES:
-            if rank == MAX_BOT_REPLIES + 1:
-                logger.warning("#%s : %s réponses à des bots d'affilée (dernier : %s). Le bot ne leur répond plus "
-                               "jusqu'au prochain message d'un membre, ou après %s minutes sans message de bot.",
-                               message.channel, MAX_BOT_REPLIES, message.author,
-                               BOT_STREAK_RESET.seconds // 60)
-            return
+        else:
+            listed = self.user in message.mentions
+            addressed = listed or await self.replies_to_me(message)
+            # Une mention dans le texte (<@id>) devrait figurer dans la liste des mentions fournie par Discord :
+            # le journal dit si c'est le cas, pour comprendre pourquoi un bot qui mentionne le bot est ignoré.
+            in_text = self.user is not None and self.user.id in message.raw_mentions
+            if in_text:
+                logger.info("%s mentionne le bot dans #%s (message %s) : %s.", message.author, message.channel,
+                            message.id, "mention transmise par Discord" if listed else
+                            "mention absente de la liste de Discord" + ("" if addressed else ", message ignoré"))
+            if not addressed:
+                return
+            if (rank := self._bot_streaks.count(message.channel.id, message.created_at)) > MAX_BOT_REPLIES:
+                if rank == MAX_BOT_REPLIES + 1:
+                    logger.warning("#%s : %s réponses à des bots d'affilée (dernier : %s). Le bot ne leur répond "
+                                   "plus jusqu'au prochain message d'un membre, ou après %s minutes sans message de "
+                                   "bot.", message.channel, MAX_BOT_REPLIES, message.author,
+                                   BOT_STREAK_RESET.seconds // 60)
+                elif in_text:
+                    logger.info("Message %s ignoré : limite de réponses à des bots d'affilée (rang %s).",
+                                message.id, rank)
+                return
 
         in_main_channel = message.channel.id == self.settings.channel_id
         # Mention directe uniquement (@everyone et @here ne comptent pas).
