@@ -18,6 +18,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les PDF protégés seulement contre la modification sont lus.** Un PDF chiffré en AES sans mot de passe d'ouverture (courant avec Acrobat ou LibreOffice) était refusé comme « illisible ». Il est maintenant lu, grâce à la nouvelle dépendance `cryptography` installée avec les autres.
 
+- **Les grandes images en gris 16 bits ne deviennent plus toutes blanches.** Un scan, une radio ou une photo d'astronomie en PNG ou TIFF 16 bits (ou 32 bits), une fois réduit, arrivait tout blanc ou tout noir chez Claude. Ses gris sont maintenant ramenés sur 8 bits sans être écrêtés.
+
 ---
 
 ## Version 5.12

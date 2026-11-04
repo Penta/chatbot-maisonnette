@@ -69,6 +69,8 @@ def prepare_image(data: bytes) -> ImageData:
     img.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
     # Après la réduction : la copie éventuelle est petite. Respecte l'orientation des photos de téléphone.
     img = ImageOps.exif_transpose(img)
+    if img.mode.startswith("I") or img.mode == "F":
+        img = _to_8_bits(img)
 
     has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
     result: ImageData | None = None
@@ -101,6 +103,29 @@ def prepare_image(data: bytes) -> ImageData:
                 fmt or "?", *original_dims, original_size / 1e6,
                 result.media_type, *img.size, len(result.data) / 1e6)
     return result
+
+
+def _to_8_bits(img: Image.Image) -> Image.Image:
+    """Ramène une image en gris 16 bits, entière ou flottante (scans, radios, astronomie) sur 8 bits.
+
+    Les conversions de Pillow écrêtent au lieu de remettre à l'échelle : tout ce qui dépasse 255
+    deviendrait blanc. L'échelle dépend des valeurs présentes : 0–255 gardé tel quel, 0–1 (flottants),
+    0–65 535 (16 bits), et au-delà, de la plus petite à la plus grande valeur.
+    """
+    if img.mode.startswith("I;16"):
+        low, high = 0, 65535
+    else:
+        img = img.convert("F")
+        low, high = img.getextrema()
+        if low >= 0 and high <= 1:
+            low, high = 0, 1
+        elif low >= 0 and high <= 255:
+            low, high = 0, 255
+        elif low >= 0 and high <= 65535:
+            low, high = 0, 65535
+    img = img.convert("F")
+    scale = 255 / (high - low) if high > low else 0
+    return img.point(lambda v: (v - low) * scale + 0.5).convert("L")  # + 0.5 : arrondi, pas troncature
 
 
 def _encode(img: Image.Image, fmt: str, **options) -> bytes:

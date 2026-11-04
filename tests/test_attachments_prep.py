@@ -82,6 +82,17 @@ class PrepareImageTest(unittest.TestCase):
                 img = opened(result.data)
                 self.assertEqual((img.format, img.size), ("PNG", (200, 100)))
 
+    def test_high_bit_depth_grey_rescaled(self):
+        # Gris 16 bits (scan, radio, astronomie) : ramené sur 8 bits, pas écrêté en blanc.
+        cases = (("PNG", Image.new("I;16", (2000, 1000), 20000), 78),   # 20000/65535 ≈ 78/255
+                 ("TIFF", Image.new("I", (200, 100), 20000), 78),       # entiers dans la plage 16 bits
+                 ("TIFF", Image.new("F", (200, 100), 0.5), 128),        # flottants entre 0 et 1
+                 ("TIFF", Image.new("F", (200, 100), 100.0), 100))      # déjà dans la plage 8 bits
+        for fmt, img, expected in cases:
+            with self.subTest(fmt=fmt, mode=img.mode, value=img.getpixel((0, 0))):
+                result = opened(prepare_image(encode(img, fmt)).data)
+                self.assertEqual(result.convert("L").getpixel((0, 0)), expected)
+
     def test_transparency_kept(self):
         result = prepare_image(encode(Image.new("RGBA", (3000, 100), (255, 0, 0, 0)), "PNG"))
         self.assertEqual(result.media_type, "image/png")
