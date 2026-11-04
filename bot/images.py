@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import logging
 
-from PIL import Image, ImageFilter, ImageMath, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageMath, ImageOps, UnidentifiedImageError
 
 from .errors import UserFacingError
 from .media import ImageData
@@ -34,6 +34,9 @@ _PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels e
 # mesure mais un trou (zone « sans donnée » d'une carte, souvent ±3,4e38). Assez haut pour garder les vraies
 # valeurs géantes (densités de colonne en astronomie, autour de 1e21).
 _FLOAT_HOLE = 1e30
+# Valeur « manquante » standard des données climatiques (modèles CMIP) : un trou aussi, mais seulement pile
+# (une mesure n'y tombe pratiquement jamais au chiffre près).
+_FLOAT_FILL = 1e20
 _FLOAT32_MAX = 3.4e38
 # Recherche des trous par bandes d'environ ce nombre de pixels : jamais une copie entière d'une grande image.
 _STRIP_PIXELS = 1_000_000
@@ -73,10 +76,10 @@ def prepare_image(data: bytes) -> ImageData:
     img.seek(0)                      # GIF ou WebP animé : première image uniquement
     if img.mode in ("1", "P"):  # sinon réduite au plus proche voisin, qui abîme le texte
         img = img.convert("RGBA" if "transparency" in img.info else "RGB")
-    holes = _fill_float_holes(img) if img.mode == "F" else None
+    filled = _fill_float_holes(img) if img.mode == "F" else None
     img.thumbnail((MAX_DIMENSION, MAX_DIMENSION), Image.Resampling.LANCZOS)
-    if holes is not None:
-        _restore_float_holes(img, holes.resize(img.size, Image.Resampling.BOX))
+    if filled is not None:
+        img = _restore_float_holes(img, *filled)
     # Après la réduction : la copie éventuelle est petite. Respecte l'orientation des photos de téléphone.
     img = ImageOps.exif_transpose(img)
     if img.mode.startswith("I") or img.mode == "F":
@@ -120,57 +123,64 @@ def _float_measures(img: Image.Image) -> Image.Image:
 
     Calculé par Pillow : lire les pixels un par un en Python serait lent et gourmand en mémoire.
     """
-    return ImageMath.lambda_eval(lambda a: (abs(a["img"]) < _FLOAT_HOLE) * 255, img=img).convert("L")
+    return ImageMath.lambda_eval(
+        lambda a: (abs(a["img"]) < _FLOAT_HOLE) * a["notequal"](a["img"], _FLOAT_FILL) * 255, img=img
+    ).convert("L")
 
 
-def _fill_float_holes(img: Image.Image) -> Image.Image | None:
-    """Bouche les trous d'une image en flottants avant sa réduction, et renvoie leur masque (255 = trou).
+def _fill_float_holes(img: Image.Image) -> tuple[Image.Image, float | None, float | None] | None:
+    """Bouche les trous d'une image en flottants avant sa réduction.
 
     Réduits tels quels, les trous laisseraient autour d'eux des traces (lobes du filtre LANCZOS) de toutes
     tailles, jusqu'à quelques dizaines : impossibles à distinguer des mesures, elles fausseraient les gris.
     Ils sont remplacés par la plus petite mesure (bord sombre, comme le noir des trous). Parcours par bandes
     de lignes : chaque calcul copie la bande, et une copie entière d'une grande image pèserait des centaines
-    de Mo. Renvoie None s'il n'y a aucun trou (l'image n'est alors pas modifiée).
+    de Mo. Renvoie le masque des trous (255 = trou) et la plus petite et la plus grande mesure (None s'il n'y
+    en a aucune), ou None s'il n'y a aucun trou (l'image n'est alors pas modifiée).
     """
     holes = None
-    lowest = None
+    lowest = highest = None
     rows = max(1, _STRIP_PIXELS // img.width)
     for top in range(0, img.height, rows):
         strip = img.crop((0, top, img.width, min(top + rows, img.height)))
         measures = _float_measures(strip)
         fewest, most = measures.getextrema()
-        if fewest < 255:  # des trous dans cette bande
+        if fewest == 255:  # aucun trou dans cette bande
+            strip_low, strip_high = strip.getextrema()
+        else:
             if holes is None:
                 holes = Image.new("L", img.size, 0)
             strip_holes = ImageOps.invert(measures)
             holes.paste(strip_holes, (0, top))
             if most == 0:  # que des trous
                 continue
-            strip.paste(_FLOAT32_MAX, mask=strip_holes)  # ignorés pour le minimum
-        strip_low = strip.getextrema()[0]
+            # Trous ignorés : remplacés par le plus grand flottant pour le minimum, le plus petit pour le maximum.
+            strip.paste(_FLOAT32_MAX, mask=strip_holes)
+            strip_low = strip.getextrema()[0]
+            strip.paste(-_FLOAT32_MAX, mask=strip_holes)
+            strip_high = strip.getextrema()[1]
         lowest = strip_low if lowest is None else min(lowest, strip_low)
-    if holes is not None:
-        img.paste(0.0 if lowest is None else lowest, mask=holes)
-    return holes
+        highest = strip_high if highest is None else max(highest, strip_high)
+    if holes is None:
+        return None
+    img.paste(0.0 if lowest is None else lowest, mask=holes)
+    return holes, lowest, highest
 
 
-def _restore_float_holes(img: Image.Image, holes: Image.Image) -> None:
+def _restore_float_holes(img: Image.Image, holes: Image.Image, lowest: float | None,
+                         highest: float | None) -> Image.Image:
     """Remet dans l'image réduite les trous bouchés par _fill_float_holes, en NaN (_to_8_bits les rend noirs).
 
-    `holes` : leur masque réduit à la taille de l'image, par moyenne (part de trous de chaque pixel, sans
-    rebond) ; un pixel surtout fait de trous en redevient un. Autour, sur la portée du filtre LANCZOS
-    (3 pixels), les valeurs mêlent le bouchage aux mesures et peuvent déborder : elles sont ramenées dans la
-    plage des pixels plus loin des trous, pour ne pas fausser l'échelle des gris.
+    Le masque des trous est réduit par moyenne (part de trous de chaque pixel, sans rebond) : un pixel surtout
+    fait de trous en redevient un. Autour des trous, le filtre LANCZOS peut faire déborder les valeurs
+    au-delà des mesures : l'image est ramenée entre la plus petite et la plus grande mesure d'origine (aucune
+    vraie mesure n'en sort), pour ne pas fausser l'échelle des gris.
     """
-    # À 4 pixels ou moins d'un trou (moyenne sur 9 × 9 non nulle : plus rapide qu'un MaxFilter).
-    near = holes.point(lambda v: 255 if v else 0).filter(ImageFilter.BoxBlur(4)).point(lambda v: 255 if v else 0)
-    low_side, high_side = img.copy(), img.copy()  # bornes des pixels loin des trous (voir _to_8_bits)
-    low_side.paste(_FLOAT32_MAX, mask=near)
-    high_side.paste(-_FLOAT32_MAX, mask=near)
-    low, high = low_side.getextrema()[0], high_side.getextrema()[1]
-    if low <= high:  # sinon aucun pixel loin des trous : rien à quoi se ramener
-        img.paste(ImageMath.lambda_eval(lambda a: a["min"](a["max"](a["img"], low), high), img=img), mask=near)
+    holes = holes.resize(img.size, Image.Resampling.BOX)
+    if lowest is not None:
+        img = ImageMath.lambda_eval(lambda a: a["min"](a["max"](a["img"], lowest), highest), img=img)
     img.paste(float("nan"), mask=holes.point(lambda v: 255 if v > 127 else 0))
+    return img
 
 
 def _to_8_bits(img: Image.Image) -> Image.Image:

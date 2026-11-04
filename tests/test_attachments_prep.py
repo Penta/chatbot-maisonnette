@@ -149,6 +149,41 @@ class PrepareImageTest(unittest.TestCase):
                 result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
                 self.assertEqual(result.getpixel(pixel), expected)
 
+    def test_scattered_float_holes_keep_the_data(self):
+        # Carte d'altitude : mer uniforme à 0 sans trou, terre (0 à 1020 m du haut en bas) parsemée de 5 %
+        # de pixels sans donnée. Presque toute la terre est près d'un trou : elle garde ses gris, au lieu
+        # d'être ramenée à la seule valeur de la mer.
+        w, h = 3200, 2000
+        img = Image.linear_gradient("L").resize((w, h)).convert("F").point(lambda v: v * 4)
+        img.paste(0.0, (0, 0, 800, h))
+        pixels, rng = img.load(), random.Random(0)
+        for _ in range(w * h // 20):
+            pixels[rng.randrange(800, w), rng.randrange(h)] = float("nan")
+        result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
+        # À quelques niveaux près : les trous, bouchés par la plus petite mesure, assombrissent un peu.
+        for y, expected in ((245, 64), (490, 128), (735, 191)):
+            self.assertAlmostEqual(result.getpixel((1000, y)), expected, delta=15)
+
+    def test_value_next_to_float_hole_kept(self):
+        # Image non réduite : une vraie mesure collée à un trou (un point à 5000 sur un fond à 1000) n'est
+        # pas écrêtée, et reste le blanc de l'échelle.
+        img = Image.new("F", (100, 100), 1000.0)
+        img.paste(float("nan"), (40, 40, 60, 60))
+        img.paste(5000.0, (60, 48, 62, 52))
+        result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
+        self.assertEqual(result.getpixel((61, 50)), 255)
+        self.assertEqual(result.getpixel((10, 10)), 0)
+
+    def test_climate_fill_value_is_a_hole(self):
+        # Données climatiques : 1e20 pile est la valeur « manquante » standard, un trou, alors que les autres
+        # valeurs géantes restent des mesures (voir test_huge_float_values_not_holes).
+        img = Image.new("F", (300, 100), 1e20)  # océan
+        img.paste(250.0, (100, 0, 200, 100))  # températures en kelvins
+        img.paste(300.0, (200, 0, 300, 100))
+        result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
+        for x, expected in ((50, 0), (150, 0), (250, 255)):
+            self.assertEqual(result.getpixel((x, 0)), expected)
+
     def test_uniform_out_of_range_grey(self):
         # Image uniforme hors des plages connues : rien à voir, mais un gris moyen plutôt qu'un noir de trou.
         # Aussi pour de très grandes valeurs, où ajouter 1 ne change plus rien.
