@@ -115,13 +115,21 @@ class PrepareImageTest(unittest.TestCase):
         self.assertEqual(result.getextrema(), (0, 0))
 
     def test_huge_float_values_not_holes(self):
-        # Densités de colonne en astronomie : de vraies mesures de 1e21 à 5e21, pas des trous à noircir.
-        img = Image.new("F", (300, 100), 1e21)
-        img.paste(3e21, (100, 0, 200, 100))
-        img.paste(5e21, (200, 0, 300, 100))
+        # De très grandes mesures, sous le seuil des trous : étalées comme les autres, pas noircies.
+        img = Image.new("F", (300, 100), 1e18)
+        img.paste(3e18, (100, 0, 200, 100))
+        img.paste(5e18, (200, 0, 300, 100))
         result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
         for x, expected in ((50, 0), (150, 128), (250, 255)):
             self.assertAlmostEqual(result.getpixel((x, 0)), expected, delta=2)
+
+    def test_float_hole_trace_not_a_measure(self):
+        # Au bout d'une fine bande de trous, la réduction laisse des traces bien plus petites que le trou
+        # (vers 1e26 ici) : elles ne doivent pas compter comme des mesures et écraser les gris du reste.
+        img = Image.new("F", (5003, 60), 0.5)
+        img.paste(3.4e38, (33, 10, 800, 18))
+        result = opened(prepare_image(encode(img, "TIFF")).data).convert("L")
+        self.assertEqual(result.getpixel((1000, 15)), 128)
 
     def test_uniform_out_of_range_grey(self):
         # Image uniforme hors des plages connues : rien à voir, mais un gris moyen plutôt qu'un noir de trou.

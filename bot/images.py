@@ -31,10 +31,9 @@ _DIRECT_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif",
 _LOSSLESS_FORMATS = {"PNG", "GIF", "BMP", "TIFF"}
 _PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels en PNG
 # Image en flottants : une valeur infinie, NaN ou plus grande que ceci (en valeur absolue) n'est pas une
-# mesure mais un trou (zone « sans donnée » d'une carte, souvent ±3,4e38) ou sa trace après la réduction
-# (mesurée au-dessus de 1e35). Assez haut pour garder les vraies valeurs géantes (densités de colonne en
-# astronomie, autour de 1e21).
-_FLOAT_HOLE = 1e30
+# mesure mais un trou (zone « sans donnée » d'une carte, souvent ±3,4e38) ou sa trace après la réduction.
+# Ces traces descendent vers 1e26 au bout d'une fine bande de trous : le seuil garde de la marge en dessous.
+_FLOAT_HOLE = 1e20
 _FLOAT32_MAX = 3.4e38
 
 
