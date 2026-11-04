@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import io
 import logging
-from array import array
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageMath, ImageOps, UnidentifiedImageError
 
 from .errors import UserFacingError
 from .media import ImageData
@@ -32,8 +31,11 @@ _DIRECT_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif",
 _LOSSLESS_FORMATS = {"PNG", "GIF", "BMP", "TIFF"}
 _PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels en PNG
 # Image en flottants : une valeur infinie, NaN ou plus grande que ceci (en valeur absolue) n'est pas une
-# mesure mais un trou (zone « sans donnée » d'une carte, souvent ±3,4e38) ou sa trace après la réduction.
-_FLOAT_HOLE = 1e20
+# mesure mais un trou (zone « sans donnée » d'une carte, souvent ±3,4e38) ou sa trace après la réduction
+# (mesurée au-dessus de 1e35). Assez haut pour garder les vraies valeurs géantes (densités de colonne en
+# astronomie, autour de 1e21).
+_FLOAT_HOLE = 1e30
+_FLOAT32_MAX = 3.4e38
 
 
 class ImageError(UserFacingError):
@@ -122,12 +124,24 @@ def _to_8_bits(img: Image.Image) -> Image.Image:
         low, high = 0, 65535
     else:
         if img.mode == "F":
-            values = array("f", img.tobytes())  # mode F : float32 natif
-            valid = [v for v in values if -_FLOAT_HOLE < v < _FLOAT_HOLE]  # NaN : comparaisons fausses
-            if len(valid) < len(values):
-                holes = Image.frombytes("L", img.size, bytes(0 if -_FLOAT_HOLE < v < _FLOAT_HOLE else 255
-                                                             for v in values))
-            low, high = (min(valid), max(valid)) if valid else (0, 0)
+            # Mesures à 255, trous à 0 (NaN : la comparaison est fausse). Calculé par Pillow : lire les
+            # pixels un par un en Python serait lent et gourmand en mémoire pour une grande image.
+            measures = ImageMath.lambda_eval(lambda a: (abs(a["img"]) < _FLOAT_HOLE) * 255,
+                                             img=img).convert("L")
+            fewest, most = measures.getextrema()
+            if fewest == 255:  # aucun trou
+                low, high = img.getextrema()
+            elif most == 0:  # que des trous : tout noir
+                holes = ImageOps.invert(measures)
+                low, high = 0, 0
+            else:
+                holes = ImageOps.invert(measures)
+                # Bornes des seules mesures : les trous remplacés par le plus grand flottant pour le
+                # minimum, par le plus petit pour le maximum.
+                low_side, high_side = img.copy(), img.copy()
+                low_side.paste(_FLOAT32_MAX, mask=holes)
+                high_side.paste(-_FLOAT32_MAX, mask=holes)
+                low, high = low_side.getextrema()[0], high_side.getextrema()[1]
         else:
             low, high = img.getextrema()
         if low >= 0 and high <= 1:
