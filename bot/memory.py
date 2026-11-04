@@ -81,6 +81,12 @@ MEMORY_TOOL = {
 }
 
 
+def _simple(name: str) -> str:
+    """Forme d'un nom pour savoir si deux membres le portent : lettres décorées simplifiées
+    (« 𝓑𝓸𝓫 » → « Bob ») et sans majuscules."""
+    return unicodedata.normalize("NFKC", name).casefold()
+
+
 @dataclass
 class ToolResult:
     content: str
@@ -379,7 +385,10 @@ class MemoryStore:
         async with self._lock:
             entry = self.members.get(member_id)
             names = [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"] if entry is not None else []
-            names = self._cited_names(names)
+            names, shared = self._cited_names(names, self._names_of_others(member_id))
+            if shared:
+                logger.info("Mémoire : %s laissé(s) dans les sources des fiches à la désactivation de %s : "
+                            "nom(s) aussi porté(s) par un autre membre", ", ".join(shared), name)
             alternatives = "|".join(map(re.escape, names))
             # Nom d'utilisateur entre parenthèses compris, comme Claude voit les auteurs (« Bob (bob) »).
             sources = re.compile(rf"({SOURCE_WORDS}\s+)(?:{alternatives})(?!\w)(?:\s*\((?:{alternatives})\))?",
@@ -409,12 +418,24 @@ class MemoryStore:
 
     # ------------------------------------------------------------ internes
 
+    def _names_of_others(self, member_id: int | str) -> set[str]:
+        """Noms Discord, anciens compris, des autres membres du registre, en forme simple et sans
+        majuscules (voir _cited_names)."""
+        return {_simple(n) for other_id, entry in self.members.members().items() if other_id != str(member_id)
+                for n in [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"]}
+
     @staticmethod
-    def _cited_names(names: list[str]) -> list[str]:
+    def _cited_names(names: list[str], others: set[str]) -> tuple[list[str], list[str]]:
         """Noms à retirer des sources (voir forget) : avec leur forme simple (« 𝓑𝓸𝓫 » →
-        « Bob »), sans ceux de moins de MIN_CITED_NAME caractères, les plus longs d'abord."""
-        variants = {v for n in names for v in (n, unicodedata.normalize("NFKC", n)) if len(v) >= MIN_CITED_NAME}
-        return sorted(variants, key=len, reverse=True)
+        « Bob »), sans ceux de moins de MIN_CITED_NAME caractères, les plus longs d'abord.
+
+        Un nom aussi porté par un autre membre (others, voir _names_of_others) est laissé, et renvoyé à
+        part : le pseudo d'un autre, pris juste avant de désactiver la mémoire, ferait sinon retirer la
+        source de tout ce que cet autre a dit."""
+        shared = sorted({n for n in names if _simple(n) in others})
+        variants = {v for n in names if n not in shared
+                    for v in (n, unicodedata.normalize("NFKC", n)) if len(v) >= MIN_CITED_NAME}
+        return sorted(variants, key=len, reverse=True), shared
 
     def _read_for_update(self, name: str) -> str:
         """Contenu d'un fichier avant de le modifier (vide s'il n'existe pas). Lève OSError ou

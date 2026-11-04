@@ -12,6 +12,10 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Désactiver la mémoire ne touche plus au fichier général.** Rika a pour consigne de ne rien y noter sur les membres : seule la fiche est effacée, et le nom retiré des sources des autres fiches (aussi sous sa forme simple pour un pseudo décoré comme « 𝓑𝓸𝓫 »). `/memoire` invite le membre à faire vérifier le fichier général par un administrateur.
 
+### Corrections
+
+- **Désactiver la mémoire n'efface plus les sources d'un autre membre.** Un membre qui prenait le pseudo d'un autre avant de désactiver sa mémoire faisait remplacer par « un membre » le nom de cet autre dans toutes les fiches. Un nom porté par deux membres est maintenant laissé, et noté dans le log.
+
 ---
 
 ## Version 5.13

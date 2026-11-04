@@ -382,6 +382,19 @@ class ForgetTest(MemoryTestCase):
         ]))
         self.assertEqual(self.store.read("membres/333.md"), "habite à Lyon")
 
+    async def test_name_of_another_member_kept_in_sources(self):
+        # Bob prend le pseudo d'Alice (lettres décorées comprises) : désactiver sa mémoire ne doit pas
+        # effacer la source de ce qu'Alice a dit. Son nom d'utilisateur, unique, est bien retiré.
+        await self.members.see(222, "alice", "Alice")
+        await self.members.see(MEMBER_ID, "bob", "Bob", nickname="𝓐𝓵𝓲𝓬𝓮")
+        await self.members.see(MEMBER_ID, "bob", "Bob", nickname="ALICE")  # 𝓐𝓵𝓲𝓬𝓮 devient un ancien pseudo
+        self.write("membres/333.md", "part à Rome (d'après Alice)\njoue à Zelda (d'après bob)")
+        with self.assertLogs("chatbot.memory", "INFO") as logs:
+            self.assertIsNone(await self.store.forget(MEMBER_ID, by="bob"))
+        self.assertEqual(self.store.read("membres/333.md"),
+                         "part à Rome (d'après Alice)\njoue à Zelda (d'après un membre)")
+        self.assertTrue(any("ALICE" in line and "autre membre" in line for line in logs.output))
+
     async def test_unreadable_file_does_not_block_sources(self):
         self.write("membres/222.md", "part à Rome (d'après Bob)")
         (self.root / "memories" / "membres" / "333.md").write_bytes("d'après Bob \xe0 Lyon".encode("latin-1"))
