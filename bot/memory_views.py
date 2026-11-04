@@ -218,14 +218,27 @@ class MemoryCard:
         await confirm(interaction, self, question, self.disable)
 
     async def disable(self, interaction: discord.Interaction) -> None:
-        error = await self.store.forget(self.target.member_id, by=str(interaction.user))
+        result = await self.store.forget(self.target.member_id, by=str(interaction.user))
+        # Lignes restées dans le fichier général : ne pas annoncer qu'elles ont été effacées.
         if self.target.departed:
             done = (f"Mémoire désactivée pour {self.target.name} : sa fiche et ce qui citait ce membre dans le "
-                    f"fichier général ont été effacés, et son nom retiré des sources.")
+                    f"fichier général ont été effacés, et son nom retiré des sources." if not result.remaining
+                    else f"Mémoire désactivée pour {self.target.name} : sa fiche a été effacée, et son nom "
+                         f"retiré des sources.")
+            whom = "ce membre"
         else:
             done = ("Mémoire désactivée : ta fiche et ce qui te citait dans le fichier général ont été effacés, "
-                    "et ton nom retiré des sources.")
-        await self.refresh(interaction, error or done)
+                    "et ton nom retiré des sources." if not result.remaining
+                    else "Mémoire désactivée : ta fiche a été effacée, et ton nom retiré des sources.")
+            whom = "toi"
+        message = result.error or done
+        if result.remaining:
+            count = ("1 ligne du fichier général parle" if result.remaining == 1
+                     else f"{result.remaining} lignes du fichier général parlent")
+            message += (f"\n\nMais {count} peut-être encore de {whom}, avec un surnom ou un nom cité trop "
+                        f"souvent pour être retiré sans vérification : à faire vérifier par un administrateur "
+                        f"avec /memoire-serveur.")
+        await self.refresh(interaction, message)
 
     async def ask_enable(self, interaction: discord.Interaction) -> None:
         # Seule présentation de la mémoire au membre : tout ce qu'il doit savoir avant d'accepter.

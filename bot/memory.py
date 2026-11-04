@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from pathlib import Path
@@ -87,6 +88,15 @@ MEMORY_TOOL = {
 class ToolResult:
     content: str
     is_error: bool = False
+
+
+@dataclass
+class Forgotten:
+    """Résultat de MemoryStore.forget. error : message d'erreur, ou None. remaining : lignes du fichier
+    général qui citent peut-être encore le membre (nom Discord, quand il y en avait trop pour les retirer,
+    ou surnom de sa fiche), à faire vérifier par un administrateur."""
+    error: str | None = None
+    remaining: int = 0
 
 
 class MemoryStore:
@@ -367,25 +377,30 @@ class MemoryStore:
         logger.info("Mémoire : %s %s par %s (%d caractères)", name, "modifié" if text else "effacé", by, len(text))
         return None
 
-    async def forget(self, member_id: int | str, by: str) -> str | None:
+    async def forget(self, member_id: int | str, by: str) -> Forgotten:
         """Membre qui désactive la mémoire : efface sa fiche et les lignes du fichier général qui citent
         un de ses noms Discord, remplace ce nom par « un membre » là où il est cité comme source dans
         les autres fiches (« d'après Bob »), puis désactive la mémoire (by : son nom, pour les logs).
-        Renvoie un message d'erreur, ou None.
+        Renvoie un Forgotten : message d'erreur, et nombre de lignes qui le citent peut-être encore.
 
-        Les surnoms de la fiche ne comptent pas : le membre les écrit lui-même avec /memoire, sans que
-        personne le voie (« Surnoms : les, est, une » viderait le fichier). Plus de MAX_FORGOTTEN_LINES
-        lignes citées : aucune n'est retirée, l'administrateur vérifie.
+        Les surnoms de la fiche ne retirent rien : le membre les écrit lui-même avec /memoire, sans que
+        personne le voie (« Surnoms : les, est, une » viderait le fichier). Les lignes qui les citent sont
+        seulement comptées, pour le dire au membre et à l'administrateur. Plus de MAX_FORGOTTEN_LINES
+        lignes citées : aucune n'est retirée, comptées de même. Un nom en lettres décorées (« 𝓑𝓸𝓫 ») est
+        aussi cherché sous sa forme simple (« Bob »), celle que Claude écrit.
 
         Tout se fait sous le verrou : un appel de l'outil en attente ne peut pas recréer la fiche."""
         name = self.member_file(member_id)
         async with self._lock:
             entry = self.members.get(member_id)
             names = [entry[key] for key in NAME_KEYS if entry[key]] + entry["former_names"] if entry is not None else []
-            names = sorted({n for n in names if len(n) >= MIN_CITED_NAME}, key=len, reverse=True)
+            names = self._cited_names(names)
             alternatives = "|".join(map(re.escape, names))
-            # Mot entier : « Bob » ne retire pas une ligne sur « Bobine ».
-            cites = re.compile(rf"(?<!\w)(?:{alternatives})(?!\w)", re.IGNORECASE) if names else None
+            cites = self._cites(names)
+            # Lue avant d'effacer la fiche. Noms Discord exclus : leurs lignes sont déjà retirées.
+            nicknames = [n for n in self._cited_names(self.nicknames(member_id))
+                         if n.casefold() not in {d.casefold() for d in names}]
+            cites_nickname = self._cites(nicknames)
             # Nom d'utilisateur entre parenthèses compris, comme Claude voit les auteurs (« Bob (bob) »).
             sources = re.compile(rf"({SOURCE_WORDS}\s+)(?:{alternatives})(?!\w)(?:\s*\((?:{alternatives})\))?",
                                  re.IGNORECASE) if names else None
@@ -394,7 +409,7 @@ class MemoryStore:
             except (OSError, UnicodeDecodeError) as exc:
                 # Rien n'est effacé ni désactivé : le membre réessaiera une fois le fichier réparé.
                 self._report(SERVER_FILE, exc)
-                return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
+                return Forgotten("Effacement impossible pour l'instant, à cause d'une erreur du bot.")
             kept = [line for line in server if cites is None or not cites.search(line)]
             if len(server) - len(kept) > MAX_FORGOTTEN_LINES:
                 # Les noms trouvés seulement, pas les lignes : l'administrateur les retrouve dans le fichier.
@@ -402,6 +417,16 @@ class MemoryStore:
                 logger.warning("Mémoire : %d lignes de %s citent %s (%s) : aucune retirée, à vérifier avec "
                                "/memoire-serveur.", len(server) - len(kept), SERVER_FILE, name, ", ".join(found))
                 kept = server
+            # Lignes qui le citent encore : trop nombreuses pour être retirées, ou citant un surnom.
+            remaining = [line for line in kept if any(regex is not None and regex.search(line)
+                                                      for regex in (cites, cites_nickname))]
+            by_nickname = [line for line in remaining if cites is None or not cites.search(line)]
+            if by_nickname:
+                found = sorted({m.group(0) for line in by_nickname for m in cites_nickname.finditer(line)},
+                               key=str.casefold)
+                logger.warning("Mémoire : %d ligne(s) de %s citent un surnom de %s (%s) : non retirées, à "
+                               "vérifier avec /memoire-serveur.", len(by_nickname), SERVER_FILE, name,
+                               ", ".join(found))
             try:
                 (self.root / name).unlink(missing_ok=True)
                 self._indexed(name, "")
@@ -415,7 +440,7 @@ class MemoryStore:
                                        if sources else ({}, []))
             except OSError as exc:
                 logger.error("Mémoire : impossible d'effacer ce qui concerne %s : %s", name, exc)
-                return "Effacement impossible pour l'instant, à cause d'une erreur du bot."
+                return Forgotten("Effacement impossible pour l'instant, à cause d'une erreur du bot.")
             for other, text in changed.items():
                 self._indexed(other, text)
             # Même après une réactivation, ce qu'il a dit avant n'est pas noté de nouveau.
@@ -429,10 +454,24 @@ class MemoryStore:
                     "%d fiche(s)", name, by, len(server) - len(kept), SERVER_FILE, len(changed))
         if not saved:
             # Effacement fait, désactivation appliquée : seul son enregistrement manque.
-            return NOT_SAVED.format(setting="la désactivation")
-        return None
+            return Forgotten(NOT_SAVED.format(setting="la désactivation"), len(remaining))
+        return Forgotten(remaining=len(remaining))
 
     # ------------------------------------------------------------ internes
+
+    @staticmethod
+    def _cited_names(names: list[str]) -> list[str]:
+        """Noms à chercher dans le fichier général (voir forget) : avec leur forme simple (« 𝓑𝓸𝓫 » →
+        « Bob »), sans ceux de moins de MIN_CITED_NAME caractères, les plus longs d'abord."""
+        variants = {v for n in names for v in (n, unicodedata.normalize("NFKC", n)) if len(v) >= MIN_CITED_NAME}
+        return sorted(variants, key=len, reverse=True)
+
+    @staticmethod
+    def _cites(names: list[str]) -> re.Pattern[str] | None:
+        """Expression qui trouve un de ces noms en mot entier (« Bob » ne trouve pas « Bobine »)."""
+        if not names:
+            return None
+        return re.compile(rf"(?<!\w)(?:{'|'.join(map(re.escape, names))})(?!\w)", re.IGNORECASE)
 
     def _read_for_update(self, name: str) -> str:
         """Contenu d'un fichier avant de le modifier (vide s'il n'existe pas). Lève OSError ou

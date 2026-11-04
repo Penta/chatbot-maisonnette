@@ -2,7 +2,15 @@
 
 Les versions les plus récentes sont en haut. Chaque entrée commence par un résumé en gras, suivi du détail.
 
-**Versions :** [5.13](#version-513) · [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500) · [Avant la 5.0](#avant-la-version-50)
+**Versions :** [5.14](#version-514) · [5.13](#version-513) · [5.12](#version-512) · [5.11](#version-511) · [5.10](#version-510) · [5.9](#version-59) · [5.8](#version-58) · [5.7](#version-57) · [5.6](#version-56) · [5.5](#version-55) · [5.4.0](#version-540) · [5.3.0](#version-530) · [5.2.0](#version-520) · [5.1.0](#version-510-1) · [5.0.0](#version-500) · [Avant la 5.0](#avant-la-version-50)
+
+---
+
+## Version 5.14
+
+### Corrections
+
+- **Désactiver la mémoire n'annonce plus un effacement qui n'a pas eu lieu.** Si des lignes du fichier général citent encore le membre (plus de 3, ou avec un surnom de sa fiche), `/memoire` le dit et invite à les faire vérifier avec `/memoire-serveur`. Un pseudo en lettres décorées (« 𝓑𝓸𝓫 ») est aussi cherché sous sa forme simple.
 
 ---
 
