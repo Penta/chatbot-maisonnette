@@ -475,6 +475,11 @@ class DecodeTextFileTest(unittest.TestCase):
         data = codecs.BOM_UTF8 + "Été".encode("utf-8") + b" \xe9\xe9"
         self.assertEqual(decode_text_file(data), "Été éé")
 
+    def test_utf8_with_real_replacement_characters(self):
+        # Les « � » déjà présents (journal abîmé auparavant) ne comptent pas comme des octets invalides.
+        data = ("Café élève déjà " + "�" * 5 + " fin ").encode("utf-8") + b"\xe9"
+        self.assertEqual(decode_text_file(data), "Café élève déjà " + "�" * 5 + " fin é")
+
     def test_utf8_cut_in_the_middle_of_a_character(self):
         # Seul le caractère coupé est abîmé, le reste du texte garde ses accents.
         data = "Café ".encode("utf-8") + "é".encode("utf-8")[:1] + " à bientôt".encode("utf-8")

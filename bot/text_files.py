@@ -44,7 +44,8 @@ def _decode_invalid_utf8(data: bytes) -> str:
     """
     if not data.startswith(codecs.BOM_UTF8):
         lenient = data.decode("utf-8", errors="replace")  # un « � » par suite d'octets invalides
-        invalid = lenient.count("�")
+        # Sans les « � » déjà dans le fichier (EF BF BD est toujours décodé d'un bloc).
+        invalid = lenient.count("�") - data.count("�".encode("utf-8"))
         valid = sum(1 for char in lenient if char > "\x7f") - invalid
         if invalid >= valid:
             return data.decode("cp1252", errors="replace")

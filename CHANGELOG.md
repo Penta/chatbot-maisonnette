@@ -20,7 +20,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les grandes images en gris 16 bits ne deviennent plus toutes blanches.** Un scan, une radio ou une photo d'astronomie en PNG ou TIFF 16 bits (ou 32 bits), une fois réduit, arrivait tout blanc ou tout noir chez Claude. Ses gris sont maintenant ramenés sur 8 bits sans être écrêtés (Pillow 11 ou plus, installé avec les autres dépendances).
 
-- **Un octet abîmé ne déforme plus tous les accents d'un fichier texte.** Dans un `.txt`, `.log` ou `.csv` en UTF-8, un seul octet invalide faisait lire tout le fichier en Windows-1252 (« CafÃ© »). Seul cet octet est maintenant relu ainsi ; les fichiers « ANSI » et les fichiers mélangés restent bien lus.
+- **Un octet abîmé ne déforme plus tous les accents d'un fichier texte.** Dans un `.txt`, `.log` ou `.csv` en UTF-8, un seul octet invalide faisait lire tout le fichier en Windows-1252 (« CafÃ© »). Seul cet octet est maintenant relu ainsi, si le fichier est surtout en UTF-8 ; les fichiers « ANSI » restent bien lus.
 
 ---
 
