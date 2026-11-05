@@ -163,6 +163,40 @@ class ServerFileLogTest(MemoryTestCase):
 
 
 
+class LargeRemovalTest(MemoryTestCase):
+    """L'outil ne peut pas vider un fichier, ou presque : sur une seule demande, des mois de notes
+    seraient perdues sans copie. Effacer reste possible avec /memoire et /memoire-serveur."""
+
+    FICHE = f"membres/{MEMBER_ID}.md"
+    NOTES = "\n".join(f"note {i} : quelque chose d'important sur Bob" for i in range(20))
+
+    async def test_rewrite_dropping_most_refused(self):
+        self.write(self.FICHE, self.NOTES)
+        result = await self.tool(expect_error=True, commande="reecrire", fichier=self.FICHE,
+                                 texte="Surnoms : Bob")
+        self.assertIn("/memoire", result.content)
+        self.assertEqual(self.store.read(self.FICHE), self.NOTES)
+
+    async def test_server_reset_refused(self):
+        self.write(SERVER_FILE, self.NOTES)
+        await self.tool(expect_error=True, commande="reecrire", texte="rien")
+        await self.tool(expect_error=True, commande="remplacer", ancien=self.NOTES, texte="rien")
+        self.assertEqual(self.server_file(), self.NOTES)
+
+    async def test_shortening_by_half_allowed(self):
+        # Fichier plein : Rika le réécrit en plus court en fusionnant les lignes.
+        self.write(self.FICHE, self.NOTES)
+        shorter = "\n".join(self.NOTES.splitlines()[:11])  # un peu plus de la moitié
+        await self.tool(commande="reecrire", fichier=self.FICHE, texte=shorter)
+        self.assertEqual(self.store.read(self.FICHE), shorter)
+
+    async def test_small_file_rewritten(self):
+        # Peu de texte en jeu : rien à protéger, une ligne retirée d'une petite fiche passe.
+        self.write(self.FICHE, "Surnoms : Bob\naime les jeux de société")
+        await self.tool(commande="reecrire", fichier=self.FICHE, texte="Surnoms : Bob")
+        self.assertEqual(self.store.read(self.FICHE), "Surnoms : Bob")
+
+
 class UsernameTest(MemoryTestCase):
     """Le nom d'utilisateur, unique, distingue deux membres qui portent le même pseudo."""
 

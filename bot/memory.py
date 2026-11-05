@@ -26,6 +26,9 @@ EDITS_FILE = "modifications.json"
 # Format des dates des messages de la conversation (voir ChatBot.timestamp), pour que Claude compare.
 DATE_FORMAT = "%d/%m/%Y %H:%M"
 MEMBER_FILE = re.compile(r"^membres/(\d+)\.md$")
+# Caractères qu'une écriture de l'outil peut retirer d'un coup, même s'ils font plus de la moitié du
+# fichier (voir _too_much_removed).
+MIN_REMOVED = 200
 # Ligne d'une fiche (la première, en principe) avec les surnoms du membre, repris dans la liste des
 # membres. Une puce en tête (« - Surnoms : … »), le singulier et le gras (« **Surnom :** … »), que
 # Claude écrit volontiers, sont acceptés.
@@ -344,6 +347,14 @@ class MemoryStore:
                     f"Refusé : {problem} Réécris tout le fichier en plus court avec « reecrire », en "
                     f"fusionnant les lignes et en retirant le moins important, puis ajoute la nouvelle "
                     f"information.", is_error=True)
+            if self._too_much_removed(after, before):
+                logger.warning("Mémoire : %s refusé sur %s (%s) : %d → %d caractères, plus de la moitié retirée",
+                               action, name, label, len(before), len(after))
+                return ToolResult(
+                    f"Refusé : {name} perdrait plus de la moitié de son texte, et rien n'en serait gardé. "
+                    f"Garde au moins la moitié (en fusionnant les lignes, pas en les retirant). Pour effacer "
+                    f"une fiche, le membre utilise /memoire ; pour le fichier général, un administrateur "
+                    f"utilise /memoire-serveur.", is_error=True)
             if after == before:
                 return ToolResult(f"Aucun changement : {name} contenait déjà cela.")
             try:
@@ -513,6 +524,16 @@ class MemoryStore:
         if count > MAX_LINES and count > len(before.splitlines()):
             return f"{name} ferait {count} lignes pour {MAX_LINES} au plus."
         return None
+
+    @staticmethod
+    def _too_much_removed(after: str, before: str) -> bool:
+        """Vrai si l'outil retirerait plus de la moitié d'un fichier (« reecrire » ou « remplacer »).
+
+        Rien n'est gardé de l'ancien texte : sur la demande d'un seul membre (« réécris la fiche d'Alice
+        avec juste son surnom »), des mois de notes seraient perdues. Raccourcir un fichier plein de
+        moitié reste possible ; effacer se fait avec /memoire ou /memoire-serveur. Sous MIN_REMOVED
+        caractères retirés, rien à protéger : une ligne peut être retirée d'une petite fiche."""
+        return len(after) * 2 < len(before) and len(before) - len(after) > MIN_REMOVED
 
     async def _save_manual(self, name: str, text: str, current: str) -> str | None:
         """Écrit (ou supprime, si text est vide) un fichier modifié avec /memoire, et retient la date de

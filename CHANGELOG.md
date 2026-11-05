@@ -16,6 +16,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Corrections
 
+- **Rika ne peut plus vider une fiche ou le fichier général sur simple demande.** Un membre pouvait lui faire réécrire la fiche d'un autre avec une seule ligne, et les anciennes notes étaient perdues. Elle ne peut plus en retirer plus de la moitié d'un coup ; effacer se fait avec `/memoire` ou `/memoire-serveur`.
+
 - **Désactiver la mémoire n'efface plus les sources d'un autre membre.** Un membre qui prenait le pseudo d'un autre avant de désactiver sa mémoire faisait remplacer par « un membre » le nom de cet autre dans toutes les fiches. Un nom porté par deux membres est maintenant laissé, et noté dans le log.
 
 ---

@@ -83,7 +83,7 @@ MEMBER_MEMORY_NOTE = (
     "Une fiche est limitée à {member_limit} caractères et le fichier général à {server_limit}, et chacun à "
     "{max_lines} lignes : ne garde que l'essentiel. Si une note "
     "est refusée faute de place, réécris tout le fichier en plus court (« reecrire »), en fusionnant les "
-    "lignes et en retirant le moins important."
+    "lignes et en retirant le moins important, sans retirer plus de la moitié du texte."
 )
 
 # Ajouté quand Claude a au moins un outil (recherche web ou mémoire). Le texte écrit avant un appel
