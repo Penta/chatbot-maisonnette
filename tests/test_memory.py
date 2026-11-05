@@ -615,6 +615,12 @@ class DeleteLinesTest(MemoryTestCase):
         buttons = [item.label for item in self.card().view().children]
         self.assertEqual(buttons, ["Surnoms", "Supprimer des lignes", "Effacer la fiche", "Désactiver la mémoire"])
 
+    async def test_file_emptied_meanwhile(self):
+        # Fiche effacée depuis un autre message /memoire après l'affichage du bouton : pas de plantage.
+        interaction = interaction_mock()
+        await self.card().choose_lines(interaction)
+        self.assertIn("vide", interaction.response.edit_message.call_args.kwargs["content"])
+
     async def test_footer_counts_lines(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
         self.assertIn(f"2/{MAX_LINES} lignes", self.card().embeds()[-1].footer.text)
@@ -659,6 +665,15 @@ class AddLinesTest(MemoryTestCase):
         self.assertIn(b"une de trop", message.kwargs["file"].fp.getvalue())
         self.assertNotIn("une de trop", self.server_file())
 
+    async def test_username_refused(self):
+        # « @alice » est la forme d'une source pour Claude : à sa prochaine écriture, elle deviendrait
+        # une vraie source rattachée à Alice (voir _with_ids).
+        await self.members.see(222, "alice", "Alice")
+        error = await self.store.add_lines(SERVER_FILE, "soirée jeux d'après @alice", by="admin")
+        self.assertIn("sans « @ »", error)
+        self.assertEqual(self.server_file(), "")
+        self.assertIsNone(await self.store.add_lines(SERVER_FILE, "contact : jeux@exemple.fr", by="admin"))
+
     async def test_member_file_cannot_be_completed(self):
         self.assertIsNotNone(await self.store.add_lines(f"membres/{MEMBER_ID}.md", "habite à Lyon", by="admin"))
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
@@ -695,6 +710,12 @@ class NicknamesWindowTest(MemoryTestCase):
             with self.subTest(text=text):
                 self.assertIsNotNone(await self.store.set_nicknames(MEMBER_ID, text, by="bob"))
         self.assertEqual(self.store.read(self.FICHE), "")
+
+    async def test_full_file_message_for_member(self):
+        self.write(self.FICHE, "\n".join(f"ligne {i}" for i in range(MAX_LINES)))
+        error = await self.store.set_nicknames(MEMBER_ID, "Bobby", by="bob")
+        self.assertIn("Ta fiche est pleine", error)
+        self.assertNotIn("membres/", error)
 
     async def test_refused_when_disabled(self):
         await self.members.set_memory(MEMBER_ID, False)
@@ -810,6 +831,26 @@ class NotEnabledWriteTest(MemoryTestCase):
         self.assertIn("Carl n'a pas activé la mémoire", text)
         self.assertIn("ancienne fiche", text)
         self.assertNotIn("Lyon", text)
+
+    async def test_old_file_lines_hidden_from_admin(self):
+        # Le menu de suppression montrerait les lignes que la fiche cache : un administrateur ne peut
+        # que l'effacer en entier.
+        self.write("membres/333.md", "habite à Lyon")
+        buttons = {item.label: item.disabled for item in self.card.view().children}
+        self.assertTrue(buttons["Supprimer des lignes"])
+        interaction = interaction_mock()
+        await self.card.choose_lines(interaction)
+        shown = interaction.response.edit_message.call_args.kwargs
+        self.assertNotIn("Lyon", shown["content"] + "".join(e.description or "" for e in shown["embeds"]))
+        self.assertFalse(any(isinstance(item, discord.ui.Select) for item in shown["view"].children))
+
+    async def test_member_sees_own_old_file_lines(self):
+        await self.members.set_memory(MEMBER_ID, False)
+        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
+        card = MemoryCard(self.store, Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True),
+                          owner_id=MEMBER_ID, bot_name="Rika")
+        buttons = {item.label: item.disabled for item in card.view().children}
+        self.assertFalse(buttons["Supprimer des lignes"])
 
 
 class LineLimitTest(MemoryTestCase):

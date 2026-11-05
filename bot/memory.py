@@ -399,8 +399,12 @@ class MemoryStore:
         if not new_lines:
             return "Rien à ajouter."
         # Une mention, même tapée à la main (« <@222> »), citerait un membre comme source.
-        if any(MEMBER_REF.search(line) for line in new_lines):
-            return "Une ligne ne peut pas citer un membre par une mention : écris son nom. Rien n'a été ajouté."
+        # « @alice » aussi : c'est la forme sous laquelle Claude lit une source, et sa prochaine écriture
+        # du fichier la changerait en mention (voir _with_ids), même pour un nom qui n'est pas encore
+        # dans le registre.
+        if any(MEMBER_REF.search(line) or USERNAME_REF.search(line) for line in new_lines):
+            return ("Une ligne ne peut pas citer un membre par une mention ni par « @nom » : écris son nom "
+                    "sans « @ ». Rien n'a été ajouté.")
         async with self._lock:
             current = self.read(SERVER_FILE)
             lines = [line for line in current.splitlines() if line.strip()]
@@ -433,8 +437,10 @@ class MemoryStore:
             current = self.read(name)
             others = [line for line in current.splitlines() if line.strip() and not NICKNAMES_LINE.match(line.strip())]
             after = "\n".join(([f"Surnoms : {', '.join(names)}"] if names else []) + others)
-            if error := self._too_big(name, after, current):
-                return error + " Rien n'a été modifié."
+            # Message pour le membre, pas pour Claude (le nom du fichier ne lui dit rien).
+            if self._too_big(name, after, current):
+                return ("Ta fiche est pleine : supprimes-en des lignes (« Supprimer des lignes ») pour faire "
+                        "de la place à tes surnoms. Rien n'a été modifié.")
             error = await self._save_manual(name, after, current)
         if error is None:
             logger.info("Mémoire : surnoms de %s modifiés par %s", name, by)

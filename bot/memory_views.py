@@ -85,6 +85,13 @@ class MemoryCard:
     def memory_enabled(self) -> bool:
         return self.target.member_id is None or self.store.members.memory_enabled(self.target.member_id)
 
+    @property
+    def lines_visible(self) -> bool:
+        """Les lignes du fichier peuvent être montrées (menu « Supprimer des lignes ») : pas celles de
+        l'ancienne fiche d'un membre qui n'a pas activé la mémoire, que embeds cache aux administrateurs
+        (ils peuvent seulement l'effacer). Le membre, lui, voit toujours les siennes."""
+        return self.memory_enabled or self.target.is_self
+
     def about(self) -> str:
         """« sur toi », « sur Penta » ou « sur le serveur »."""
         if self.target.member_id is None:
@@ -142,7 +149,7 @@ class MemoryCard:
             add_button(view, "Surnoms", "🏷️", discord.ButtonStyle.primary, self.ask_nicknames,
                        disabled=not self.memory_enabled)
         add_button(view, "Supprimer des lignes", "✂️", discord.ButtonStyle.secondary, self.choose_lines,
-                   disabled=not content)
+                   disabled=not content or not self.lines_visible)
         add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
                    discord.ButtonStyle.secondary, self.ask_erase, disabled=not content)
         # Seul le membre lui-même active ou désactive la mémoire. Parti du serveur, il ne peut plus lancer
@@ -178,7 +185,16 @@ class MemoryCard:
 
     async def choose_lines(self, interaction: discord.Interaction) -> None:
         """Remplace le fichier affiché par ses lignes numérotées et un menu pour cocher celles à supprimer."""
+        # Bouton affiché avant un changement : fiche effacée entre-temps (autre message /memoire,
+        # désactivation), ou mémoire du membre désactivée depuis (lignes à ne plus montrer).
+        if not self.lines_visible:
+            await self.refresh(interaction, "La mémoire n'est pas activée pour ce membre : sa fiche ne peut "
+                                            "qu'être effacée.")
+            return
         original = self.store.read(self.target.file)  # les numéros valent pour ce contenu (voir delete_lines)
+        if not original:
+            await self.refresh(interaction, "Le fichier est vide : rien à supprimer.")
+            return
         lines = [self.store.with_names(line) for line in self.store.lines(self.target.file)]
         view = OwnerView(self.owner_id)
         for start in range(0, min(len(lines), MENU_OPTIONS * MAX_MENUS), MENU_OPTIONS):
