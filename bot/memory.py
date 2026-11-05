@@ -395,16 +395,12 @@ class MemoryStore:
         complètent pas à la main (voir delete_lines). Renvoie un message d'erreur, ou None."""
         if name != SERVER_FILE:
             return "Seul le fichier général peut être complété à la main."
-        new_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        # Seuls les administrateurs ajoutent des lignes : ils peuvent citer un membre. « @alice » est
+        # enregistré comme quand Claude l'écrit (voir _with_ids) : sinon Claude, qui lit et recopie
+        # « @alice », ne retrouverait pas la ligne pour la remplacer.
+        new_lines = [self._with_ids(line.strip()) for line in text.splitlines() if line.strip()]
         if not new_lines:
             return "Rien à ajouter."
-        # Une mention, même tapée à la main (« <@222> »), citerait un membre comme source.
-        # « @alice » aussi : c'est la forme sous laquelle Claude lit une source, et sa prochaine écriture
-        # du fichier la changerait en mention (voir _with_ids), même pour un nom qui n'est pas encore
-        # dans le registre.
-        if any(MEMBER_REF.search(line) or USERNAME_REF.search(line) for line in new_lines):
-            return ("Une ligne ne peut pas citer un membre par une mention ni par « @nom » : écris son nom "
-                    "sans « @ ». Rien n'a été ajouté.")
         async with self._lock:
             current = self.read(SERVER_FILE)
             lines = [line for line in current.splitlines() if line.strip()]

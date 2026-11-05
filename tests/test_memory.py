@@ -467,11 +467,11 @@ class MemberRefTest(MemoryTestCase):
         menu = interaction.response.edit_message.call_args.kwargs["view"].children[0]
         self.assertEqual(menu.options[0].label, "1. joue à Zelda (d'après Alice)")
 
-    async def test_added_line_cannot_cite_a_member(self):
+    async def test_added_line_can_cite_a_member(self):
+        # L'administrateur est libre de citer un membre, et le voit par son nom dans /memoire-serveur.
         self.write(SERVER_FILE, "soirée jeux le vendredi")
-        error = await self.store.add_lines(SERVER_FILE, "tournoi en mai (d'après <@222>)", by="admin")
-        self.assertIn("mention", error)
-        self.assertEqual(self.server_file(), "soirée jeux le vendredi")
+        self.assertIsNone(await self.store.add_lines(SERVER_FILE, "tournoi en mai (d'après <@222>)", by="admin"))
+        self.assertEqual(self.raw(SERVER_FILE), "soirée jeux le vendredi\ntournoi en mai (d'après <@222>)")
 
     async def test_forget_replaces_mentions_whatever_the_name(self):
         # Bob a pris le pseudo d'Alice : sa mention à lui est retirée, celle d'Alice reste.
@@ -665,13 +665,18 @@ class AddLinesTest(MemoryTestCase):
         self.assertIn(b"une de trop", message.kwargs["file"].fp.getvalue())
         self.assertNotIn("une de trop", self.server_file())
 
-    async def test_username_refused(self):
-        # « @alice » est la forme d'une source pour Claude : à sa prochaine écriture, elle deviendrait
-        # une vraie source rattachée à Alice (voir _with_ids).
+    async def test_username_written_as_id(self):
+        # Ligne enregistrée comme Claude l'écrirait (voir _with_ids) : sinon, Claude, qui recopie
+        # « @alice », ne retrouverait pas la ligne pour la remplacer.
         await self.members.see(222, "alice", "Alice")
-        error = await self.store.add_lines(SERVER_FILE, "soirée jeux d'après @alice", by="admin")
-        self.assertIn("sans « @ »", error)
-        self.assertEqual(self.server_file(), "")
+        self.assertIsNone(await self.store.add_lines(SERVER_FILE, "soirée jeux d'après @alice\nrdv @20h",
+                                                     by="admin"))
+        self.assertEqual(self.server_file(), "soirée jeux d'après <@222>\nrdv @20h")
+        await self.tool(commande="remplacer", ancien="d'après @alice", texte="d'après @alice, le vendredi")
+        self.assertEqual(self.server_file(), "soirée jeux d'après <@222>, le vendredi\nrdv @20h")
+        # Déjà là sous l'autre forme : pas ajoutée une deuxième fois.
+        self.assertIsNone(await self.store.add_lines(SERVER_FILE, "rdv @20h", by="admin"))
+        self.assertEqual(len(self.store.lines(SERVER_FILE)), 2)
         self.assertIsNone(await self.store.add_lines(SERVER_FILE, "contact : jeux@exemple.fr", by="admin"))
 
     async def test_member_file_cannot_be_completed(self):
