@@ -22,6 +22,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika ne joue plus à un jeu Steam pas encore sorti.** Les jeux annoncés sur la boutique sont maintenant écartés du statut « joue à », comme les jeux pour adultes. Rien à régler.
 
+- **Une « version » invalide dans `registre.json` n'empêche plus le bot de démarrer.** Le bot démarre avec la mémoire des membres coupée et le log indique quoi corriger : `version` doit être un nombre entier, sans guillemets. Corrige le fichier puis redémarre.
+
 ---
 
 ## Version 5.13

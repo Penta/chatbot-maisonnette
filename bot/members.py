@@ -111,6 +111,11 @@ class MemberRegistry:
             raw = json.loads(self.file_path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict) or not isinstance(raw.get("members"), dict):
                 raise ValueError("« members » absent ou n'est pas un dictionnaire")
+            # Absente : ancien registre, à convertir. Invalide : à corriger, car la convertir par erreur
+            # désactiverait la mémoire de tous (bool à part : true vaut 1 en Python).
+            version = raw.get("version", 1)
+            if not isinstance(version, int) or isinstance(version, bool):
+                raise ValueError("« version » doit être un nombre entier")
             data = {key: self._sanitize(key, value) for key, value in raw["members"].items()}
         except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
             self.broken = str(exc)
@@ -118,7 +123,7 @@ class MemberRegistry:
                          "réparation. Corrige %s puis redémarre le bot ; le supprimer repartirait de zéro, "
                          "en désactivant la mémoire de tous ceux qui l'avaient activée.", exc, self.file_path)
             return {}
-        if raw.get("version", 1) < 2:
+        if version < 2:
             self._migrate(raw["members"], data)
         return data
 

@@ -41,6 +41,15 @@ class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
             registry = self.load(text=text[:-20])
         await self.assert_broken_and_kept(registry)
 
+    async def test_version_not_an_integer(self):
+        # true compterait pour 1 et 1.5 passerait la comparaison : la conversion désactiverait la mémoire de tous.
+        for version in ("2", None, True, 1.5):
+            with self.subTest(version=version):
+                text = json.dumps({"version": version, "members": {"111": ENTRY}})
+                with self.assertLogs("chatbot.members", "ERROR"):
+                    registry = self.load(text=text)
+                await self.assert_broken_and_kept(registry)
+
     async def test_malformed_memory_field(self):
         with self.assertLogs("chatbot.members", "ERROR"):
             registry = self.load({"111": {**ENTRY, "memory": "non"}})
