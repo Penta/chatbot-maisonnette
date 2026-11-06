@@ -35,6 +35,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Trop de fichiers en attente ne peuvent plus faire tomber le bot.** Au-delà de 200 Mo de fichiers en attente, tous salons confondus, un nouveau message avec fichier est refusé avant téléchargement, et son auteur est invité à le renvoyer plus tard. Rien à régler.
 
+- **Rika répond normalement quand elle atteint `MEMORY_MAX_OPERATIONS`.** Un membre qui racontait beaucoup de choses d'un coup pouvait recevoir « Je n'ai rien trouvé à répondre à ça », alors que les notes étaient écrites. Rien à régler.
+
 ---
 
 ## Version 5.13

@@ -13,6 +13,7 @@ import anthropic
 from bot.claude_client import ClaudeClient, ClaudeError
 from bot.discord_bot import ChatBot, PendingMessage
 from bot.media import PDF_MEDIA_TYPE, ImageData, base64_size, fit_in_request
+from bot.memory import MEMORY_TOOL, ToolResult
 
 CHANNEL_ID = 10
 
@@ -225,6 +226,52 @@ class WebToolsTest(unittest.IsolatedAsyncioTestCase):
         ])
         # Mêmes outils à chaque appel : l'API l'exige pour reprendre, et le cache de prompt est préservé.
         self.assertEqual(second, first)
+
+
+class MemoryLimitTest(unittest.IsolatedAsyncioTestCase):
+    """Modèle qui rappelle l'outil « memoire » tant que l'API le lui permet."""
+
+    def setUp(self):
+        self.client = ClaudeClient.__new__(ClaudeClient)  # sans __init__ : pas de client Anthropic à créer
+        self.client.settings = SimpleNamespace(
+            model="modele", max_tokens=100, api_timeout=1, web_search=False, presence=False, thinking=False,
+            effort=None, memory_max_operations=2, price_input_per_mtok=None, price_output_per_mtok=None,
+            price_web_search_per_1000=10.0)
+        self.client.memory = mock.Mock(run=mock.AsyncMock(return_value=ToolResult("Noté.")))
+        self.client.memory.system_context.return_value = ""
+        self.client.personality = lambda: "Tu es Rika."
+        self.calls_per_response = 1
+        self.create = mock.AsyncMock(side_effect=self.answer)
+        self.client._client = SimpleNamespace(messages=SimpleNamespace(create=self.create))
+
+    async def answer(self, **params) -> SimpleNamespace:
+        usage = SimpleNamespace(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0,
+                                cache_read_input_tokens=0, server_tool_use=None)
+        if params.get("tool_choice") == {"type": "none"}:
+            return SimpleNamespace(stop_reason="end_turn", model="modele", usage=usage,
+                                   content=[SimpleNamespace(type="text", text="Enchantée !")])
+        calls = [SimpleNamespace(type="tool_use", id=f"appel{i}", name=MEMORY_TOOL["name"], input={"action": "ajouter"})
+                 for i in range(self.calls_per_response)]
+        return SimpleNamespace(stop_reason="tool_use", model="modele", usage=usage, content=calls)
+
+    async def test_text_answer_once_limit_reached(self):
+        answer = await self.client.ask([], [("J'ai trois chats.", [])])
+        self.assertEqual(answer.text, "Enchantée !")
+        self.assertEqual(self.client.memory.run.await_count, 2)
+        # Le dernier appel ne peut plus noter, sans appel payé en plus pour lui signaler la limite.
+        choices = [call.kwargs.get("tool_choice") for call in self.create.await_args_list]
+        self.assertEqual(choices, [None, None, {"type": "none"}])
+        # La liste des outils ne change pas : retirer un outil ferait réécrire tout le cache de prompt.
+        tools = [call.kwargs["tools"] for call in self.create.await_args_list]
+        self.assertEqual(tools, [[MEMORY_TOOL]] * 3)
+
+    async def test_calls_beyond_limit_in_one_response_are_refused(self):
+        self.calls_per_response = 3
+        answer = await self.client.ask([], [("J'ai trois chats.", [])])
+        self.assertEqual(answer.text, "Enchantée !")
+        self.assertEqual(self.client.memory.run.await_count, 2)
+        results = self.create.await_args_list[-1].kwargs["messages"][-1]["content"]
+        self.assertEqual([result["is_error"] for result in results], [False, False, True])
 
 
 if __name__ == "__main__":

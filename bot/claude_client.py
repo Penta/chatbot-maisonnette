@@ -235,11 +235,14 @@ class ClaudeClient:
                 pauses += 1
                 follow_up = []
             # Appel à l'outil « memoire » : le bot l'exécute et renvoie le résultat. Une fois la limite
-            # d'opérations atteinte, un dernier tour lui demande de répondre, puis la boucle s'arrête.
+            # d'opérations atteinte, plus aucun outil n'est utilisable : le dernier appel répond forcément
+            # en texte. Le choix est interdit plutôt que l'outil retiré, qui ferait réécrire tout le cache.
             elif last.stop_reason == "tool_use" and self.memory and operations <= self.settings.memory_max_operations:
                 results = await self._run_tools(last, operations)
                 follow_up = [{"role": "user", "content": results}]
                 operations += len(results)
+                if operations >= self.settings.memory_max_operations:
+                    params = {**params, "tool_choice": {"type": "none"}}
             else:
                 break
             # Réponse renvoyée telle quelle, réflexion comprise : l'API l'exige pour continuer.
