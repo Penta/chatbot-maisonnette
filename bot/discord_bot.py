@@ -761,6 +761,10 @@ class ChatBot(commands.Bot):
         except (OSError, ValueError) as exc:
             logger.warning("%s illisible, ignoré : %s", self._waiting_file, exc)
             return
+        # Gardés en mémoire pendant les téléchargements : un message arrivé entre-temps réécrit le fichier,
+        # qui doit encore les contenir si le bot s'arrête avant leur reprise.
+        keys = {(channel_id, message_id) for channel_id, message_id in saved}
+        self._waiting |= keys
         messages = []
         for channel_id, message_id in saved:
             try:
@@ -768,13 +772,16 @@ class ChatBot(commands.Bot):
                 messages.append(await channel.fetch_message(message_id))
             except discord.HTTPException:
                 pass  # message supprimé, salon inaccessible…
-        self._waiting.clear()
+        self._waiting -= keys  # pas les messages arrivés pendant les téléchargements, toujours en attente
         self._save_waiting()
         if messages:
             logger.info("%d message(s) resté(s) sans réponse avant le redémarrage : reprise.", len(messages))
             # En parallèle, comme à leur arrivée : ceux du salon dédié sont regroupés.
-            await asyncio.gather(*(self.on_message(m) for m in sorted(messages, key=lambda m: m.id)),
-                                 return_exceptions=True)
+            ordered = sorted(messages, key=lambda m: m.id)
+            results = await asyncio.gather(*(self.on_message(m) for m in ordered), return_exceptions=True)
+            for message, result in zip(ordered, results):
+                if isinstance(result, Exception):
+                    logger.error("Reprise du message %d impossible", message.id, exc_info=result)
 
     # ------------------------------------------------------------- réactions
 

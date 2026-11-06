@@ -27,6 +27,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les membres savent qu'un administrateur peut effacer leur fiche.** La question d'activation de la mémoire et la note sous la fiche dans `/memoire` ne parlaient que de supprimer des lignes : elles disent maintenant tout ce que les administrateurs peuvent faire. Rien à régler.
 
+- **La reprise au démarrage ne perd plus de messages en attente.** Un message reçu pendant la relecture de `waiting_messages.json` pouvait en disparaître, ou en faire disparaître d'autres, et un nouveau redémarrage les laissait sans réponse. Une reprise qui échoue est aussi notée dans le log. Rien à régler.
+
 ---
 
 ## Version 5.13
