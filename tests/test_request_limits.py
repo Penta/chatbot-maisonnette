@@ -162,5 +162,36 @@ class TooLargeTest(unittest.IsolatedAsyncioTestCase):
                          "Ces fichiers sont trop lourds pour moi tous ensemble, renvoie-les un par un.")
 
 
+class WebToolsTest(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def response(stop_reason: str) -> SimpleNamespace:
+        usage = SimpleNamespace(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0,
+                                cache_read_input_tokens=0, server_tool_use=None)
+        return SimpleNamespace(stop_reason=stop_reason, model="modele", usage=usage,
+                               content=[SimpleNamespace(type="text", text="Réponse")])
+
+    async def test_limits_hold_for_the_whole_message(self):
+        # L'API ne compte d'un appel à l'autre que les appels directs : sans allowed_callers, ceux lancés
+        # depuis le filtrage automatique repartiraient de zéro à chaque relance.
+        client = ClaudeClient.__new__(ClaudeClient)  # sans __init__ : pas de client Anthropic à créer
+        client.settings = SimpleNamespace(
+            model="modele", max_tokens=100, api_timeout=1, web_search=True, web_max_uses=3, presence=False,
+            thinking=False, effort=None, price_input_per_mtok=None, price_output_per_mtok=None,
+            price_web_search_per_1000=10.0)
+        client.memory = None
+        client.personality = lambda: "Tu es Rika."
+        create = mock.AsyncMock(side_effect=[self.response("pause_turn"), self.response("end_turn")])
+        client._client = SimpleNamespace(messages=SimpleNamespace(create=create))
+        await client.ask([], [("Bonjour", [])])
+        first, second = (call.kwargs["tools"] for call in create.await_args_list)
+        self.assertEqual(first, [
+            {"type": "web_search_20260209", "name": "web_search", "max_uses": 3, "allowed_callers": ["direct"]},
+            {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 3, "allowed_callers": ["direct"],
+             "max_content_tokens": 10_000},
+        ])
+        # Mêmes outils à chaque appel : l'API l'exige pour reprendre, et le cache de prompt est préservé.
+        self.assertEqual(second, first)
+
+
 if __name__ == "__main__":
     unittest.main()

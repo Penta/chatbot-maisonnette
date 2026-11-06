@@ -29,6 +29,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **La reprise au démarrage ne perd plus de messages en attente.** Un message reçu pendant la relecture de `waiting_messages.json` pouvait en disparaître, ou en faire disparaître d'autres, et un nouveau redémarrage les laissait sans réponse. Une reprise qui échoue est aussi notée dans le log. Rien à régler.
 
+- **`WEB_MAX_USES` limite vraiment les recherches et les pages lues par message.** La limite pouvait repartir de zéro à chaque note de mémoire, ce qui multipliait le coût d'un message. Le texte d'une page lue est aussi limité à environ 10 000 tokens. Rien à régler.
+
 ---
 
 ## Version 5.13

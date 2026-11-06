@@ -30,6 +30,9 @@ TRUNCATED_ERROR = ("Ma réponse a été coupée avant que j'aie pu l'écrire. Si
 
 # Nombre maximal de relances quand l'API met la réponse en pause pendant les recherches.
 MAX_CONTINUATIONS = 3
+# Taille maximale du texte d'une page lue, renvoyé à chaque appel suivant du même message (les PDF n'ont pas
+# de limite : l'API ne l'applique qu'au texte).
+WEB_PAGE_MAX_TOKENS = 10_000
 
 
 class ClaudeError(UserFacingError):
@@ -207,10 +210,15 @@ class ClaudeClient:
             params["extra_body"] = {"output_config": {"effort": self.settings.effort}}
         tools: list[dict] = []
         if self.settings.web_search:
-            # Outils exécutés par Anthropic : leurs appels se font sans nous.
+            # Outils exécutés par Anthropic : leurs appels se font sans nous. L'API compte max_uses sur tout
+            # le message, relances comprises, mais seulement les appels directs : sans allowed_callers, ceux
+            # du filtrage automatique repartiraient de zéro à chaque relance. Ces outils ne changent pas
+            # en cours de message : l'API l'exige pour reprendre un appel en attente, et le cache est préservé.
             tools += [
-                {"type": "web_search_20260209", "name": "web_search", "max_uses": self.settings.web_max_uses},
-                {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses},
+                {"type": "web_search_20260209", "name": "web_search", "max_uses": self.settings.web_max_uses,
+                 "allowed_callers": ["direct"]},
+                {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses,
+                 "allowed_callers": ["direct"], "max_content_tokens": WEB_PAGE_MAX_TOKENS},
             ]
         if self.memory:
             tools.append(MEMORY_TOOL)  # exécuté par le bot : voir _run_tools
