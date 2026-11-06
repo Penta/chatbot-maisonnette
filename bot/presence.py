@@ -44,7 +44,7 @@ RECENT_CUSTOM_STATUSES = 4  # statuts personnalisés récents, à ne pas répét
 # Variété : chances des derniers types de statut tirés, du plus récent au plus ancien (0 : exclu).
 # Les deux derniers ne peuvent pas revenir, le troisième revient deux fois moins souvent.
 RECENT_KIND_FACTORS = (0, 0, 0.5)
-GAME_ATTEMPTS = 5  # jeux essayés avant d'abandonner (fiche introuvable, jeu pas sorti, pour adultes…)
+GAME_ATTEMPTS = 8  # jeux essayés avant d'abandonner (fiche introuvable, jeu pas sorti, pour adultes…)
 DND_REPLY_MINUTES = (5, 15)  # délai de réponse en « Ne pas déranger »
 
 # Durée de chaque statut, tirée au sort entre ces bornes.
