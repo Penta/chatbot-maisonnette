@@ -10,7 +10,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from bot.presence import Kind, PresenceManager, Status, format_duration
-from bot.presence_sources import Track
+from bot.presence_sources import PresenceSources, Track
 
 UTC = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
@@ -148,6 +148,24 @@ class StatusDictTest(unittest.TestCase):
 
     def test_empty_fields_left_out(self):
         self.assertEqual(Status(Kind.ONLINE).to_dict(), {"kind": "en_ligne"})
+
+
+class GameDetailsTest(unittest.IsolatedAsyncioTestCase):
+    async def details(self, **fields):
+        info = {"type": "game", "name": "Celeste", **fields}
+        response = {"42": {"success": True, "data": info}}
+        with mock.patch("bot.presence_sources.get_json", mock.AsyncMock(return_value=response)):
+            return await PresenceSources.game_details(42)
+
+    async def test_unreleased_game_rejected(self):
+        self.assertIsNone(await self.details(release_date={"coming_soon": True, "date": "2027"}))
+
+    async def test_released_game_kept(self):
+        game = await self.details(release_date={"coming_soon": False, "date": "25 janv. 2018"})
+        self.assertEqual(game.name, "Celeste")
+
+    async def test_missing_release_date_counts_as_released(self):
+        self.assertEqual((await self.details()).name, "Celeste")
 
 
 class RestoreTest(unittest.IsolatedAsyncioTestCase):

@@ -20,6 +20,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Désactiver la mémoire n'efface plus les sources d'un autre membre.** Un membre qui prenait le pseudo d'un autre avant de désactiver sa mémoire faisait remplacer par « un membre » le nom de cet autre dans toutes les fiches. Un nom porté par deux membres est maintenant laissé, et noté dans le log.
 
+- **Rika ne joue plus à un jeu Steam pas encore sorti.** Les jeux annoncés sur la boutique sont maintenant écartés du statut « joue à », comme les jeux pour adultes. Rien à régler.
+
 ---
 
 ## Version 5.13

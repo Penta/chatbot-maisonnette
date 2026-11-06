@@ -44,7 +44,7 @@ RECENT_CUSTOM_STATUSES = 4  # statuts personnalisés récents, à ne pas répét
 # Variété : chances des derniers types de statut tirés, du plus récent au plus ancien (0 : exclu).
 # Les deux derniers ne peuvent pas revenir, le troisième revient deux fois moins souvent.
 RECENT_KIND_FACTORS = (0, 0, 0.5)
-GAME_ATTEMPTS = 5  # jeux essayés avant d'abandonner (fiche introuvable, jeu pour adultes…)
+GAME_ATTEMPTS = 5  # jeux essayés avant d'abandonner (fiche introuvable, jeu pas sorti, pour adultes…)
 DND_REPLY_MINUTES = (5, 15)  # délai de réponse en « Ne pas déranger »
 
 # Durée de chaque statut, tirée au sort entre ces bornes.
@@ -465,7 +465,7 @@ class PresenceManager:
         return [(Status(kind), seconds / speed)]
 
     async def pick_game(self) -> Game | None:
-        """Jeu au hasard dans toute la boutique Steam, en écartant les jeux pour adultes."""
+        """Jeu au hasard dans toute la boutique Steam, en écartant les jeux pas sortis ou pour adultes."""
         for appid in random.sample(self.sources.games, min(GAME_ATTEMPTS, len(self.sources.games))):
             try:
                 game = await self.sources.game_details(appid)
@@ -474,7 +474,7 @@ class PresenceManager:
                 return None
             if game:
                 return game
-            logger.info("Jeu Steam %s écarté (introuvable, pas un jeu ou pour adultes).", appid)
+            logger.info("Jeu Steam %s écarté (introuvable, pas un jeu, pas sorti ou pour adultes).", appid)
         return None
 
     async def write_custom_status(self, kind: Kind, seconds: int) -> str | None:

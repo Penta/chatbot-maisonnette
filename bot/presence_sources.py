@@ -181,13 +181,15 @@ class PresenceSources:
 
     @staticmethod
     async def game_details(appid: int) -> Game | None:
-        """Fiche d'un jeu sur la boutique, ou None s'il ne convient pas (introuvable, pas un jeu, pour adultes)."""
+        """Fiche d'un jeu sur la boutique, ou None s'il ne convient pas (introuvable, pas un jeu, pas sorti, pour adultes)."""
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             data = await get_json(session, "GET", STEAM_DETAILS_URL,
                                   params={"appids": str(appid), "l": "french", "cc": "fr"})
         entry = data.get(str(appid)) or {}
         info = entry.get("data") if entry.get("success") else None
         if not info or info.get("type") != "game" or not info.get("name"):
+            return None
+        if (info.get("release_date") or {}).get("coming_soon"):
             return None
         descriptors = set((info.get("content_descriptors") or {}).get("ids") or [])
         try:
