@@ -33,6 +33,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une erreur sur des messages groupés prévient tous leurs auteurs.** Seul le dernier auteur était prévenu que ses messages étaient perdus. Les messages très longs, fichiers texte compris, partent aussi en plusieurs réponses au lieu de faire échouer tout le lot. Rien à régler.
 
+- **Trop de fichiers en attente ne peuvent plus faire tomber le bot.** Au-delà de 200 Mo de fichiers en attente, tous salons confondus, un nouveau message avec fichier est refusé avant téléchargement, et son auteur est invité à le renvoyer plus tard. Rien à régler.
+
 ---
 
 ## Version 5.13

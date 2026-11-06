@@ -18,8 +18,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import VERSION
-from .attachments import (MAX_IMAGES, AttachmentReader, AttachmentRefused, attachments_marker, looks_like_image,
-                          looks_like_pdf, looks_like_text, text_file_marker, text_file_prompt)
+from .attachments import (FILES_QUEUE_FULL, MAX_IMAGES, AttachmentReader, AttachmentRefused, HeldFiles,
+                          attachments_marker, looks_like_image, looks_like_pdf, looks_like_text, readable_size,
+                          text_file_marker, text_file_prompt)
 from .claude_client import ClaudeClient, ClaudeError
 from .commands import memory_command, reset_command, server_memory_command, skip_command
 from .config import Settings, memory_warning
@@ -123,6 +124,11 @@ class PendingMessage:
     images: list[ImageData]  # images, ou un seul PDF
 
     @property
+    def held_size(self) -> int:
+        """Place que ses fichiers occupent en mémoire pendant l'attente (voir HeldFiles)."""
+        return sum(len(image.data) for image in self.images) + len(self.extra)
+
+    @property
     def user_text(self) -> str:
         """Texte envoyé à Claude : les images ou le fichier eux-mêmes remplacent leur repère."""
         line = {key: value for key, value in self.line.items() if key != "attachments"}
@@ -199,6 +205,7 @@ class ChatBot(commands.Bot):
         # Absent ou en « Ne pas déranger » : réponses différées, par salon.
         self._waiters: dict[int, asyncio.Task] = {}  # attente en cours
         self._mentions: dict[int, list[discord.Message]] = {}  # mentions en attente (hors salon dédié)
+        self.held_files = HeldFiles()  # place occupée par les fichiers de tous les messages en attente
         # Messages en attente, gardés sur le disque pour y répondre même après un redémarrage.
         self._waiting_file = settings.history_file.with_name("waiting_messages.json")
         self._waiting: set[tuple[int, int]] = set()  # (salon, message)
@@ -449,6 +456,7 @@ class ChatBot(commands.Bot):
             pending[:] = [p for p in pending if p.message.id not in message_ids]
         if mentions := self._mentions.get(channel_id):
             mentions[:] = [m for m in mentions if m.id not in message_ids]
+        self.held_files.release(*message_ids)
         keys = {(channel_id, message_id) for message_id in message_ids}
         if keys & self._waiting:
             self._waiting -= keys
@@ -468,13 +476,40 @@ class ChatBot(commands.Bot):
             if await self.reply_to_sticker(message) or await self.reply_to_emoji(message):
                 return
 
+        # Place réservée avant tout téléchargement, et jusqu'à la réponse (voir answer_main_channel).
+        if not self.held_files.reserve(message.id, readable_size(message.attachments)):
+            logger.warning("Trop de fichiers en attente : message %s de %s refusé.", message.id, message.author)
+            await self.safe_reply(message, FILES_QUEUE_FULL)
+            return
+        pending = None
+        try:
+            pending = await self.read_main_message(message, content)
+        finally:
+            if pending is None:
+                self.held_files.release(message.id)
+        if pending is None:
+            return
+        self.held_files.settle(message.id, pending.held_size)
+
+        # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
+        # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel
+        # (ou plusieurs, s'ils sont trop lourds ensemble : voir fit_in_request).
+        self._pending.setdefault(message.channel.id, []).append(pending)
+        if not self.available() or message.channel.id in self._waiters:
+            self.answer_later(message, self.answer_main_channel)
+            return
+        await self.answer_main_channel(message.channel)
+
+    async def read_main_message(self, message: discord.Message, content: str) -> PendingMessage | None:
+        """Télécharge ce qui accompagne un message du salon dédié et le prépare pour Claude, ou renvoie None
+        s'il n'y a rien à lire ou si une pièce jointe est refusée (l'auteur a alors été prévenu)."""
         forward, forward_images = await self.read_forward(message)
         if not (content or message.attachments or message.stickers or forward):
-            return  # sondage, transfert d'un message vide… : rien à lire
+            return None  # sondage, transfert d'un message vide… : rien à lire
 
         attachments = await self.read_attachments(message)
         if attachments is False:
-            return  # pièce jointe refusée, l'utilisateur a été prévenu
+            return None  # pièce jointe refusée, l'utilisateur a été prévenu
         images, text_file = attachments
 
         # Les images du message cité ne sont utilisées que si le message n'en contient pas lui-même.
@@ -496,15 +531,7 @@ class ChatBot(commands.Bot):
             markers.append(text_file_marker(text_file[0]))
         if markers:
             line["attachments"] = markers
-
-        # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
-        # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel
-        # (ou plusieurs, s'ils sont trop lourds ensemble : voir fit_in_request).
-        self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, line, extra, images))
-        if not self.available() or message.channel.id in self._waiters:
-            self.answer_later(message, self.answer_main_channel)
-            return
-        await self.answer_main_channel(message.channel)
+        return PendingMessage(message, line, extra, images)
 
     async def answer_main_channel(self, channel: discord.abc.Messageable, late: Status | None = None) -> None:
         """Répond aux messages en attente du salon dédié : en une fois, ou en plusieurs réponses à la suite
@@ -524,19 +551,19 @@ class ChatBot(commands.Bot):
                                 "d'abord, les autres ensuite.", channel, count, len(pending))
                 batch = pending[:count]
                 del pending[:count]
-                last = batch[-1].message
-                if len(batch) > 1:
-                    logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
-                # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
-                parts = [(p.user_text, p.images) for p in batch]
-                lines = [p.line for p in batch]
-                notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
-                if note := self.presence_note():
-                    notes.append(note)
-                for note in reversed(notes):
-                    parts.insert(0, (note, []))
-                    lines.insert(0, {"content": note})
-                try:
+                try:  # ces messages ont quitté la file : le finally les retire de l'attente, quoi qu'il arrive
+                    last = batch[-1].message
+                    if len(batch) > 1:
+                        logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
+                    # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
+                    parts = [(p.user_text, p.images) for p in batch]
+                    lines = [p.line for p in batch]
+                    notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
+                    if note := self.presence_note():
+                        notes.append(note)
+                    for note in reversed(notes):
+                        parts.insert(0, (note, []))
+                        lines.insert(0, {"content": note})
                     async with typing(channel):
                         try:
                             notes = await self.member_notes([p.message for p in batch])
@@ -551,12 +578,18 @@ class ChatBot(commands.Bot):
                             continue
                 finally:
                     self.forget_waiting(*(p.message for p in batch))
+                    self.held_files.release(*(p.message.id for p in batch))
                 await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
             await self.send_answer(last, answer.text, reply=split)
 
     async def handle_mention(self, message: discord.Message) -> None:
         # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
         # puis partent ensemble dans un seul appel (ou plusieurs, si elles sont trop lourdes ensemble).
+        # Leurs fichiers sont téléchargés au moment de répondre : leur place est réservée dès maintenant.
+        if not self.held_files.reserve(message.id, readable_size(message.attachments)):
+            logger.warning("Trop de fichiers en attente : mention %s de %s refusée.", message.id, message.author)
+            await self.safe_reply(message, FILES_QUEUE_FULL)
+            return
         self._mentions.setdefault(message.channel.id, []).append(message)
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_mentions)
@@ -576,6 +609,7 @@ class ChatBot(commands.Bot):
                 await self.answer_mention(batch, late)
             finally:
                 self.forget_waiting(*batch)
+                self.held_files.release(*(m.id for m in batch))
 
     async def answer_mention(self, mentions: list[discord.Message], late: Status | None = None) -> None:
         """Hors du salon dédié : répond aux mentions d'un même salon en lisant les messages récents, en une

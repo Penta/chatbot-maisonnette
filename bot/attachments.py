@@ -26,6 +26,41 @@ MAX_IMAGES = 4
 MAX_IMAGES_AT_ONCE = 1
 # Délai d'un téléchargement depuis Discord, en secondes (sinon c'est celui d'aiohttp : 5 minutes).
 DOWNLOAD_TIMEOUT = 30
+# Fichiers gardés en mémoire pour les messages en attente, tous salons confondus. Sans limite, des dizaines
+# de PDF reçus pendant une absence feraient tomber le bot, et de nouveau à chaque reprise au redémarrage.
+HELD_FILES_MAX_BYTES = 200_000_000
+FILES_QUEUE_FULL = "J'ai déjà trop de fichiers en attente : renvoie ton message un peu plus tard, s'il te plaît."
+
+
+class HeldFiles:
+    """Place occupée par les fichiers des messages en attente. Réservée d'après la taille annoncée par Discord,
+    avant le téléchargement : les messages reçus en même temps ne peuvent pas dépasser ensemble le budget."""
+
+    def __init__(self, limit: int = HELD_FILES_MAX_BYTES):
+        self.limit = limit
+        self._sizes: dict[int, int] = {}  # message : octets
+
+    @property
+    def total(self) -> int:
+        return sum(self._sizes.values())
+
+    def reserve(self, message_id: int, size: int) -> bool:
+        """Réserve la place d'un message, ou renvoie False s'il n'y en a plus. Un message sans fichier passe toujours."""
+        if size and self.total + size > self.limit:
+            return False
+        self._sizes[message_id] = size
+        return True
+
+    def settle(self, message_id: int, size: int) -> None:
+        """Message téléchargé : compte sa taille réelle (une photo réduite pèse moins que l'original).
+        Sans effet si sa place a déjà été libérée (message supprimé pendant le téléchargement)."""
+        if message_id in self._sizes:
+            self._sizes[message_id] = size
+
+    def release(self, *message_ids: int) -> None:
+        """Libère la place de ces messages (sans effet pour ceux qui n'en ont plus)."""
+        for message_id in message_ids:
+            self._sizes.pop(message_id, None)
 
 
 class AttachmentRefused(UserFacingError):
@@ -52,6 +87,11 @@ def looks_like_text(attachment: discord.Attachment) -> bool:
 
 def looks_like_pdf(attachment: discord.Attachment) -> bool:
     return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
+
+
+def readable_size(attachments: list[discord.Attachment]) -> int:
+    """Taille annoncée des fichiers que le bot peut lire : les autres (vidéos…) ne sont jamais téléchargés."""
+    return sum(a.size for a in attachments if looks_like_image(a) or looks_like_pdf(a) or looks_like_text(a))
 
 
 def text_file_prompt(name: str, content: str) -> str:

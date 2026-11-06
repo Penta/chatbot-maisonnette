@@ -68,9 +68,9 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
             await release.wait()
         bot.answer_mention = answer
         channel = mock.Mock(id=CHANNEL_ID)
-        tasks = [asyncio.create_task(ChatBot.handle_mention(bot, mock.Mock(id=1, channel=channel)))]
+        tasks = [asyncio.create_task(ChatBot.handle_mention(bot, mock.Mock(id=1, channel=channel, attachments=[])))]
         await asyncio.sleep(0)
-        tasks += [asyncio.create_task(ChatBot.handle_mention(bot, mock.Mock(id=i, channel=channel)))
+        tasks += [asyncio.create_task(ChatBot.handle_mention(bot, mock.Mock(id=i, channel=channel, attachments=[])))
                   for i in range(2, 11)]
         await asyncio.sleep(0)
         release.set()
