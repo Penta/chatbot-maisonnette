@@ -9,6 +9,7 @@ import json
 import logging
 import random
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -52,6 +53,15 @@ DEPARTURE_WINDOW = timedelta(minutes=3)
 MAX_BOT_REPLIES = 5
 # Passé ce délai sans message d'un bot dans le salon, le compte repart de zéro.
 BOT_STREAK_RESET = timedelta(minutes=10)
+UNEXPECTED_ERROR = "Désolé, une erreur inattendue est survenue."
+
+
+async def warn_authors(reply: Callable[[discord.Message, str], Awaitable[None]],
+                       messages: list[discord.Message], text: str) -> None:
+    """Un appel à Claude a échoué : ces messages n'auront pas de réponse. Chaque auteur est prévenu, une
+    seule fois, sur son dernier message du lot : il sait qu'il doit le renvoyer."""
+    for message in {m.author.id: m for m in messages}.values():
+        await reply(message, text)
 
 
 def author_name(user: discord.User | discord.Member) -> str:
@@ -489,7 +499,7 @@ class ChatBot(commands.Bot):
 
         # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
         # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel
-        # (ou plusieurs, si leurs pièces jointes sont trop lourdes ensemble : voir fit_in_request).
+        # (ou plusieurs, s'ils sont trop lourds ensemble : voir fit_in_request).
         self._pending.setdefault(message.channel.id, []).append(PendingMessage(message, line, extra, images))
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_main_channel)
@@ -498,7 +508,7 @@ class ChatBot(commands.Bot):
 
     async def answer_main_channel(self, channel: discord.abc.Messageable, late: Status | None = None) -> None:
         """Répond aux messages en attente du salon dédié : en une fois, ou en plusieurs réponses à la suite
-        si leurs pièces jointes ne tiennent pas dans une seule requête."""
+        s'ils ne tiennent pas dans une seule requête."""
         pending = self._pending.setdefault(channel.id, [])
         split = False  # réponse découpée : chaque morceau cite son dernier message
         # Jusqu'au dernier message : une réponse différée est la seule tâche pour tous ceux de son attente.
@@ -507,10 +517,10 @@ class ChatBot(commands.Bot):
                 if not pending:
                     return  # déjà parti avec un message précédent
                 pending.sort(key=lambda p: p.message.id)
-                count = fit_in_request([p.images for p in pending])
+                count = fit_in_request([p.images for p in pending], [p.user_text for p in pending])
                 if count < len(pending):
                     split = True
-                    logger.info("Pièces jointes trop lourdes pour une seule réponse dans #%s : %s message(s) sur %s "
+                    logger.info("Messages trop lourds pour une seule réponse dans #%s : %s message(s) sur %s "
                                 "d'abord, les autres ensuite.", channel, count, len(pending))
                 batch = pending[:count]
                 del pending[:count]
@@ -533,11 +543,11 @@ class ChatBot(commands.Bot):
                             answer = await self.claude.ask(self.history.get(channel.id), parts,
                                                            emojis=emoji_names(last.guild), member_notes=notes)
                         except ClaudeError as exc:
-                            await self.safe_reply(last, exc.user_message)
+                            await warn_authors(self.safe_reply, [p.message for p in batch], exc.user_message)
                             continue
                         except Exception:
                             logger.exception("Erreur inattendue pendant le traitement d'un message")
-                            await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
+                            await warn_authors(self.safe_reply, [p.message for p in batch], UNEXPECTED_ERROR)
                             continue
                 finally:
                     self.forget_waiting(*(p.message for p in batch))
@@ -546,7 +556,7 @@ class ChatBot(commands.Bot):
 
     async def handle_mention(self, message: discord.Message) -> None:
         # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
-        # puis partent ensemble dans un seul appel (ou plusieurs, si leurs pièces jointes sont trop lourdes).
+        # puis partent ensemble dans un seul appel (ou plusieurs, si elles sont trop lourdes ensemble).
         self._mentions.setdefault(message.channel.id, []).append(message)
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_mentions)
@@ -569,7 +579,7 @@ class ChatBot(commands.Bot):
 
     async def answer_mention(self, mentions: list[discord.Message], late: Status | None = None) -> None:
         """Hors du salon dédié : répond aux mentions d'un même salon en lisant les messages récents, en une
-        fois, ou en plusieurs réponses à la suite si leurs pièces jointes ne tiennent pas dans une seule requête."""
+        fois, ou en plusieurs réponses à la suite si elles ne tiennent pas dans une seule requête."""
         channel = mentions[-1].channel
         answered, parts = [], []
         for message in mentions:
@@ -582,10 +592,10 @@ class ChatBot(commands.Bot):
         split = False  # réponse découpée : chaque morceau cite sa dernière mention
         # Liste vide : pièces jointes refusées, les auteurs ont été prévenus.
         while parts:
-            count = fit_in_request([images for _, images in parts])
+            count = fit_in_request([images for _, images in parts], [text for text, _ in parts])
             if count < len(parts):
                 split = True
-                logger.info("Pièces jointes trop lourdes pour une seule réponse dans #%s : %s mention(s) sur %s "
+                logger.info("Mentions trop lourdes pour une seule réponse dans #%s : %s mention(s) sur %s "
                             "d'abord, les autres ensuite.", channel, count, len(parts))
             group, group_parts = answered[:count], parts[:count]
             del answered[:count], parts[:count]
@@ -613,11 +623,11 @@ class ChatBot(commands.Bot):
                     answer = await self.claude.ask([], group_parts, emojis=emoji_names(last.guild), cache_history=False,
                                                    member_notes=await self.member_notes(group))
                 except ClaudeError as exc:
-                    await self.safe_reply(last, exc.user_message)
+                    await warn_authors(self.safe_reply, group, exc.user_message)
                     continue
                 except Exception:
                     logger.exception("Erreur inattendue pendant le traitement d'une mention")
-                    await self.safe_reply(last, "Désolé, une erreur inattendue est survenue.")
+                    await warn_authors(self.safe_reply, group, UNEXPECTED_ERROR)
                     continue
             # En retard ou découpée, la réponse cite la dernière mention : on sait à quoi elle répond.
             await self.send_answer(last, answer.text, reply=late is not None or split)

@@ -8,7 +8,7 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 
 ### Conversation
 
-- **Salon dédié** : le bot répond à tous les messages du salon choisi (`CHANNEL_ID`). Il se souvient des derniers échanges, même après un redémarrage. Les messages envoyés pendant qu'il écrit reçoivent une seule réponse groupée, comme le ferait quelqu'un qui lit plusieurs messages d'un coup ; s'ils contiennent des fichiers trop lourds ensemble, il y répond en plusieurs fois, chaque réponse citant son message.
+- **Salon dédié** : le bot répond à tous les messages du salon choisi (`CHANNEL_ID`). Il se souvient des derniers échanges, même après un redémarrage. Les messages envoyés pendant qu'il écrit reçoivent une seule réponse groupée, comme le ferait quelqu'un qui lit plusieurs messages d'un coup ; s'ils sont trop lourds ensemble (images, PDF ou fichiers texte), il y répond en plusieurs fois, chaque réponse citant son message. Si un appel échoue, chaque auteur concerné en est prévenu.
 - **Mentions ailleurs** : dans les autres salons, il répond quand on le mentionne, en lisant les derniers messages pour comprendre la discussion (sans mémoire d'un appel à l'autre). Comme dans son salon, les mentions reçues dans un salon pendant qu'il écrit reçoivent une seule réponse groupée.
 - **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et ses images. Il lit aussi les messages transférés dans son salon.
 - **Messages modifiés ou supprimés** : sa mémoire suit. Un message supprimé est oublié, un message modifié prend son nouveau texte.

@@ -80,6 +80,13 @@ class BudgetTest(unittest.TestCase):
         # Une image compte pour une page : 100 au plus par requête.
         self.assertEqual(fit_in_request([[image()] * 4] * 30), 25)
 
+    def test_text_limit(self):
+        # 100 Ko : la taille maximale d'un fichier texte joint. Le premier message part toujours.
+        big = "x" * 100_000
+        self.assertEqual(fit_in_request([[]] * 4, [big] * 4), 3)
+        self.assertEqual(fit_in_request([[], []], ["x" * 400_000, "court"]), 1)
+        self.assertEqual(fit_in_request([[]] * 3, ["court"] * 3), 3)
+
 
 @mock.patch("bot.discord_bot.typing", lambda channel: contextlib.nullcontext())
 @mock.patch("bot.discord_bot.emoji_names", lambda guild: [])
@@ -124,6 +131,33 @@ class MainChannelTest(unittest.IsolatedAsyncioTestCase):
         bot.send_answer.assert_awaited_once_with(second.message, "Réponse", reply=True)
         bot.history.add_exchange.assert_awaited_once()
         self.assertEqual(bot.forget_waiting.call_args_list, [mock.call(first.message), mock.call(second.message)])
+
+    async def test_long_text_files_split(self):
+        # Quatre fichiers texte de 100 Ko, sans image ni PDF : trop longs pour partir dans la même requête.
+        bot = fake_bot()
+        channel = mock.Mock(id=CHANNEL_ID)
+        messages = [pending(i, channel, []) for i in (1, 2, 3, 4)]
+        for waiting in messages:
+            waiting.extra = "x" * 100_000
+        bot._pending[CHANNEL_ID] = messages
+        await ChatBot.answer_main_channel(bot, channel)
+        self.assertEqual([len(call.args[1]) for call in bot.claude.ask.await_args_list], [3, 1])
+        self.assertEqual([call.args[0].id for call in bot.send_answer.await_args_list], [3, 4])
+
+    async def test_error_warns_every_author(self):
+        # Deux messages d'Alice et un de Bob : chacun est prévenu, sur son dernier message du lot.
+        bot = fake_bot()
+        channel = mock.Mock(id=CHANNEL_ID)
+        batch = [pending(i, channel, []) for i in (1, 2, 3)]
+        batch[0].message.author.id = batch[2].message.author.id = 100
+        batch[1].message.author.id = 200
+        bot._pending[CHANNEL_ID] = list(batch)
+        bot.claude.ask.side_effect = ClaudeError("Erreur.")
+        await ChatBot.answer_main_channel(bot, channel)
+        replied = {call.args[0].id: call.args[1] for call in bot.safe_reply.await_args_list}
+        self.assertEqual(replied, {2: "Erreur.", 3: "Erreur."})
+        self.assertEqual(bot.safe_reply.await_count, 2)
+        bot.history.add_exchange.assert_not_awaited()
 
     async def test_deferred_answer_handles_all(self):
         # Absent : une seule tâche attend pour tous les messages du salon, et doit répondre à chacun.

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import zip_longest
 
 PDF_MEDIA_TYPE = "application/pdf"
 
@@ -12,6 +14,9 @@ PDF_MEDIA_TYPE = "application/pdf"
 # occuperaient beaucoup de mémoire le temps de l'envoi.
 REQUEST_MAX_BASE64 = 24_000_000  # octets une fois encodés en base64 (+33 %), soit 18 Mo bruts
 REQUEST_MAX_PAGES = 100  # pages de PDF et images, jusqu'à plusieurs milliers de tokens chacune
+# Caractères de texte par requête, fichiers texte joints compris : environ 100 000 tokens, soit trois fichiers
+# à leur taille maximale (TEXT_FILE_MAX_BYTES). Laisse de la place à l'historique, et limite le coût d'un appel.
+REQUEST_MAX_TEXT = 350_000
 
 
 @dataclass
@@ -37,14 +42,15 @@ def request_weight(attachments: list[ImageData]) -> tuple[int, int]:
     return sum(base64_size(len(a.data)) for a in attachments), sum(a.pages for a in attachments)
 
 
-def fit_in_request(messages: list[list[ImageData]]) -> int:
+def fit_in_request(messages: list[list[ImageData]], texts: Sequence[str] = ()) -> int:
     """Nombre de messages, pris dans l'ordre, qui partent ensemble dans la prochaine requête : tant que
-    leurs pièces jointes (une liste par message) tiennent dans le budget. Le premier part toujours, même
-    seul au-delà du budget : il tient déjà dans les limites de l'API (voir PDF_MAX_BYTES, MAX_IMAGES)."""
-    size = pages = 0
-    for count, attachments in enumerate(messages):
+    leurs pièces jointes (une liste par message) et leurs textes tiennent dans le budget. Le premier part
+    toujours, même seul au-delà du budget : il tient déjà dans les limites de l'API (voir PDF_MAX_BYTES,
+    MAX_IMAGES, TEXT_FILE_MAX_BYTES)."""
+    size = pages = characters = 0
+    for count, (attachments, text) in enumerate(zip_longest(messages, texts, fillvalue="")):
         message_size, message_pages = request_weight(attachments)
-        size, pages = size + message_size, pages + message_pages
-        if count and (size > REQUEST_MAX_BASE64 or pages > REQUEST_MAX_PAGES):
+        size, pages, characters = size + message_size, pages + message_pages, characters + len(text)
+        if count and (size > REQUEST_MAX_BASE64 or pages > REQUEST_MAX_PAGES or characters > REQUEST_MAX_TEXT):
             return count
     return len(messages)

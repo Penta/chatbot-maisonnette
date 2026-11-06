@@ -6,6 +6,7 @@ import contextlib
 import unittest
 from unittest import mock
 
+from bot.claude_client import ClaudeError
 from bot.discord_bot import ChatBot
 from bot.media import PDF_MEDIA_TYPE, ImageData
 
@@ -138,6 +139,23 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         await ChatBot.answer_mention(bot, [first, second])
         self.assertEqual(bot.claude.ask.await_args.args[1], [("texte", [])])
         bot.member_notes.assert_awaited_once_with([second])
+
+    async def test_error_warns_every_author(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        first, second = fake_mention(1, "salut", channel), fake_mention(2, "coucou", channel)
+        bot.claude.ask.side_effect = ClaudeError("Erreur.")
+        await ChatBot.answer_mention(bot, [first, second])
+        self.assertCountEqual(bot.safe_reply.await_args_list, [mock.call(first, "Erreur."), mock.call(second, "Erreur.")])
+
+    async def test_long_text_files_split(self):
+        # Quatre mentions avec un fichier texte de 100 Ko : trop longues pour partir dans la même requête.
+        bot = fake_bot()
+        channel = fake_channel([])
+        mentions = [fake_mention(i, "lis ça", channel) for i in (1, 2, 3, 4)]
+        bot.mention_part = mock.AsyncMock(return_value=("x" * 100_000, []))
+        await ChatBot.answer_mention(bot, mentions)
+        self.assertEqual([len(call.args[1]) for call in bot.claude.ask.await_args_list], [3, 1])
 
     async def test_heavy_mentions_split(self):
         # Deux mentions avec chacune un PDF de 15 Mo : trop lourdes pour une seule requête, elles reçoivent
