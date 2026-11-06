@@ -25,6 +25,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une « version » invalide dans `registre.json` n'empêche plus le bot de démarrer.** Le bot démarre avec la mémoire des membres coupée et le log indique quoi corriger : `version` doit être un nombre entier, sans guillemets. Corrige le fichier puis redémarre.
 
+- **Les membres savent qu'un administrateur peut effacer leur fiche.** La question d'activation de la mémoire et la note sous la fiche dans `/memoire` ne parlaient que de supprimer des lignes : elles disent maintenant tout ce que les administrateurs peuvent faire. Rien à régler.
+
 ---
 
 ## Version 5.13

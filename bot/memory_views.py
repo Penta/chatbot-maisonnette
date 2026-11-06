@@ -34,7 +34,7 @@ VIEW_TIMEOUT = 600
 # laisse ouverte sans limite, mais discord.py l'oublie ensuite et ignore sa validation.
 MODAL_TIMEOUT = 3600
 # Sous la fiche d'un membre, quand il la consulte lui-même.
-ADMINS_NOTE = "Les administrateurs du serveur peuvent aussi voir ta fiche et en supprimer des lignes."
+ADMINS_NOTE = "Les administrateurs du serveur peuvent aussi voir ta fiche, en supprimer des lignes ou l'effacer."
 ERROR_MESSAGE = "Une erreur est survenue. Si ça se reproduit, préviens l'administrateur du bot."
 
 Callback = Callable[[discord.Interaction], Awaitable[None]]
@@ -293,8 +293,8 @@ class MemoryCard:
                     f"sur toi, avec leur nom comme source (« d'après … »). De même, ce que tu lui racontes sur "
                     f"un autre membre qui a activé la mémoire peut être noté dans sa fiche avec ton nom, et il "
                     f"la voit. Ce qui est retenu sert dans la conversation, mais ta fiche n'est jamais récitée "
-                    f"aux autres ; à part toi, seuls les administrateurs du serveur peuvent la voir et en "
-                    f"supprimer des lignes. Avec /memoire, tu pourras la voir, en supprimer des lignes ou désactiver la mémoire.")
+                    f"aux autres ; à part toi, seuls les administrateurs du serveur peuvent la voir, en "
+                    f"supprimer des lignes ou l'effacer. Avec /memoire, tu pourras la voir, en supprimer des lignes ou désactiver la mémoire.")
         await confirm(interaction, self, question, self.enable)
 
     async def enable(self, interaction: discord.Interaction) -> None:

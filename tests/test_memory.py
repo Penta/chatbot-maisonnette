@@ -570,7 +570,7 @@ class ConfirmationTextsTest(MemoryTestCase):
         text = await self.question(target, "ask_enable")
         self.assertIn("ce que d'autres membres lui racontent", text)
         self.assertIn("noté dans sa fiche avec ton nom", text)  # ses propres propos, montrés aux autres
-        self.assertIn("administrateurs du serveur peuvent la voir", text)
+        self.assertIn("administrateurs du serveur peuvent la voir, en supprimer des lignes ou l'effacer", text)
         interaction = mock.Mock()
         interaction.response.is_done.return_value = False
         interaction.response.edit_message = mock.AsyncMock()
@@ -1031,6 +1031,7 @@ class AdminAccessTest(MemoryTestCase):
     def test_own_file_mentions_admins(self):
         own = Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True)
         self.assertIn("administrateurs", self.footer(own))  # fiche vide
+        self.assertIn("en supprimer des lignes ou l'effacer", ADMINS_NOTE)  # tout ce qu'ils peuvent faire
         self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
         self.assertEqual(self.footer(own), f"13/3000 caractères, 1/{MAX_LINES} lignes · {ADMINS_NOTE}")
 
