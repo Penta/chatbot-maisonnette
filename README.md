@@ -30,6 +30,7 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 
 - **Statut Discord** (`PRESENCE=on`) : sous son pseudo, le bot regarde quelques épisodes d'un anime (top 500 d'AniList), écoute quelques morceaux (tops Deezer), joue à un jeu de la boutique Steam, affiche une pensée du moment, ou passe absent ou en « Ne pas déranger » avec une raison qu'il écrit lui-même. Pour varier, un type de statut ne revient pas avant au moins deux autres. Il dort la nuit (`PRESENCE_NIGHT`) et sait ce qu'il est en train de faire quand on lui en parle. Après un redémarrage, il reprend son statut là où il en serait s'il ne s'était pas arrêté.
 - **Absences** : absent, il ne répond qu'à son retour ; en « Ne pas déranger », au bout de 5 à 15 minutes. S'il s'en va en pleine conversation, il prévient d'abord son salon. Les messages en attente ou en cours de réponse sont gardés même après un redémarrage, avec un seul nouvel essai au démarrage. Au-delà de 100 Mo de fichiers en attente, un nouveau message avec fichier est refusé, et son auteur est invité à le renvoyer plus tard.
+- **Messages spontanés** (`SPONTANEOUS_PER_DAY`, désactivés par défaut) : quand il finit son anime ou sa partie de jeu et que personne n'a écrit dans son salon depuis 3 heures, le bot en parle parfois de lui-même (une fois sur trois environ), en s'adressant éventuellement à un membre que le sujet intéresse d'après ses notes. Il peut aussi choisir de ne rien dire. Jamais la nuit, au plus `SPONTANEOUS_PER_DAY` fois par 24 heures, et jamais deux fois de suite sans que quelqu'un ait écrit entre-temps.
 - **Emojis du serveur** : le bot connaît automatiquement tous les emojis du serveur, animés compris, et peut les utiliser dans ses réponses. Un emoji ajouté ou retiré est pris en compte tout de suite.
 
 ### Mémoire des membres
@@ -111,6 +112,7 @@ Tous les réglages se trouvent dans le `.env`, et chacun est expliqué dans `.en
 | `API_TIMEOUT` | Attente maximale d'une réponse, en secondes, relances comprises (une requête trop lente n'est pas relancée) ; le bot prévient au démarrage s'il est trop court pour `MAX_TOKENS` | `90` |
 | `WEB_SEARCH` | Recherche web et lecture de liens (`on` ou `off`) ; prévois alors 40 secondes de plus pour `API_TIMEOUT` (`120` avec `MAX_TOKENS=6000`) | `off` |
 | `PRESENCE` | Statut Discord et absences (`on` ou `off`) ; les `PRESENCE_*` règlent les chances de chaque statut et la nuit | `on` |
+| `SPONTANEOUS_PER_DAY` | Messages spontanés au plus par 24 heures, de 0 (jamais) à 10 ; nécessite `PRESENCE=on` | `0` |
 | `MEMORY` | Mémoire des membres (`on` ou `off`) ; `MEMORY_MEMBER_LIMIT` et `MEMORY_SERVER_LIMIT` règlent la taille des fiches et du fichier général (3000 et 5000 caractères) | `off` |
 | `PDF_MAX_PAGES` | Pages maximales d'un PDF (0 = PDF refusés) | `20` |
 | `PERSONALITY_FILE` | Fichier de la personnalité | `personality_prompt.txt` |
@@ -167,6 +169,7 @@ Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque app
 | `waiting_messages.json` | Messages qui attendent leur réponse, repris après un redémarrage |
 | `presence_sources.json` | Listes d'animes, de musiques et de jeux, mises à jour une fois par jour |
 | `presence_state.json` | Statut Discord en cours, repris après un redémarrage |
+| `spontaneous_messages.json` | Avec `SPONTANEOUS_PER_DAY` : derniers messages spontanés, pour respecter la limite par jour après un redémarrage |
 | `slash_commands.sha256` | Empreinte des commandes slash, pour ne les envoyer à Discord que quand elles changent |
 | `memories/registre.json` | Avec `MEMORY=on` : membres vus par le bot, leurs noms et anciens pseudos, et leurs réglages de la mémoire. Si le fichier est illisible, la mémoire des membres est coupée (comme avec `MEMORY=off`) et le fichier n'est pas modifié : corrige-le d'après le log, puis redémarre le bot. Le supprimer repart de zéro : la mémoire est désactivée pour tous, chacun la réactive avec `/memoire`. À la mise à jour vers la mémoire à activer soi-même, elle reste activée pour les membres qui avaient déjà une fiche et ne l'avaient pas désactivée |
 | `memories/membres/<id>.md`, `memories/serveur.md` | Avec `MEMORY=on` : fiche de chaque membre et fichier général du serveur, tenus par Claude, en UTF-8. Un fichier illisible (enregistré dans un autre encodage, par exemple) est signalé dans le log : le bot continue de répondre, mais n'y écrit plus rien tant qu'il n'est pas corrigé. Après une modification directe sur le disque, redémarre le bot pour que la liste des membres (fiches existantes et surnoms) en tienne compte ; `/memoire` n'a pas besoin de redémarrage |
@@ -193,6 +196,7 @@ bot/attachments.py       pièces jointes des messages : vérification et téléc
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi
 bot/presence.py          statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)
+bot/spontaneous.py       messages spontanés : quand parler de soi-même, et de quoi
 bot/images.py            préparation des images (taille, format)
 bot/gifs.py              GIF du sélecteur de Discord : téléchargement et grille de l'animation
 bot/pdf_files.py         vérification des PDF joints (pages, mot de passe)

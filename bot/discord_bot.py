@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import random
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from .memory_views import reply_error, see_user
 from .models import display_name, is_known, thinking_off
 from .pdf_files import PdfError
 from .presence import PresenceManager, Status
+from .spontaneous import CHANCE, RECENT_AUTHORS, SpontaneousLog, finished_activity, is_silence, occasion_note
 from .text_files import TextFileError
 from .text_utils import split_message
 
@@ -209,6 +211,11 @@ class ChatBot(commands.Bot):
         self.config_error: str | None = None  # salon dédié inutilisable : main.py sort en erreur
         self._memory_warning = memory_warning(settings) if self.memory else None
         self.presence =PresenceManager(self, self.claude, settings) if settings.presence else None
+        # Messages spontanés (voir spontaneous.py) : ils naissent des statuts, rien sans eux.
+        self.spontaneous = None
+        if self.presence and settings.spontaneous_per_day:
+            self.spontaneous = SpontaneousLog(settings.history_file.with_name("spontaneous_messages.json"),
+                                              settings.spontaneous_per_day, settings.presence_speed)
         # Absent ou en « Ne pas déranger » : réponses différées, par salon.
         self._waiters: dict[int, asyncio.Task] = {}  # attente en cours
         self._mentions: dict[int, list[discord.Message]] = {}  # mentions en attente (hors salon dédié)
@@ -272,6 +279,8 @@ class ChatBot(commands.Bot):
                            s.api_timeout, s.max_tokens, " avec la recherche web" if s.web_search else "", needed)
         if self._memory_warning:
             logger.warning("%s", self._memory_warning)  # rappelé dans le message « En ligne »
+        if s.spontaneous_per_day and not self.presence:
+            logger.warning("SPONTANEOUS_PER_DAY est ignoré : les messages spontanés nécessitent PRESENCE=on.")
         if self.presence:
             self.presence.start()
 
@@ -817,8 +826,14 @@ class ChatBot(commands.Bot):
             logger.exception("Erreur inattendue pendant une réponse différée")
 
     async def on_status_change(self, before: Status, after: Status) -> None:
+        if after.available:
+            await self.speak_up(before, after)
+        else:
+            await self.announce_departure(before, after)
+
+    async def announce_departure(self, before: Status, after: Status) -> None:
         """Passe absent ou en « Ne pas déranger » : prévient le salon dédié si une conversation y est en cours."""
-        if not before.available or after.available or self._last_main_message is None:
+        if not before.available or self._last_main_message is None:
             return
         if discord.utils.utcnow() - self._last_main_message > DEPARTURE_WINDOW:
             return
@@ -846,6 +861,60 @@ class ChatBot(commands.Bot):
             except DISCORD_FAILURES as exc:
                 logger.error("Envoi du message d'absence impossible : %s", exc)
                 return
+
+    async def speak_up(self, before: Status, after: Status) -> None:
+        """Vient de finir son anime ou sa partie de jeu : en parle peut-être de lui-même dans le salon dédié, s'il
+        est calme (voir spontaneous.py)."""
+        if not self.spontaneous or not finished_activity(before, after) or random.random() >= CHANCE:
+            return
+        channel = self.get_channel(self.settings.channel_id)
+        if channel is None:
+            return
+        async with self.history.lock(channel.id):
+            # Vérifié sous le verrou : une réponse vient peut-être de partir, ou un message attend la sienne.
+            if (self.presence.status is not after or self._pending.get(channel.id) or self._preparing.get(channel.id)
+                    or channel.id in self._waiters
+                    or not self.spontaneous.allowed(discord.utils.utcnow(), channel.last_message_id)):
+                return
+            note = occasion_note(before, datetime.now(self.settings.timezone))
+            parts = [(text, []) for text in (self.presence_note(), note) if text]
+            try:
+                notes = await self.recent_members_notes(channel)
+                answer = await self.claude.ask(self.history.get(channel.id), parts, emojis=emoji_names(channel.guild),
+                                               member_notes=notes)
+            except ClaudeError as exc:
+                logger.warning("Message spontané non envoyé : %s", exc.user_message)
+                return
+            if is_silence(answer.text):
+                logger.info("Fin de « %s » : rien à dire dans #%s, pas de message spontané.", before.title, channel)
+                return
+            sent = None
+            for chunk in split_message(discord_emojis(short_emojis(answer.text), channel.guild)):
+                try:
+                    sent = await channel.send(chunk)
+                except DISCORD_FAILURES as exc:
+                    logger.error("Envoi du message spontané impossible : %s", exc)
+                    break
+            if sent is None:
+                return
+            self.spontaneous.record(sent.id, discord.utils.utcnow())
+            lines = [{"content": text} for text, _ in parts]
+            await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
+        logger.info("Fin de « %s » : message spontané dans #%s.", before.title, channel)
+
+    async def recent_members_notes(self, channel: discord.abc.Messageable) -> str:
+        """Fiches des derniers membres à avoir écrit dans le salon (vide sans mémoire, ou si Discord ne répond pas)."""
+        if not self.memory:
+            return ""
+        ids: list[int] = []
+        try:
+            async for message in channel.history(limit=RECENT_AUTHORS):
+                if not message.author.bot and message.author.id not in ids:
+                    ids.append(message.author.id)
+        except DISCORD_FAILURES as exc:
+            logger.warning("Derniers messages de #%s illisibles, pas de fiches jointes : %s", channel, exc)
+            return ""
+        return self.memory.notes_for(ids)
 
     def remember_waiting(self, message: discord.Message) -> None:
         key = (message.channel.id, message.id)

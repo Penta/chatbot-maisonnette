@@ -14,6 +14,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika répond avec des mots à un sticker ou un emoji envoyé seul**, au lieu de renvoyer un sticker ou un emoji du serveur au hasard.
 
+- **Rika peut lancer la conversation d'elle-même** quand elle finit son anime ou sa partie de jeu et que le salon est calme depuis 3 heures. Désactivé par défaut : `SPONTANEOUS_PER_DAY` règle le nombre maximum de messages par jour.
+
 - **Rika voit les GIF choisis dans le sélecteur de Discord**, et suit l'animation du début à la fin pour ceux de Klipy. Pour les autres (Giphy, anciens favoris Tenor), elle n'en voit que la première image.
 
 ### Corrections

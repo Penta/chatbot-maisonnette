@@ -197,6 +197,7 @@ class Settings:
     presence_night: tuple[int, int] | None  # heures de début et de fin ; None = pas de nuit
     deezer_playlists: tuple[int, ...]
     steam_api_key: str | None = field(repr=False)
+    spontaneous_per_day: int  # messages spontanés au plus par 24 h (voir spontaneous.py) ; 0 = jamais
 
     # Divers
     timezone: ZoneInfo
@@ -322,6 +323,8 @@ def load_settings() -> Settings:
         presence_night=check(_get_night),
         deezer_playlists=check(_get_deezer_playlists),
         steam_api_key=_get_str("STEAM_API_KEY"),
+        # Chacun est un appel à Claude, et un bot qui parle trop souvent seul devient agaçant.
+        spontaneous_per_day=check(_get_int, "SPONTANEOUS_PER_DAY", default=0, minimum=0, maximum=10),
         timezone=timezone,
         price_input_per_mtok=check(_get_float, "PRICE_INPUT_PER_MTOK", default=default_input, minimum=0),
         price_output_per_mtok=check(_get_float, "PRICE_OUTPUT_PER_MTOK", default=default_output, minimum=0),
