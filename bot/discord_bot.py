@@ -872,10 +872,14 @@ class ChatBot(commands.Bot):
         channel = self.get_channel(self.settings.channel_id)
         if channel is None:
             return
+
+        def member_waiting() -> bool:
+            """Un message du salon attend sa réponse (ou se prépare) : c'est à lui que le bot répond."""
+            return bool(self._pending.get(channel.id) or self._preparing.get(channel.id) or channel.id in self._waiters)
+
         async with self.history.lock(channel.id):
             # Vérifié sous le verrou : une réponse vient peut-être de partir, ou un message attend la sienne.
-            if (self.presence.status is not after or self._pending.get(channel.id) or self._preparing.get(channel.id)
-                    or channel.id in self._waiters):
+            if self.presence.status is not after or member_waiting():
                 return
             # Seuls les messages des membres comptent : ni le message « En ligne » du démarrage, ni les autres bots
             # ne répondent au bot ou ne troublent le calme du salon.
@@ -899,6 +903,10 @@ class ChatBot(commands.Bot):
                 return
             if is_silence(answer.text):
                 logger.info("Fin de « %s » : rien à dire dans #%s, pas de message spontané.", before.title, channel)
+                return
+            if member_waiting():  # un membre a écrit pendant que Claude écrivait : le salon n'est plus calme
+                logger.info("Fin de « %s » : un membre vient d'écrire dans #%s, message spontané abandonné.",
+                            before.title, channel)
                 return
             sent = None
             for chunk in split_message(discord_emojis(short_emojis(answer.text), channel.guild)):

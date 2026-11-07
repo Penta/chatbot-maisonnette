@@ -231,6 +231,20 @@ class SpeakUpTest(unittest.IsolatedAsyncioTestCase):
         await self.speak_up(before=MUSIC)
         self.bot.claude.ask.assert_not_awaited()
 
+    async def test_not_sent_when_a_member_writes_meanwhile(self):
+        # Un membre écrit pendant que Claude prépare le message spontané : il n'est pas envoyé, Rika répond au membre.
+        for waiting in ("_pending", "_preparing"):
+            with self.subTest(waiting=waiting):
+                async def ask(*args, **kwargs):
+                    getattr(self.bot, waiting)[CHANNEL_ID] = {1}
+                    return mock.Mock(text="L'épisode 4 de Frieren, quelle claque.", web_used=False)
+                self.bot.claude.ask.side_effect = ask
+                await self.speak_up()
+                self.channel.send.assert_not_awaited()
+                self.bot.history.add_exchange.assert_not_awaited()
+                self.assertEqual(self.bot.spontaneous.sent, [])
+                getattr(self.bot, waiting).clear()
+
     async def test_quiet_after_a_skip(self):
         # Un administrateur passe le statut avec /skip en plein anime : Rika ne l'a pas fini, elle n'en parle pas.
         self.bot.speak_up = lambda before, after: ChatBot.speak_up(self.bot, before, after)
