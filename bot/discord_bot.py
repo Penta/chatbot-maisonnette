@@ -287,7 +287,7 @@ class ChatBot(commands.Bot):
             pass  # premier démarrage, ou fichier illisible : on synchronise
         try:
             synced = await self.tree.sync()
-        except discord.HTTPException as exc:  # le bot fonctionne quand même ; nouvel essai au prochain démarrage
+        except DISCORD_FAILURES as exc:  # le bot fonctionne quand même ; nouvel essai au prochain démarrage
             logger.error("Synchronisation des commandes slash impossible : %s", exc)
             return
         logger.info("%d commande(s) slash synchronisée(s).", len(synced))
@@ -347,7 +347,7 @@ class ChatBot(commands.Bot):
             embed.add_field(name="⚠️ Réglage à revoir", value=self._memory_warning, inline=False)
         try:
             await channel.send(embed=embed)
-        except discord.HTTPException as exc:
+        except DISCORD_FAILURES as exc:
             logger.error("Impossible d'envoyer le message de démarrage : %s", exc)
 
     async def close(self) -> None:
@@ -821,7 +821,7 @@ class ChatBot(commands.Bot):
         for chunk in split_message(discord_emojis(short_emojis(answer.text), channel.guild)):
             try:
                 await channel.send(chunk)
-            except discord.HTTPException as exc:
+            except DISCORD_FAILURES as exc:
                 logger.error("Envoi du message d'absence impossible : %s", exc)
                 return
 
@@ -913,7 +913,7 @@ class ChatBot(commands.Bot):
             except discord.Forbidden as exc:  # pas le droit d'envoyer de sticker : inutile d'insister
                 logger.warning("Envoi de sticker interdit : %s", exc)
                 break
-            except discord.HTTPException as exc:
+            except DISCORD_FAILURES as exc:
                 logger.warning("Sticker %s inutilisable : %s", sticker.name, exc)
         return False
 
@@ -927,7 +927,7 @@ class ChatBot(commands.Bot):
             return False
         try:
             await message.channel.send(str(random.choice(emojis)))
-        except discord.HTTPException as exc:
+        except DISCORD_FAILURES as exc:
             logger.warning("Impossible d'envoyer l'emoji : %s", exc)
         return True
 
@@ -957,7 +957,7 @@ class ChatBot(commands.Bot):
         if cited is None:  # Discord ne l'a pas fourni (vieux message) : on le télécharge
             try:
                 cited = await message.channel.fetch_message(ref.message_id)
-            except discord.HTTPException as exc:
+            except DISCORD_FAILURES as exc:
                 logger.info("Message cité inaccessible : %s", exc)
                 return None
             ref.resolved = cited  # évite de le télécharger une seconde fois
