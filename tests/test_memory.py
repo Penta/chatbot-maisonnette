@@ -821,6 +821,18 @@ class EditLineTest(MemoryTestCase):
         await window.on_submit(interaction_mock(done=True))
         self.assertEqual(self.store.read(self.FICHE), "joue à Elden Ring (d'après <@222>)")
 
+    async def test_source_kept_when_name_cannot_be_used(self):
+        # « @alice » porté par deux comptes du registre (nom libéré puis repris), membre inconnu du registre :
+        # « @… » ne retrouverait pas le bon membre, la mention reste telle quelle dans la fenêtre.
+        await self.members.see(222, "alice", "Alice")
+        await self.members.see(444, "alice", "Alice bis")
+        self.write(self.FICHE, "habite à Lyon (d'après <@222>, selon <@999>)")
+        window = await self.window(self.card(), 1)
+        self.assertEqual(window.input.default, "habite à Lyon (d'après <@222>, selon <@999>)")
+        window.input._value = window.input.default.replace("Lyon", "Villeurbanne")
+        await window.on_submit(interaction_mock(done=True))
+        self.assertEqual(self.store.read(self.FICHE), "habite à Villeurbanne (d'après <@222>, selon <@999>)")
+
     async def test_one_line_stays_one_line(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
         window = await self.window(self.card(), 1)

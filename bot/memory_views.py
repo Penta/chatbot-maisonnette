@@ -282,10 +282,9 @@ class MemoryCard:
 
         async def save(file: str, text: str, by: str) -> str | None:
             return await self.store.edit_line(file, index, text, by=by, expected=choice.original)
-        # Membres cités par « @alice », reconverti à l'enregistrement : la source reste liée au membre.
         await interaction.response.send_modal(TextModal(
             self, f"Modifier la ligne {index + 1}", "Texte de la ligne", save,
-            default=self.store.with_usernames(line), placeholder="Vide : la ligne est supprimée.",
+            default=self.store.for_editing(line), placeholder="Vide : la ligne est supprimée.",
             max_length=min(INPUT_MAX, self.store.limit(self.target.file)), done="C'est enregistré."))
 
     async def turn_choice_page(self, interaction: discord.Interaction, page: int) -> None:

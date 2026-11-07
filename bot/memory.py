@@ -171,6 +171,20 @@ class MemoryStore:
             return f"@{entry['username']}" if entry is not None else "un membre"
         return MEMBER_REF.sub(username, text)
 
+    def for_editing(self, text: str) -> str:
+        """Ligne telle qu'elle s'ouvre dans « Modifier une ligne » : comme with_usernames, reconverti à
+        l'enregistrement (voir _with_ids). Mais un membre que « @nom » ne retrouverait pas à coup sûr (nom
+        porté par deux comptes du registre, membre inconnu du registre) reste « <@id> » : corriger le reste
+        de la ligne ne lui fait pas perdre sa source."""
+        owners = self._owners()
+
+        def username(match: re.Match) -> str:
+            entry = self.members.get(match.group(1))
+            if entry is None or owners.get(entry["username"].casefold()) != [match.group(1)]:
+                return match.group(0)
+            return f"@{entry['username']}"
+        return MEMBER_REF.sub(username, text)
+
     def with_names(self, text: str) -> str:
         """Fichier tel que les membres le voient dans /memoire : membres cités par leur nom actuel
         (« <@222> » → « Alice (alice) »)."""
@@ -597,9 +611,7 @@ class MemoryStore:
         Un nom inconnu reste tel quel, comme un nom porté par deux membres du registre (nom libéré par
         un compte puis repris par un autre) : on ne saurait pas lequel citer. Un point final qui n'en
         fait pas partie (« d'après @alice. ») reste après la mention."""
-        owners: dict[str, list[str]] = {}
-        for member_id, entry in self.members.members().items():
-            owners.setdefault(entry["username"].casefold(), []).append(member_id)
+        owners = self._owners()
 
         def ref(match: re.Match) -> str:
             username, dots = match.group(1), ""
@@ -608,6 +620,13 @@ class MemoryStore:
             ids = owners.get(username.casefold(), [])
             return f"<@{ids[0]}>{dots}" if len(ids) == 1 else match.group(0)
         return USERNAME_REF.sub(ref, text)
+
+    def _owners(self) -> dict[str, list[str]]:
+        """Identifiants des membres du registre pour chaque nom d'utilisateur, sans majuscules."""
+        owners: dict[str, list[str]] = {}
+        for member_id, entry in self.members.members().items():
+            owners.setdefault(entry["username"].casefold(), []).append(member_id)
+        return owners
 
     def _names_of_others(self, member_id: int | str) -> set[str]:
         """Noms Discord, anciens compris, des autres membres du registre, en forme simple et sans
