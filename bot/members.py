@@ -32,6 +32,9 @@ class MemberRegistry:
         # Raison pour laquelle le fichier est illisible, ou None. Repartir d'un registre vide oublierait
         # qui a désactivé la mémoire : la mémoire est alors coupée, et le fichier n'est jamais réécrit.
         self.broken: str | None = None
+        # Version écrite à chaque sauvegarde : 2 tant que les anciennes fiches n'ont pas pu être effacées,
+        # pour que l'effacement soit retenté au démarrage suivant (voir _remove_old_files).
+        self._version = FILE_VERSION
         self._data: dict[str, dict] = self._load()
         self._save_lock = asyncio.Lock()
         # Dernière sauvegarde ratée (disque plein, droits) : le fichier est en retard sur _data. La
@@ -141,6 +144,7 @@ class MemberRegistry:
                 removed += 1
             except OSError as exc:  # refait au prochain démarrage : le registre reste en version 2
                 logger.error("Impossible d'effacer l'ancienne fiche %s : %s", path, exc)
+                self._version = 2
                 return
         try:
             write_atomic(self.file_path, json.dumps({"version": FILE_VERSION, "members": data},
@@ -169,7 +173,7 @@ class MemberRegistry:
         """Écrit le registre ; renvoie False s'il n'a pas pu l'être."""
         if self.broken:
             return False  # le fichier illisible attend sa réparation : l'écraser perdrait les désactivations
-        payload = {"version": FILE_VERSION, "members": self._data}
+        payload = {"version": self._version, "members": self._data}
         text = json.dumps(payload, ensure_ascii=False, indent=2)
         async with self._save_lock:
             try:

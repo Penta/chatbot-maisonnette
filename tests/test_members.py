@@ -1,5 +1,6 @@
 """Tests du registre des membres. Lancer depuis la racine du projet : python -m unittest"""
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -185,6 +186,18 @@ class OldFilesRemovalTest(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["version"], 2)  # refait au démarrage
         MemberRegistry(self.path)
         self.assertEqual(self.remaining(), [])
+
+    def test_removal_retried_after_other_saves(self):
+        # Le registre est réécrit souvent (nouveau membre, pseudo) : il reste en version 2 jusqu'à ce que
+        # l'effacement réussisse, sinon il ne serait jamais retenté.
+        with mock.patch("pathlib.Path.unlink", side_effect=OSError("droits")), \
+                self.assertLogs("chatbot.members", "ERROR"):
+            registry = self.load(2, {"2": {**ENTRY, "memory": False}}, ["2.md"])
+        asyncio.run(registry.see(222, "alice", "Alice"))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["version"], 2)
+        MemberRegistry(self.path)
+        self.assertEqual(self.remaining(), [])
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["version"], FILE_VERSION)
 
 
 if __name__ == "__main__":
