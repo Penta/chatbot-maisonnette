@@ -16,6 +16,7 @@ from bot import gifs
 from bot.attachments import AttachmentReader
 from bot.discord_bot import ChatBot
 from bot.gifs import GIF_FRAMES, download_gif, gif_source, prepare_gif
+from bot.images import ImageError
 
 KLIPY_LINK = "https://klipy.com/gifs/no-no-no-dont-do-that-1"
 # Aperçu tel que Discord l'envoie pour un GIF Klipy (relevé sur le bot de test).
@@ -110,6 +111,22 @@ class PrepareGifTest(unittest.TestCase):
         Image.new("RGB", (100, 100), "red").save(buffer, format="GIF")
         image, shown = prepare_gif(buffer.getvalue())
         self.assertEqual((image.media_type, shown), ("image/gif", 1))
+
+    def test_cut_or_damaged_file_unreadable(self):
+        # Fichier coupé en route ou abîmé : refusé comme illisible, jamais une autre erreur (qui ferait échouer
+        # tout le message au lieu de le lire sans le GIF).
+        noisy = [Image.frombytes("RGB", (60, 40), bytes((i * 37 + j) % 256 for j in range(60 * 40 * 3)))
+                 for i in range(8)]
+        for fmt in ("GIF", "WEBP"):
+            buffer = io.BytesIO()
+            noisy[0].save(buffer, format=fmt, save_all=True, append_images=noisy[1:], duration=100, loop=0)
+            data = buffer.getvalue()
+            for cut in range(10, len(data), 7):
+                with self.subTest(fmt=fmt, cut=cut):
+                    try:
+                        prepare_gif(data[:cut])
+                    except ImageError:
+                        pass
 
     def test_huge_animation_not_played(self):
         # Des milliers d'images à décoder bloqueraient le bot : seule la première est envoyée.

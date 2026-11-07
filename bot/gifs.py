@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 import discord
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 from .images import MAX_PIXELS, ImageError, prepare_image
 from .media import ImageData
@@ -120,27 +120,32 @@ def prepare_gif(data: bytes) -> tuple[ImageData, int]:
     Fonction bloquante (calculs sur l'image) : à appeler via asyncio.to_thread.
     """
     try:
-        img = Image.open(io.BytesIO(data))
-        count = getattr(img, "n_frames", 1)
-        pixels = img.width * img.height
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
-        raise ImageError("GIF illisible.")
+        return _prepare_gif(data)
+    except ImageError:
+        raise
+    except Exception as exc:
+        # Sur un fichier coupé ou abîmé, Pillow lève des erreurs de toutes sortes (IndexError en comptant les
+        # images d'un GIF coupé…) : le GIF est illisible, le message est lu sans lui.
+        raise ImageError("GIF illisible.") from exc
+
+
+def _prepare_gif(data: bytes) -> tuple[ImageData, int]:
+    img = Image.open(io.BytesIO(data))
+    count = getattr(img, "n_frames", 1)
+    pixels = img.width * img.height
     if count < 2 or pixels > MAX_PIXELS or pixels * count > GIF_MAX_TOTAL_PIXELS:
         return prepare_image(data), 1
 
     shown = min(GIF_FRAMES, count)
     indexes = [round(i * (count - 1) / (shown - 1)) for i in range(shown)]
     frames = []
-    try:
-        for index in indexes:
-            img.seek(index)
-            frame = img.convert("RGBA")
-            background = Image.new("RGB", frame.size, "white")  # transparence : fond blanc
-            background.paste(frame, mask=frame.getchannel("A"))
-            background.thumbnail((CELL_SIZE, CELL_SIZE), Image.Resampling.LANCZOS)
-            frames.append(background)
-    except (OSError, ValueError, EOFError):
-        raise ImageError("GIF illisible.")
+    for index in indexes:
+        img.seek(index)
+        frame = img.convert("RGBA")
+        background = Image.new("RGB", frame.size, "white")  # transparence : fond blanc
+        background.paste(frame, mask=frame.getchannel("A"))
+        background.thumbnail((CELL_SIZE, CELL_SIZE), Image.Resampling.LANCZOS)
+        frames.append(background)
 
     columns = min(GRID_COLUMNS, shown)
     rows = -(-shown // columns)
