@@ -20,6 +20,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les versions des dépendances sont figées, et Python 3.11 est le minimum.** `requirements.txt` indique les versions exactes testées : une nouvelle version d'une bibliothèque n'arrive plus sans changement du dépôt. Hors Docker, vérifie ta version de Python, puis relance `pip install -r requirements.txt`.
 
+- **Des consignes plus courtes pour Claude.** Les notes ajoutées à la personnalité gardent les mêmes règles en environ 600 tokens de moins par message (un quart de moins, tous réglages activés), ce qui allège un peu le coût. Rien à régler.
+
 ### Corrections
 
 - **Rika ne peut plus vider une fiche ou le fichier général sur simple demande.** Un membre pouvait lui faire réécrire la fiche d'un autre avec une seule ligne, et les anciennes notes étaient perdues. Elle ne peut plus en retirer plus de la moitié d'un coup ; effacer se fait avec `/memoire` ou `/memoire-serveur`.
