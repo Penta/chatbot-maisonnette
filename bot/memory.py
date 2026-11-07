@@ -383,9 +383,9 @@ class MemoryStore:
         """Supprime ces lignes (numérotées à partir de 0, voir lines) : modification faite avec /memoire
         (by : son nom, pour les logs). Renvoie un message d'erreur, ou None.
 
-        Les fichiers ne se modifient à la main que ligne par ligne (voir add_lines), sans pouvoir changer
-        le texte d'une ligne : personne ne peut changer ce que dit une note de Claude, ni la source
-        qu'elle cite. Toujours permis, même si la mémoire n'est pas activée. expected : le contenu (lu
+        Les fichiers ne se modifient à la main que ligne par ligne, jamais d'un bloc : chacun peut
+        supprimer des lignes, et seul celui qui peut en ajouter (voir add_lines) peut en modifier (voir
+        edit_line). Toujours permis, même si la mémoire n'est pas activée. expected : le contenu (lu
         avec read) d'où viennent les numéros ; si le fichier a changé depuis, rien n'est supprimé, pour ne
         pas retirer la mauvaise ligne."""
         async with self._lock:
@@ -401,10 +401,42 @@ class MemoryStore:
             logger.info("Mémoire : %d ligne(s) supprimée(s) de %s par %s", len(lines) - len(kept), name, by)
         return error
 
+    async def edit_line(self, name: str, index: int, text: str, by: str, expected: str) -> str | None:
+        """Remplace le texte d'une ligne (numérotée à partir de 0, voir lines), à sa place : mêmes droits
+        qu'add_lines (by : son nom, pour les logs). Modifier une ligne revient à la supprimer et à en écrire
+        une autre : rien de plus que ce qu'add_lines permet déjà, source citée comprise. Texte vide : la
+        ligne est supprimée. expected : comme pour delete_lines. Renvoie un message d'erreur, ou None."""
+        member = MEMBER_FILE.match(name)
+        if name != SERVER_FILE and not member:
+            return "Ce fichier ne peut pas être modifié à la main."
+        # Une ligne reste une ligne ; « @alice » enregistré comme dans add_lines.
+        new_line = self._with_ids(" ".join(text.split()))
+        async with self._lock:
+            if member and not self.members.memory_enabled(member.group(1)):
+                return "La mémoire n'est pas activée : rien n'a été modifié."
+            current = self.read(name)
+            if current != expected:
+                return ("Le fichier a changé entre-temps (nouvelle note, ou autre modification) : rien n'a été "
+                        "modifié. Recommence avec « Modifier une ligne ».")
+            lines = [line for line in current.splitlines() if line.strip()]
+            lines[index:index + 1] = [new_line] if new_line else []
+            after = "\n".join(lines)
+            if error := self._too_big(name, after, current):
+                if member:  # message pour le membre, pas pour Claude (le nom du fichier ne lui dit rien)
+                    return "Ta fiche serait trop longue : raccourcis la ligne. Rien n'a été modifié."
+                return error + " Rien n'a été modifié."
+            error = await self._save_manual(name, after, current)
+        if error is None and member:
+            logger.info("Mémoire : ligne %d de %s modifiée par %s", index + 1, name, by)
+        elif error is None:
+            # Comme add_lines : le texte du fichier général est gardé au log.
+            logger.info("Mémoire : ligne %d de %s modifiée par %s : %r", index + 1, name, by, new_line)
+        return error
+
     async def add_lines(self, name: str, text: str, by: str) -> str | None:
         """Ajoute des lignes : au fichier général, par un administrateur avec /memoire-serveur, ou à sa
-        propre fiche, par le membre avec /memoire (by : son nom, pour les logs). Les lignes déjà là ne
-        se modifient pas (voir delete_lines). Renvoie un message d'erreur, ou None."""
+        propre fiche, par le membre avec /memoire (by : son nom, pour les logs). Les mêmes peuvent
+        modifier les lignes déjà là (voir edit_line). Renvoie un message d'erreur, ou None."""
         member = MEMBER_FILE.match(name)
         if name != SERVER_FILE and not member:
             return "Ce fichier ne peut pas être complété à la main."
@@ -436,8 +468,8 @@ class MemoryStore:
 
     async def set_nicknames(self, member_id: int | str, text: str, by: str) -> str | None:
         """Le membre écrit lui-même ses surnoms (séparés par des virgules) : la ligne « Surnoms : … » de
-        sa fiche est remplacée, en tête, ou retirée si text est vide. Seule ligne qu'il écrit (voir
-        delete_lines). Renvoie un message d'erreur, ou None."""
+        sa fiche est remplacée, en tête, ou retirée si text est vide. « Modifier une ligne » passe par ici
+        pour cette ligne, qui garde ainsi son format et ses limites. Renvoie un message d'erreur, ou None."""
         names = [n.strip() for n in re.split(r"[,;\n]", text) if n.strip()]
         if len(names) > MAX_NICKNAMES:
             return f"{MAX_NICKNAMES} surnoms au plus. Rien n'a été modifié."

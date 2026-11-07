@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 import discord
 
 from .members import MemberRegistry, display_name
-from .memory import MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, NOT_SAVED, SERVER_FILE, MemoryStore
+from .memory import (MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, NICKNAMES_LINE, NOT_SAVED, SERVER_FILE,
+                     MemoryStore)
 
 logger = logging.getLogger("chatbot.memory")
 
@@ -46,6 +47,7 @@ ERROR_MESSAGE = "Une erreur est survenue. Si ça se reproduit, préviens l'admin
 EXPIRED = "Ces boutons ont expiré : relance la commande pour continuer."
 CHOOSE_HELP = ("Clique sur les numéros des lignes à supprimer : elles apparaissent barrées. Rien n'est "
                "supprimé avant le bouton « Supprimer », et la suppression est définitive.")
+EDIT_HELP = "Clique sur le numéro de la ligne à modifier : son texte s'ouvre dans une fenêtre, prêt à corriger."
 
 Callback = Callable[[discord.Interaction], Awaitable[None]]
 
@@ -81,9 +83,11 @@ class Target:
 
 @dataclass
 class Choice:
-    """Écran « Supprimer des lignes » en cours : lignes affichées et numéros cochés."""
+    """Écran « Supprimer des lignes » (ou « Modifier une ligne », edit) en cours : lignes et numéros cochés."""
     original: str          # contenu du fichier à l'ouverture : les numéros valent pour lui (voir delete_lines)
+    raw: list[str]         # lignes telles qu'enregistrées (membres cités par « <@id> »)
     lines: list[str]       # lignes telles qu'affichées (membres cités par leur nom)
+    edit: bool = False
     chosen: set[int] = field(default_factory=set)  # index des lignes cochées
     page: int = 0
 
@@ -148,24 +152,25 @@ class MemoryCard:
                              f"{len(self.store.lines(self.target.file))}/{MAX_LINES} lignes")
         body = f"### {title}\n{text}" + "".join(f"\n-# {line}" for line in footer)
         view.add_item(discord.ui.Container(discord.ui.TextDisplay(body), accent_colour=color))
-        view.add_item(discord.ui.ActionRow(*self.buttons(content)))
+        for row in self.buttons(content):
+            view.add_item(discord.ui.ActionRow(*row))
         if pages > 1:
             view.add_item(discord.ui.ActionRow(*page_buttons(self.page, pages, self.turn_page)))
         return view
 
-    def buttons(self, content: str) -> list[discord.ui.Button]:
-        """Boutons de l'écran principal (5 au plus : une rangée)."""
-        buttons = []
-        # Un fichier ne se modifie à la main que ligne par ligne (voir MemoryStore.delete_lines) : on en
-        # supprime des lignes, l'administrateur ajoute des lignes au fichier général, et le membre à sa
-        # propre fiche, dont il écrit aussi les surnoms. Mémoire pas activée : il n'y a pas de fiche.
-        if self.target.member_id is None:
-            buttons.append(button("Ajouter des lignes", self.ask_add, discord.ButtonStyle.primary, "➕"))
-        elif self.target.is_self:
-            buttons.append(button("Ajouter des lignes", self.ask_add, discord.ButtonStyle.primary, "➕",
-                                  disabled=not self.memory_enabled))
-            buttons.append(button("Surnoms", self.ask_nicknames, discord.ButtonStyle.primary, "🏷️",
-                                  disabled=not self.memory_enabled))
+    def buttons(self, content: str) -> list[list[discord.ui.Button]]:
+        """Rangées de boutons de l'écran principal : écrire, puis retirer."""
+        write, buttons = [], []
+        # Un fichier ne se modifie à la main que ligne par ligne (voir MemoryStore.delete_lines) : chacun en
+        # supprime des lignes ; l'administrateur ajoute ou modifie des lignes du fichier général, et le membre
+        # de sa propre fiche, dont il écrit aussi les surnoms. Mémoire pas activée : il n'y a pas de fiche.
+        if self.target.member_id is None or self.target.is_self:
+            off = not self.memory_enabled
+            write.append(button("Ajouter des lignes", self.ask_add, discord.ButtonStyle.primary, "➕", disabled=off))
+            write.append(button("Modifier une ligne", self.choose_line_to_edit, discord.ButtonStyle.primary, "✏️",
+                                disabled=off or not content))
+            if self.target.is_self:
+                write.append(button("Surnoms", self.ask_nicknames, discord.ButtonStyle.primary, "🏷️", disabled=off))
         buttons.append(button("Supprimer des lignes", self.choose_lines, emoji="✂️", disabled=not content))
         buttons.append(button("Tout effacer" if self.target.member_id is None else "Effacer la fiche",
                               self.ask_erase, emoji="🗑️", disabled=not content))
@@ -176,7 +181,7 @@ class MemoryCard:
                 buttons.append(button("Désactiver la mémoire", self.ask_disable, discord.ButtonStyle.danger, "🚫"))
             elif self.target.is_self:
                 buttons.append(button("Activer la mémoire", self.ask_enable, discord.ButtonStyle.success, "✅"))
-        return buttons
+        return [row for row in (write, buttons) if row]
 
     async def turn_page(self, interaction: discord.Interaction, page: int) -> None:
         self.page = page
@@ -207,16 +212,25 @@ class MemoryCard:
 
     async def choose_lines(self, interaction: discord.Interaction) -> None:
         """Remplace le fichier affiché par ses lignes numérotées, avec un bouton par numéro pour les cocher."""
+        await self.open_choice(interaction, edit=False)
+
+    async def choose_line_to_edit(self, interaction: discord.Interaction) -> None:
+        """Comme choose_lines, mais un numéro ouvre la fenêtre pour modifier sa ligne."""
+        await self.open_choice(interaction, edit=True)
+
+    async def open_choice(self, interaction: discord.Interaction, edit: bool) -> None:
         # Bouton affiché avant un changement : fiche effacée entre-temps (autre message /memoire, désactivation).
         original = self.store.read(self.target.file)
         if not original:
-            await self.refresh(interaction, "Le fichier est vide : rien à supprimer.")
+            await self.refresh(interaction, f"Le fichier est vide : rien à {'modifier' if edit else 'supprimer'}.")
             return
-        self._choice = Choice(original, [self.store.with_names(line) for line in self.store.lines(self.target.file)])
+        raw = self.store.lines(self.target.file)
+        self._choice = Choice(original, raw, [self.store.with_names(line) for line in raw], edit=edit)
         await self.show(interaction, self.choice_view())
 
     def choice_view(self) -> OwnerView:
-        """Écran « Supprimer des lignes » : les lignes en entier, les cochées barrées, et leurs boutons."""
+        """Écran « Supprimer des lignes » (les lignes en entier, les cochées barrées, et leurs boutons) ou
+        « Modifier une ligne » (les mêmes, sans rien à cocher)."""
         choice = self._choice
         # Pages calculées comme si tout était coché (barré) : elles ne bougent pas quand on coche.
         bounds = paginate([len(numbered(i, line, True)) for i, line in enumerate(choice.lines)], PAGE_TEXT_MAX,
@@ -224,7 +238,8 @@ class MemoryCard:
         choice.page = min(choice.page, len(bounds) - 1)
         start, end = bounds[choice.page]
         text = "\n".join(numbered(i, choice.lines[i], i in choice.chosen) for i in range(start, end))
-        body = f"### Lignes à supprimer\n{CHOOSE_HELP}\n\n{text}"
+        heading, help_text = ("Modifier une ligne", EDIT_HELP) if choice.edit else ("Lignes à supprimer", CHOOSE_HELP)
+        body = f"### {heading}\n{help_text}\n\n{text}"
         if len(bounds) > 1:
             body += f"\n-# Lignes {start + 1} à {end} sur {len(choice.lines)}"
         container = discord.ui.Container(discord.ui.TextDisplay(body), accent_colour=discord.Color.orange())
@@ -236,20 +251,42 @@ class MemoryCard:
         count = len(choice.chosen)
         plural = "s" if count > 1 else ""
         buttons = page_buttons(choice.page, len(bounds), self.turn_choice_page, label=False) if len(bounds) > 1 else []
-        buttons.append(button(f"Supprimer {count} ligne{plural}" if count else "Supprimer", self.delete_chosen,
-                              discord.ButtonStyle.danger, "✂️", disabled=not count))
+        if not choice.edit:
+            buttons.append(button(f"Supprimer {count} ligne{plural}" if count else "Supprimer", self.delete_chosen,
+                                  discord.ButtonStyle.danger, "✂️", disabled=not count))
         buttons.append(button("Annuler", self.refresh, emoji="↩️"))
         view.add_item(discord.ui.ActionRow(*buttons))
         return view
 
     def number_button(self, index: int) -> discord.ui.Button:
-        """Bouton d'une ligne : un clic la coche (rouge, barrée dans la liste), un autre la décoche."""
+        """Bouton d'une ligne : un clic la coche (rouge, barrée dans la liste), un autre la décoche ; pour
+        « Modifier une ligne », un clic ouvre la fenêtre de la ligne."""
         chosen = index in self._choice.chosen
 
         async def toggle(interaction: discord.Interaction) -> None:
             self._choice.chosen.symmetric_difference_update({index})
             await self.show(interaction, self.choice_view())
-        return button(str(index + 1), toggle, discord.ButtonStyle.danger if chosen else discord.ButtonStyle.secondary)
+
+        async def edit(interaction: discord.Interaction) -> None:
+            await self.ask_edit(interaction, index)
+        return button(str(index + 1), edit if self._choice.edit else toggle,
+                      discord.ButtonStyle.danger if chosen else discord.ButtonStyle.secondary)
+
+    async def ask_edit(self, interaction: discord.Interaction, index: int) -> None:
+        """Fenêtre pour modifier une ligne, son texte déjà rempli. La ligne des surnoms a sa propre fenêtre."""
+        choice = self._choice
+        line = choice.raw[index]
+        if self.target.member_id is not None and NICKNAMES_LINE.match(line.strip()):
+            await self.ask_nicknames(interaction)
+            return
+
+        async def save(file: str, text: str, by: str) -> str | None:
+            return await self.store.edit_line(file, index, text, by=by, expected=choice.original)
+        # Membres cités par « @alice », reconverti à l'enregistrement : la source reste liée au membre.
+        await interaction.response.send_modal(TextModal(
+            self, f"Modifier la ligne {index + 1}", "Texte de la ligne", save,
+            default=self.store.with_usernames(line), placeholder="Vide : la ligne est supprimée.",
+            max_length=min(INPUT_MAX, self.store.limit(self.target.file)), done="C'est enregistré."))
 
     async def turn_choice_page(self, interaction: discord.Interaction, page: int) -> None:
         self._choice.page = page
@@ -333,7 +370,7 @@ class MemoryCard:
                     f"un autre membre qui a activé la mémoire peut être noté dans sa fiche avec ton nom, et il "
                     f"la voit. Ce qui est retenu sert dans la conversation, mais ta fiche n'est jamais récitée "
                     f"aux autres ; à part toi, seuls les administrateurs du serveur peuvent la voir, en "
-                    f"supprimer des lignes ou l'effacer. Avec /memoire, tu pourras la voir, y ajouter ou en supprimer des lignes, ou désactiver la mémoire.")
+                    f"supprimer des lignes ou l'effacer. Avec /memoire, tu pourras la voir, y ajouter, modifier ou supprimer des lignes, ou désactiver la mémoire.")
         await confirm(interaction, self, question, self.enable)
 
     async def enable(self, interaction: discord.Interaction) -> None:

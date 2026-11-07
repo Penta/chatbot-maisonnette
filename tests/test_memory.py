@@ -759,8 +759,9 @@ class DeleteLinesTest(MemoryTestCase):
 
     async def test_own_file_buttons(self):
         self.write(self.FICHE, "habite à Lyon")
-        self.assertEqual(labels(self.card().view()), ["Ajouter des lignes", "Surnoms", "Supprimer des lignes",
-                                                      "Effacer la fiche", "Désactiver la mémoire"])
+        self.assertEqual(labels(self.card().view()), ["Ajouter des lignes", "Modifier une ligne", "Surnoms",
+                                                      "Supprimer des lignes", "Effacer la fiche",
+                                                      "Désactiver la mémoire"])
 
     async def test_file_emptied_meanwhile(self):
         # Fiche effacée depuis un autre message /memoire après l'affichage du bouton : pas de plantage.
@@ -771,6 +772,129 @@ class DeleteLinesTest(MemoryTestCase):
     async def test_footer_counts_lines(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
         self.assertIn(f"2/{MAX_LINES} lignes", texts(self.card().view()))
+
+
+class EditLineTest(MemoryTestCase):
+    """Le membre modifie une ligne de sa fiche (l'administrateur, du fichier général), à sa place."""
+
+    FICHE = f"membres/{MEMBER_ID}.md"
+
+    def card(self, target: Target | None = None, owner_id: int = MEMBER_ID) -> MemoryCard:
+        target = target or Target(self.FICHE, MEMBER_ID, "Bob", is_self=True)
+        return MemoryCard(self.store, target, owner_id=owner_id, bot_name="Rika")
+
+    @staticmethod
+    async def window(card: MemoryCard, number: int) -> TextModal:
+        """Ouvre « Modifier une ligne », puis la fenêtre de la ligne number."""
+        await card.send(interaction_mock())
+        await click(card, "Modifier une ligne")
+        interaction = await click(card, str(number))
+        return interaction.response.send_modal.call_args.args[0]
+
+    async def test_line_replaced_in_place(self):
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda\naime les lasagnes")
+        card = self.card()
+        await card.send(interaction_mock())
+        view = shown((await click(card, "Modifier une ligne")).response.edit_message)
+        self.assertIn("**2.** joue à Zelda", texts(view))
+        self.assertEqual([item.label for item in number_buttons(view)], ["1", "2", "3"])
+        self.assertNotIn("Supprimer", labels(view))
+        window = await self.window(card, 2)
+        self.assertEqual(window.title, "Modifier la ligne 2")
+        self.assertEqual(window.input.default, "joue à Zelda")
+        window.input._value = "joue à Elden Ring\n"
+        interaction = interaction_mock(done=True)
+        with self.assertLogs("chatbot.memory", "INFO") as logs:
+            await window.on_submit(interaction)
+        self.assertEqual(self.store.read(self.FICHE), "habite à Lyon\njoue à Elden Ring\naime les lasagnes")
+        self.assertEqual(note(interaction.edit_original_response), "C'est enregistré.")
+        self.assertFalse(any("Elden" in line for line in logs.output))  # texte d'une fiche : pas au log
+        self.assertIsNotNone(self.store.edited(self.FICHE))  # Claude ne renote pas l'ancienne version
+
+    async def test_source_stays_linked_to_member(self):
+        # « Alice » s'affiche « @alice » dans la fenêtre, et redevient sa mention à l'enregistrement.
+        await self.members.see(222, "alice", "Alice")
+        self.write(self.FICHE, "joue à Zelda (d'après <@222>)")
+        window = await self.window(self.card(), 1)
+        self.assertEqual(window.input.default, "joue à Zelda (d'après @alice)")
+        window.input._value = "joue à Elden Ring (d'après @alice)"
+        await window.on_submit(interaction_mock(done=True))
+        self.assertEqual(self.store.read(self.FICHE), "joue à Elden Ring (d'après <@222>)")
+
+    async def test_one_line_stays_one_line(self):
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
+        window = await self.window(self.card(), 1)
+        window.input._value = "habite à\nVilleurbanne"
+        await window.on_submit(interaction_mock(done=True))
+        self.assertEqual(self.store.read(self.FICHE), "habite à Villeurbanne\njoue à Zelda")
+
+    async def test_emptied_line_deleted(self):
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
+        window = await self.window(self.card(), 1)
+        window.input._value = "  "
+        await window.on_submit(interaction_mock(done=True))
+        self.assertEqual(self.store.read(self.FICHE), "joue à Zelda")
+
+    async def test_change_meanwhile_modifies_nothing(self):
+        # Claude ajoute une ligne en tête pendant que la fenêtre est ouverte : la ligne 1 n'est plus la même.
+        self.write(self.FICHE, "habite à Lyon")
+        window = await self.window(self.card(), 1)
+        await self.tool(commande="reecrire", fichier=self.FICHE, texte="joue à Zelda\nhabite à Lyon")
+        window.input._value = "habite à Villeurbanne"
+        interaction = interaction_mock(done=True)
+        await window.on_submit(interaction)
+        self.assertEqual(self.store.read(self.FICHE), "joue à Zelda\nhabite à Lyon")
+        message = interaction.followup.send.call_args
+        self.assertIn("a changé", message.args[0])
+        self.assertIn("Villeurbanne".encode(), message.kwargs["file"].fp.getvalue())  # texte rendu, pas perdu
+
+    async def test_too_long_refused(self):
+        self.write(self.FICHE, "habite à Lyon\n" + "x" * 2980)
+        window = await self.window(self.card(), 1)
+        window.input._value = "habite à Lyon, " + "y" * 50
+        interaction = interaction_mock(done=True)
+        await window.on_submit(interaction)
+        self.assertIn("Ta fiche serait trop longue", interaction.followup.send.call_args.args[0])
+        self.assertTrue(self.store.read(self.FICHE).startswith("habite à Lyon\n"))
+
+    async def test_nicknames_line_opens_nicknames_window(self):
+        self.write(self.FICHE, "Surnoms : Bobby\nhabite à Lyon")
+        window = await self.window(self.card(), 1)
+        self.assertEqual(window.title, "Tes surnoms")
+        self.assertEqual(window.input.default, "Bobby")
+
+    async def test_server_file(self):
+        self.write(SERVER_FILE, "soirée jeux le vendredi\ntournoi en mai")
+        window = await self.window(self.card(Target(SERVER_FILE, None), owner_id=999), 2)
+        window.input._value = "tournoi en juin"
+        with self.assertLogs("chatbot.memory", "INFO") as logs:
+            await window.on_submit(interaction_mock(done=True))
+        self.assertEqual(self.server_file(), "soirée jeux le vendredi\ntournoi en juin")
+        self.assertTrue(any("tournoi en juin" in line for line in logs.output))  # comme les lignes ajoutées
+
+    async def test_who_can_edit(self):
+        self.write(self.FICHE, "habite à Lyon")
+        # Administrateur sur la fiche d'un autre : il peut seulement supprimer.
+        self.assertNotIn("Modifier une ligne", labels(self.card(Target(self.FICHE, MEMBER_ID, "Bob"), 999).view()))
+        await self.members.set_memory(MEMBER_ID, False)
+        button = next(item for item in buttons(self.card().view()) if item.label == "Modifier une ligne")
+        self.assertTrue(button.disabled)
+        self.assertIn("pas activée", await self.store.edit_line(self.FICHE, 0, "habite à Paris", by="bob",
+                                                                expected="habite à Lyon"))
+        self.assertIsNotNone(await self.store.edit_line("registre.json", 0, "x", by="bob", expected=""))
+        self.assertEqual(self.store.read(self.FICHE), "habite à Lyon")
+
+    async def test_answers_before_writing(self):
+        self.write(self.FICHE, "habite à Lyon")
+        window = await self.window(self.card(), 1)
+        window.input._value = "habite à Paris"
+        interaction = interaction_mock()
+
+        def check(*_args, **_kwargs) -> None:
+            self.assertTrue(interaction.response.is_done(), "edit_line avant la réponse à Discord")
+        self.store.edit_line = mock.AsyncMock(side_effect=check, return_value=None)
+        await window.on_submit(interaction)
+        self.store.edit_line.assert_awaited_once()
 
 
 class AddLinesTest(MemoryTestCase):
@@ -786,7 +910,8 @@ class AddLinesTest(MemoryTestCase):
 
     async def test_buttons(self):
         self.write(SERVER_FILE, "soirée jeux le vendredi")
-        self.assertEqual(labels(self.card().view()), ["Ajouter des lignes", "Supprimer des lignes", "Tout effacer"])
+        self.assertEqual(labels(self.card().view()), ["Ajouter des lignes", "Modifier une ligne", "Supprimer des lignes",
+                                                      "Tout effacer"])
 
     async def test_lines_added(self):
         self.write(SERVER_FILE, "soirée jeux le vendredi")

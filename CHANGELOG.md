@@ -8,6 +8,10 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.15
 
+### Changements
+
+- **Chacun peut modifier une ligne de sa fiche dans `/memoire`**, et les administrateurs celles du fichier général dans `/memoire-serveur`.
+
 ### Corrections
 
 - **Rika ne répond plus à un message supprimé avant sa réponse**, et ne le garde pas en mémoire.
