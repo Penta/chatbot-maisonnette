@@ -37,6 +37,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika répond normalement quand elle atteint `MEMORY_MAX_OPERATIONS`.** Un membre qui racontait beaucoup de choses d'un coup pouvait recevoir « Je n'ai rien trouvé à répondre à ça », alors que les notes étaient écrites. Rien à régler.
 
+- **Les messages envoyés à la suite reçoivent une seule réponse.** Dans le salon dédié, Rika attend environ 2 secondes avant de répondre, et attend les images en préparation : une capture d'écran et « tu en penses quoi ? » partent ensemble, au lieu de deux réponses dans le désordre. Rien à régler.
+
 ---
 
 ## Version 5.13

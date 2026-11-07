@@ -54,6 +54,8 @@ DEPARTURE_WINDOW = timedelta(minutes=3)
 MAX_BOT_REPLIES = 5
 # Passé ce délai sans message d'un bot dans le salon, le compte repart de zéro.
 BOT_STREAK_RESET = timedelta(minutes=10)
+# Secondes d'attente avant de répondre dans le salon dédié, pour regrouper les messages envoyés à la suite.
+REPLY_PAUSE = 2
 UNEXPECTED_ERROR = "Désolé, une erreur inattendue est survenue."
 
 
@@ -197,6 +199,7 @@ class ChatBot(commands.Bot):
         self.attachments = AttachmentReader(settings)
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
+        self._preparing: dict[int, set[int]] = {}  # messages dont les pièces jointes se téléchargent, par salon
         self._bot_streaks = BotStreaks()
         self._announced = False
         self.config_error: str | None = None  # salon dédié inutilisable : main.py sort en erreur
@@ -481,22 +484,36 @@ class ChatBot(commands.Bot):
             logger.warning("Trop de fichiers en attente : message %s de %s refusé.", message.id, message.author)
             await self.safe_reply(message, FILES_QUEUE_FULL)
             return
+        # Tant qu'il se prépare, les messages suivants l'attendent (voir answer_main_channel) : une fois prêt,
+        # ou refusé, c'est lui qui lance leur réponse, quoi qu'il arrive.
+        channel_id = message.channel.id
+        arrival = asyncio.get_running_loop().time()
+        self._preparing.setdefault(channel_id, set()).add(message.id)
         pending = None
         try:
             pending = await self.read_main_message(message, content)
+        except Exception:
+            logger.exception("Erreur inattendue pendant la lecture d'un message")
+            await self.safe_reply(message, UNEXPECTED_ERROR)
         finally:
-            if pending is None:
-                self.held_files.release(message.id)
+            self._preparing[channel_id].discard(message.id)
         if pending is None:
-            return
-        self.held_files.settle(message.id, pending.held_size)
-
-        # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
-        # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel
-        # (ou plusieurs, s'ils sont trop lourds ensemble : voir fit_in_request).
-        self._pending.setdefault(message.channel.id, []).append(pending)
-        if not self.available() or message.channel.id in self._waiters:
-            self.answer_later(message, self.answer_main_channel)
+            self.held_files.release(message.id)
+            if not self._pending.get(channel_id):
+                return
+        else:
+            self.held_files.settle(message.id, pending.held_size)
+            # Un seul appel à la fois par salon : l'historique reste cohérent. Les messages arrivés
+            # pendant une réponse attendent dans la file, puis partent ensemble dans un seul appel
+            # (ou plusieurs, s'ils sont trop lourds ensemble : voir fit_in_request).
+            self._pending.setdefault(channel_id, []).append(pending)
+        # Courte pause, comptée depuis l'arrivée du message : tout ce qui arrive entre-temps part dans la même
+        # réponse. Une image, plus longue à envoyer, arrive souvent après le texte qui l'accompagne.
+        if self.available() and channel_id not in self._waiters:
+            await asyncio.sleep(max(0, REPLY_PAUSE - (asyncio.get_running_loop().time() - arrival)))
+        if not self.available() or channel_id in self._waiters:
+            if pending is not None:
+                self.answer_later(message, self.answer_main_channel)
             return
         await self.answer_main_channel(message.channel)
 
@@ -541,8 +558,10 @@ class ChatBot(commands.Bot):
         # Jusqu'au dernier message : une réponse différée est la seule tâche pour tous ceux de son attente.
         while True:
             async with self.history.lock(channel.id):
-                if not pending:
-                    return  # déjà parti avec un message précédent
+                # Tous les messages attendent ceux encore en préparation : sinon le bot répondrait à « tu en
+                # penses quoi ? » sans avoir vu l'image envoyée avec. Le message en préparation relancera la réponse.
+                if not pending or self._preparing.get(channel.id):
+                    return
                 pending.sort(key=lambda p: p.message.id)
                 count = fit_in_request([p.images for p in pending], [p.user_text for p in pending])
                 if count < len(pending):
