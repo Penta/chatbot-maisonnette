@@ -24,7 +24,9 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         self.bot = bot = mock.Mock()
         bot.settings.reply_pause = 0
         bot.held_files = HeldFiles()
-        bot._pending, bot._preparing, bot._waiters = {}, {}, {}
+        bot._pending, bot._preparing, bot._waiters, bot._mentions = {}, {}, {}, {}
+        bot._answering, bot._waiting = set(), set()
+        bot.history.delete = mock.AsyncMock(return_value=False)
         bot._last_main_message = None
         bot.available.return_value = True
         bot.safe_reply = mock.AsyncMock()
@@ -56,6 +58,16 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         message = mock.Mock(id=message_id, channel=self.channel, attachments=[], content=f"message {message_id}",
                             stickers=[], created_at=datetime(2026, 11, 7, tzinfo=timezone.utc))
         return asyncio.create_task(ChatBot.handle_main_channel(self.bot, message))
+
+    async def delete(self, *message_ids: int) -> None:
+        await ChatBot.forget_deleted(self.bot, CHANNEL_ID, set(message_ids))
+
+    def deleted_while_asking(self, *message_ids: int) -> None:
+        """Ces messages sont supprimés pendant que Claude écrit sa réponse."""
+        async def ask(*args, **kwargs):
+            await self.delete(*message_ids)
+            return mock.Mock(text="Réponse", web_used=False)
+        self.bot.claude.ask.side_effect = ask
 
     def asked(self) -> list[list[str]]:
         return [[part for part, _ in call.args[1]] for call in self.bot.claude.ask.await_args_list]
@@ -200,6 +212,45 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         self.results[1] = None
         await self.arrive(1)
         self.bot.answer_later.assert_not_called()
+
+    async def test_deleted_while_preparing_not_answered(self):
+        # Alice poste une image puis supprime son message pendant le téléchargement : pas de réponse, rien en mémoire.
+        self.slow[1] = asyncio.Event()
+        task = self.arrive(1)
+        await asyncio.sleep(0)
+        await self.delete(1)
+        self.slow[1].set()
+        await task
+        self.bot.claude.ask.assert_not_awaited()
+        self.bot.history.add_exchange.assert_not_awaited()
+
+    async def test_deleted_while_preparing_others_still_answered(self):
+        self.slow[1] = asyncio.Event()
+        task = self.arrive(1)
+        await asyncio.sleep(0)
+        await self.arrive(2)
+        await self.delete(1)
+        self.slow[1].set()
+        await task
+        self.assertEqual(self.asked(), [[text(2)]])
+
+    async def test_deleted_during_answer_not_sent(self):
+        self.deleted_while_asking(1)
+        await self.arrive(1)
+        self.bot.send_answer.assert_not_awaited()
+        self.bot.history.add_exchange.assert_not_awaited()
+
+    async def test_one_deleted_during_answer_others_answered(self):
+        self.slow[1] = asyncio.Event()
+        task = self.arrive(1)
+        await asyncio.sleep(0)
+        await self.arrive(2)
+        self.deleted_while_asking(2)
+        self.slow[1].set()
+        await task
+        self.bot.history.add_exchange.assert_awaited_once()
+        self.bot.send_answer.assert_awaited_once()
+        self.assertEqual(self.bot.send_answer.await_args.args[0].id, 1)  # la réponse suit le message restant
 
 
 if __name__ == "__main__":

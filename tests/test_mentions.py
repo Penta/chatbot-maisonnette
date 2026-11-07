@@ -9,6 +9,7 @@ from unittest import mock
 import aiohttp
 import discord
 
+from bot.attachments import HeldFiles
 from bot.claude_client import ClaudeError
 from bot.discord_bot import UNEXPECTED_ERROR, ChatBot
 from bot.discord_bot import typing as real_typing  # la classe de tests remplace bot.discord_bot.typing
@@ -19,8 +20,10 @@ CHANNEL_ID = 20
 
 def fake_bot() -> mock.Mock:
     bot = mock.Mock()
-    bot._mentions = {}
-    bot._waiters = {}
+    bot._mentions, bot._waiters, bot._pending, bot._preparing = {}, {}, {}, {}
+    bot._answering, bot._waiting = set(), set()
+    bot.held_files = HeldFiles()
+    bot.history.delete = mock.AsyncMock(return_value=False)
     bot.available.return_value = True
     lock = asyncio.Lock()
     bot.history.lock.return_value = lock
@@ -314,6 +317,31 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         bot.mention_part = mock.AsyncMock(return_value=None)
         await ChatBot.answer_mention(bot, [fake_mention(1, "regarde", channel)])
         bot.claude.ask.assert_not_awaited()
+        bot.send_answer.assert_not_awaited()
+
+    async def test_deleted_while_reading_not_answered(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        first, second = fake_mention(1, "regarde", channel), fake_mention(2, "et ça ?", channel)
+
+        async def read(message):
+            if message is first:  # supprimée pendant le téléchargement de sa pièce jointe
+                await ChatBot.forget_deleted(bot, CHANNEL_ID, {1})
+            return f"texte {message.id}", []
+        bot.mention_part = read
+        await ChatBot.answer_mention(bot, [first, second])
+        self.assertEqual(bot.claude.ask.await_args.args[1], [("texte 2", [])])
+        bot.send_answer.assert_awaited_once_with(second, "Coucou", reply=False)
+
+    async def test_deleted_during_answer_not_sent(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+
+        async def ask(*args, **kwargs):
+            await ChatBot.forget_deleted(bot, CHANNEL_ID, {1})
+            return mock.Mock(text="Coucou")
+        bot.claude.ask.side_effect = ask
+        await ChatBot.answer_mention(bot, [fake_mention(1, "salut", channel)])
         bot.send_answer.assert_not_awaited()
 
 

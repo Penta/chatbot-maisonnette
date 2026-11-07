@@ -202,6 +202,9 @@ class ChatBot(commands.Bot):
         self.history = ConversationHistory(settings.history_file, settings.max_history_length)
         self._pending: dict[int, list[PendingMessage]] = {}  # messages en attente de réponse, par salon
         self._preparing: dict[int, set[int]] = {}  # messages dont les pièces jointes se téléchargent, par salon
+        # Messages auxquels le bot est en train de répondre (tous salons) : un message supprimé en sort, et le bot
+        # ne lui répond plus (voir forget_deleted).
+        self._answering: set[int] = set()
         self._bot_streaks = BotStreaks()
         self._announced = False
         self.config_error: str | None = None  # salon dédié inutilisable : main.py sort en erreur
@@ -466,6 +469,10 @@ class ChatBot(commands.Bot):
             pending[:] = [p for p in pending if p.message.id not in message_ids]
         if mentions := self._mentions.get(channel_id):
             mentions[:] = [m for m in mentions if m.id not in message_ids]
+        # En préparation ou en cours de réponse : le bot le voit et ne répond pas à ces messages.
+        if preparing := self._preparing.get(channel_id):
+            preparing -= message_ids
+        self._answering -= message_ids
         self.held_files.release(*message_ids)
         keys = {(channel_id, message_id) for message_id in message_ids}
         if keys & self._waiting:
@@ -504,7 +511,11 @@ class ChatBot(commands.Bot):
             logger.exception("Erreur inattendue pendant la lecture d'un message")
             await self.safe_reply(message, UNEXPECTED_ERROR)
         finally:
-            self._preparing[channel_id].discard(message.id)
+            preparing = self._preparing[channel_id]
+            if message.id not in preparing:  # supprimé pendant sa préparation (voir forget_deleted)
+                logger.info("Message %s supprimé pendant sa préparation : pas de réponse.", message.id)
+                pending = None
+            preparing.discard(message.id)
         if pending is None:
             self.held_files.release(message.id)
             self.forget_waiting(message)
@@ -584,6 +595,7 @@ class ChatBot(commands.Bot):
                                     "d'abord, les autres ensuite.", channel, count, len(pending))
                     batch = pending[:count]
                     del pending[:count]
+                    self._answering.update(p.message.id for p in batch)
                     try:  # ces messages ont quitté la file : le finally libère leur place, quoi qu'il arrive
                         last = batch[-1].message
                         if len(batch) > 1:
@@ -611,10 +623,18 @@ class ChatBot(commands.Bot):
                                 continue
                     finally:
                         self.held_files.release(*(p.message.id for p in batch))
+                    # Supprimés pendant que Claude écrivait : sans eux, la réponse n'a plus lieu d'être. Si d'autres
+                    # restent, elle part ; la suppression attend ce verrou, puis efface ces messages de la mémoire.
+                    kept = [p.message for p in batch if p.message.id in self._answering]
+                    if not kept:
+                        logger.info("Message(s) supprimé(s) dans #%s pendant la réponse : elle n'est pas envoyée.",
+                                    channel)
+                        continue
                     await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
-                await self.send_answer(last, answer.text, reply=split)
+                await self.send_answer(kept[-1], answer.text, reply=split)
             finally:
                 if batch:
+                    self._answering.difference_update(p.message.id for p in batch)
                     self.forget_waiting(*(p.message for p in batch))
 
     async def handle_mention(self, message: discord.Message) -> None:
@@ -644,12 +664,14 @@ class ChatBot(commands.Bot):
             try:
                 await self.answer_mention(batch, late)
             finally:
+                self._answering.difference_update(m.id for m in batch)
                 self.forget_waiting(*batch)
                 self.held_files.release(*(m.id for m in batch))
 
     async def answer_mention(self, mentions: list[discord.Message], late: Status | None = None) -> None:
         """Hors du salon dédié : répond aux mentions d'un même salon en lisant les messages récents, en une
         fois, ou en plusieurs réponses à la suite si elles ne tiennent pas dans une seule requête."""
+        self._answering.update(m.id for m in mentions)  # retirées par answer_mentions, une fois la réponse finie
         channel = mentions[-1].channel
         answered, parts = [], []
         for message in mentions:
@@ -659,10 +681,10 @@ class ChatBot(commands.Bot):
                 logger.exception("Erreur inattendue pendant la lecture d'une mention")
                 await self.safe_reply(message, UNEXPECTED_ERROR)
                 continue
-            if part:
+            if part and message.id in self._answering:  # pas supprimée pendant sa lecture
                 answered.append(message)
                 parts.append(part)
-        # Mentions à pièce jointe refusée : leurs auteurs ont été prévenus, elles restent hors du contexte.
+        # Mentions à pièce jointe refusée (leurs auteurs ont été prévenus) ou supprimées : hors du contexte.
         refused = {m.id for m in mentions} - {m.id for m in answered}
         sent: list[str] = []  # en retard, réponses déjà envoyées (postées après la fin du contexte)
         split = False  # réponse découpée : chaque morceau cite sa dernière mention
@@ -705,6 +727,11 @@ class ChatBot(commands.Bot):
                     logger.exception("Erreur inattendue pendant le traitement d'une mention")
                     await warn_authors(self.safe_reply, group, UNEXPECTED_ERROR)
                     continue
+            # Toutes supprimées pendant que Claude écrivait : la réponse n'a plus lieu d'être.
+            if not (kept := [m for m in group if m.id in self._answering]):
+                logger.info("Mention(s) supprimée(s) dans #%s pendant la réponse : elle n'est pas envoyée.", channel)
+                continue
+            last = kept[-1]
             # En retard ou découpée, la réponse cite la dernière mention : on sait à quoi elle répond.
             await self.send_answer(last, answer.text, reply=late is not None or split)
             if late:
