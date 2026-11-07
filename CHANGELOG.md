@@ -12,51 +12,41 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
-- **Désactiver la mémoire ne touche plus au fichier général.** Rika a pour consigne de ne rien y noter sur les membres : seule la fiche est effacée, et le nom retiré des sources des autres fiches (aussi sous sa forme simple pour un pseudo décoré comme « 𝓑𝓸𝓫 »). `/memoire` invite le membre à faire vérifier le fichier général par un administrateur.
+- **Les fiches de mémoire se modifient ligne par ligne, et chacun peut compléter la sienne.** Dans `/memoire`, le membre ajoute ou supprime des lignes et écrit ses surnoms ; l'administrateur fait de même dans `/memoire-serveur`.
 
-- **Une source est gardée par l'identifiant Discord du membre.** « d'après Alice » désigne toujours la bonne Alice, même si un autre membre prend son pseudo, et affiche son nom actuel. Désactiver la mémoire retire exactement ses mentions. Les notes plus anciennes restent écrites avec le nom.
+- **Une source (« d'après Alice ») suit le membre, même s'il change de pseudo.**
 
-- **Les fiches se modifient ligne par ligne, et chacun complète la sienne.** Dans `/memoire`, le membre ajoute des lignes à sa fiche, coche celles à supprimer dans un menu et écrit ses surnoms avec le bouton « Surnoms ». Dans `/memoire-serveur`, l'administrateur ajoute ou supprime des lignes. Rika garde au plus 25 lignes par fichier ; une fiche plus longue n'est pas tronquée.
+- **Désactiver la mémoire ne touche plus au fichier général.** `/memoire` invite le membre à le faire vérifier par un administrateur.
 
-- **Les versions des dépendances sont figées, et Python 3.11 est le minimum.** `requirements.txt` indique les versions exactes testées : une nouvelle version d'une bibliothèque n'arrive plus sans changement du dépôt. Hors Docker, vérifie ta version de Python, puis relance `pip install -r requirements.txt`.
+- **Une seule réponse aux messages envoyés à la suite dans le salon dédié.** Rika attend environ 2 secondes avant de répondre (`REPLY_PAUSE`).
 
-- **Les anciennes fiches des membres sans mémoire sont effacées.** Au premier démarrage de cette version, les fiches écrites avant la 5.11 sur les membres qui n'ont pas activé la mémoire depuis disparaissent : Rika ne s'en servait plus, et personne ne pouvait les lire. Rien à faire.
+- **Les anciennes fiches des membres sans mémoire sont effacées au premier démarrage.** Rika ne s'en servait plus, et personne ne pouvait les lire.
 
-- **Les fichiers d'avant la 5.8 et la 5.11 ne sont plus convertis.** Un historique d'avant la 5.8 est mis de côté (`conversation_history.json.corrompu-<date>`) et la conversation repart de zéro ; un `registre.json` d'avant la 5.11 coupe la mémoire des membres. Depuis une version aussi ancienne, passe d'abord par la 5.13.
+- **Python 3.11 minimum, et versions des dépendances figées.** Hors Docker, relance `pip install -r requirements.txt`.
 
-- **Des consignes plus courtes pour Claude.** Les notes ajoutées à la personnalité gardent les mêmes règles en environ 600 tokens de moins par message (un quart de moins, tous réglages activés), ce qui allège un peu le coût. Rien à régler.
+- **Les fichiers d'avant la 5.8 et la 5.11 ne sont plus convertis.** Depuis une version aussi ancienne, passe d'abord par la 5.13.
+
+- **Des consignes plus courtes pour Claude : environ un quart de tokens en moins par message.**
 
 ### Corrections
 
-- **Rika ne peut plus vider une fiche ou le fichier général sur simple demande.** Un membre pouvait lui faire réécrire la fiche d'un autre avec une seule ligne, et les anciennes notes étaient perdues. Elle ne peut plus en retirer plus de la moitié d'un coup ; effacer se fait avec `/memoire` ou `/memoire-serveur`.
+- **Rika ne perd plus de messages lors d'un redémarrage ou d'une panne de Discord.** Ils sont repris au démarrage suivant, et chaque auteur est prévenu si sa réponse échoue.
 
-- **Désactiver la mémoire n'efface plus les sources d'un autre membre.** Un membre qui prenait le pseudo d'un autre avant de désactiver sa mémoire faisait remplacer par « un membre » le nom de cet autre dans toutes les fiches. Un nom porté par deux membres est maintenant laissé, et noté dans le log.
+- **Rika ne peut plus vider une fiche sur simple demande.** Elle ne retire jamais plus de la moitié d'un fichier d'un coup ; effacer se fait avec `/memoire` ou `/memoire-serveur`.
 
-- **Rika ne joue plus à un jeu Steam pas encore sorti.** Les jeux annoncés sur la boutique sont maintenant écartés du statut « joue à », comme les jeux pour adultes. Rien à régler.
+- **Désactiver la mémoire n'efface plus les sources d'un autre membre qui avait pris le même pseudo.**
 
-- **Une « version » invalide dans `registre.json` n'empêche plus le bot de démarrer.** Le bot démarre avec la mémoire des membres coupée et le log indique quoi corriger : `version` doit valoir `3`, sans guillemets. Corrige le fichier puis redémarre.
+- **Les boutons de `/memoire` n'affichent plus « Échec de l'interaction » alors que l'action a réussi.**
 
-- **Les membres savent qu'un administrateur peut effacer leur fiche.** La question d'activation de la mémoire et la note sous la fiche dans `/memoire` ne parlaient que de supprimer des lignes : elles disent maintenant tout ce que les administrateurs peuvent faire. Rien à régler.
+- **Plus de « Je n'ai rien trouvé à répondre à ça » quand Rika prend beaucoup de notes d'un coup.**
 
-- **La reprise au démarrage ne perd plus de messages en attente.** Un message reçu pendant la relecture de `waiting_messages.json` pouvait en disparaître, ou en faire disparaître d'autres, et un nouveau redémarrage les laissait sans réponse. Une reprise qui échoue est aussi notée dans le log. Rien à régler.
+- **Les gros messages ne font plus exploser le coût ni tomber le bot.** `WEB_MAX_USES` limite vraiment les recherches web, les messages groupés très longs partent en plusieurs réponses, et au-delà de 100 Mo de fichiers en attente, l'auteur est invité à renvoyer le sien plus tard.
 
-- **`WEB_MAX_USES` limite vraiment les recherches et les pages lues par message.** La limite pouvait repartir de zéro à chaque note de mémoire, ce qui multipliait le coût d'un message. Le texte d'une page lue est aussi limité à environ 10 000 tokens. Rien à régler.
+- **Rika ne joue plus à un jeu Steam pas encore sorti.**
 
-- **Une erreur sur des messages groupés prévient tous leurs auteurs.** Seul le dernier auteur était prévenu que ses messages étaient perdus. Les messages très longs, fichiers texte compris, partent aussi en plusieurs réponses au lieu de faire échouer tout le lot. Rien à régler.
+- **Une « version » invalide dans `registre.json` n'empêche plus le démarrage.** La mémoire des membres est alors coupée, et le log dit quoi corriger.
 
-- **Trop de fichiers en attente ne peuvent plus faire tomber le bot.** Au-delà de 100 Mo de fichiers en attente, tous salons confondus, un nouveau message avec fichier est refusé avant téléchargement, et son auteur est invité à le renvoyer plus tard. Rien à régler.
-
-- **Rika répond normalement quand elle atteint `MEMORY_MAX_OPERATIONS`.** Un membre qui racontait beaucoup de choses d'un coup pouvait recevoir « Je n'ai rien trouvé à répondre à ça », alors que les notes étaient écrites. Rien à régler.
-
-- **Les messages envoyés à la suite reçoivent une seule réponse.** Dans le salon dédié, Rika attend environ 2 secondes avant de répondre, et attend les images en préparation : une capture d'écran et « tu en penses quoi ? » partent ensemble, au lieu de deux réponses dans le désordre. Rien à régler ; `REPLY_PAUSE` change ce délai si besoin.
-
-- **Les boutons de `/memoire` n'affichent plus « Échec de l'interaction » alors que c'est fait.** Effacer, désactiver ou activer la mémoire pouvait dépasser le délai de Discord sur un disque lent. Le bot répond maintenant à Discord avant d'écrire. Rien à régler.
-
-- **Un redémarrage ne perd plus les messages en cours de réponse.** Ils sont repris au démarrage, dans le salon dédié comme pour les mentions, avec un seul nouvel essai pour qu'un message problématique ne bloque pas le bot. Rien à régler.
-
-- **Une panne de Discord au redémarrage ne fait plus perdre de messages en attente.** Un message que le bot n'a pas pu relire reste dans `waiting_messages.json` et sera repris au démarrage suivant, avec une trace dans le log. Rien à régler.
-
-- **Une panne de Discord pendant une mention ne laisse plus son auteur sans nouvelles.** Si Rika ne peut pas lire les derniers messages du salon, elle répond sans eux, et toute autre erreur inattendue prévient l'auteur. Une coupure réseau ne bloque plus les autres messages, et sans accès à un message cité, elle répond sans lui. Rien à régler.
+- **`/memoire` dit aux membres qu'un administrateur peut aussi effacer leur fiche.**
 
 ---
 
