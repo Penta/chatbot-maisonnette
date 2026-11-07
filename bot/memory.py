@@ -173,17 +173,11 @@ class MemoryStore:
 
     def for_editing(self, text: str) -> str:
         """Ligne telle qu'elle s'ouvre dans « Modifier une ligne » : comme with_usernames, reconverti à
-        l'enregistrement (voir _with_ids). Mais un membre que « @nom » ne retrouverait pas à coup sûr (nom
-        porté par deux comptes du registre, membre inconnu du registre) reste « <@id> » : corriger le reste
-        de la ligne ne lui fait pas perdre sa source."""
-        owners = self._owners()
-
-        def username(match: re.Match) -> str:
-            entry = self.members.get(match.group(1))
-            if entry is None or owners.get(entry["username"].casefold()) != [match.group(1)]:
-                return match.group(0)
-            return f"@{entry['username']}"
-        return MEMBER_REF.sub(username, text)
+        l'enregistrement (voir _with_ids). Si « @nom » ne redonnait pas la ligne à l'identique (nom porté par
+        deux comptes du registre, membre inconnu du registre, mention collée à un mot…), la ligne s'ouvre
+        telle qu'enregistrée, avec ses « <@id> » : corriger le reste ne fait jamais perdre une source."""
+        shown = self.with_usernames(text)
+        return shown if self._with_ids(shown) == text else text
 
     def with_names(self, text: str) -> str:
         """Fichier tel que les membres le voient dans /memoire : membres cités par leur nom actuel

@@ -833,6 +833,16 @@ class EditLineTest(MemoryTestCase):
         await window.on_submit(interaction_mock(done=True))
         self.assertEqual(self.store.read(self.FICHE), "habite à Villeurbanne (d'après <@222>, selon <@999>)")
 
+    async def test_source_kept_when_glued_to_a_word(self):
+        # Mention écrite à la main collée à un mot : « d'après@carol » ne serait pas relu comme Carol.
+        # Toute ligne que « @nom » ne redonnerait pas à l'identique s'ouvre sous sa forme brute.
+        await self.members.see(444, "carol", "Carol")
+        self.write(self.FICHE, "aime le jazz (d'après<@444>)\njoue à Zelda (<@444>abc)")
+        for number, line in enumerate(["aime le jazz (d'après<@444>)", "joue à Zelda (<@444>abc)"], start=1):
+            with self.subTest(line=line):
+                window = await self.window(self.card(), number)
+                self.assertEqual(window.input.default, line)
+
     async def test_one_line_stays_one_line(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
         window = await self.window(self.card(), 1)
