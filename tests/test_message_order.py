@@ -73,16 +73,31 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         return [[part for part, _ in call.args[1]] for call in self.bot.claude.ask.await_args_list]
 
     async def test_sticker_or_emoji_alone_answered_by_claude(self):
-        # Paul envoie un sticker seul, puis Léa un emoji du serveur seul : Claude leur répond, comme à un message.
-        for content, stickers in (("", [mock.Mock()]), ("<:rire:1>", [])):
-            with self.subTest(content=content):
-                self.bot.claude.ask.reset_mock()
+        # Paul envoie un sticker seul, puis un emoji du serveur seul : Claude reçoit chaque message et y répond
+        # avec des mots, même si le serveur a des stickers et des emojis qu'il pourrait renvoyer.
+        bot = self.bot
+        bot.read_main_message = ChatBot.read_main_message.__get__(bot)
+        bot.read_forward = mock.AsyncMock(return_value=(None, []))
+        bot.read_attachments = mock.AsyncMock(return_value=([], None))
+        bot.read_reply = mock.AsyncMock(return_value=(None, []))
+        bot.message_body = ChatBot.message_body
+        bot.timestamp.return_value = "07/11/2026 18:00"
+        sticker = mock.Mock(available=True)
+        sticker.name = "chat qui pleure"
+        guild = mock.Mock(stickers=[sticker])
+        for content, stickers, seen in (("", [sticker], "[sticker « chat qui pleure »]"), ("<:rire:1>", [], ":rire:")):
+            with self.subTest(seen=seen):
+                bot.claude.ask.reset_mock()
                 self.channel.send = mock.AsyncMock()
-                message = mock.Mock(id=1, channel=self.channel, attachments=[], content=content, stickers=stickers,
+                message = mock.Mock(id=1, channel=self.channel, guild=guild, attachments=[], content=content,
+                                    clean_content=content, stickers=stickers,
                                     created_at=datetime(2026, 11, 7, tzinfo=timezone.utc))
-                await ChatBot.handle_main_channel(self.bot, message)
-                self.assertEqual(self.asked(), [[text(1)]])
+                message.author.display_name = message.author.name = "membre"
+                with mock.patch("bot.discord_bot.usable_emojis", lambda guild: ["<:rire:1>"]):
+                    await ChatBot.handle_main_channel(bot, message)
+                self.assertEqual(self.asked(), [[f"07/11/2026 18:00, membre a écrit : {seen}"]])
                 self.channel.send.assert_not_awaited()
+                bot.send_answer.assert_awaited_with(message, "Réponse", reply=False)
 
     async def test_text_waits_for_older_image(self):
         # Une capture d'écran, puis « tu en penses quoi ? » : Claude doit voir les deux ensemble.
