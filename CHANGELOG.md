@@ -43,6 +43,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Un redémarrage ne perd plus les messages en cours de réponse.** Ils sont repris au démarrage, dans le salon dédié comme pour les mentions, avec un seul nouvel essai pour qu'un message problématique ne bloque pas le bot. Rien à régler.
 
+- **Une panne de Discord au redémarrage ne fait plus perdre de messages en attente.** Un message que le bot n'a pas pu relire reste dans `waiting_messages.json` et sera repris au démarrage suivant, avec une trace dans le log. Rien à régler.
+
 ---
 
 ## Version 5.13

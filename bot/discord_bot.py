@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -857,12 +858,18 @@ class ChatBot(commands.Bot):
         if not keys:
             return
         messages = []
+        unread = set()  # Discord en panne, réseau coupé : pas une raison de les perdre
         for channel_id, message_id in sorted(keys):
             try:
                 channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
                 messages.append(await channel.fetch_message(message_id))
-            except discord.HTTPException:
-                pass  # message supprimé, salon inaccessible…
+            except (discord.NotFound, discord.Forbidden) as exc:  # message supprimé, salon inaccessible
+                logger.info("Message %s du salon %s non repris : %s", message_id, channel_id, exc)
+            except (discord.HTTPException, aiohttp.ClientError, OSError) as exc:
+                logger.warning("Message %s du salon %s pas relu, gardé pour le prochain démarrage : %s",
+                               message_id, channel_id, exc)
+                unread.add((channel_id, message_id))
+        keys -= unread
         self._waiting -= keys  # pas les messages arrivés pendant les téléchargements, toujours en attente
         self._replayed |= keys  # un seul essai pour ceux-là (voir remember_queued)
         self._save_waiting()

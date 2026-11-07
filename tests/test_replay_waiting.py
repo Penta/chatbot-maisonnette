@@ -7,6 +7,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import aiohttp
+import discord
+
 from bot.discord_bot import ChatBot
 
 CHANNEL_ID = 10
@@ -97,6 +100,69 @@ class ReplayWaitingTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertLogs("chatbot.discord", "WARNING"):
                     ChatBot.load_waiting(bot)
                 self.assertEqual(bot._waiting, set())
+
+    def reading_fails(self, error: Exception) -> None:
+        """La relecture du message 1 échoue, celle du message 2 réussit."""
+        async def fetch(message_id: int) -> mock.Mock:
+            if message_id == 1:
+                raise error
+            return mock.Mock(id=message_id)
+        self.channel.fetch_message.side_effect = fetch
+
+    async def test_temporary_failure_keeps_message_for_next_start(self):
+        errors = (discord.DiscordServerError(mock.Mock(status=503, reason="indisponible"), "panne"),
+                  discord.HTTPException(mock.Mock(status=429, reason="trop vite"), "limite"),
+                  aiohttp.ClientConnectionError("réseau coupé"), TimeoutError("délai dépassé"))
+        for error in errors:
+            with self.subTest(type(error).__name__):
+                self.file.write_text(json.dumps([[CHANNEL_ID, 1], [CHANNEL_ID, 2]]), encoding="utf-8")
+                self.bot = fake_bot(self.file)
+                ChatBot.load_waiting(self.bot)
+                self.bot.get_channel.return_value = self.channel
+                self.reading_fails(error)
+                with self.assertLogs("chatbot.discord", "WARNING") as logs:
+                    await ChatBot.replay_waiting(self.bot)
+                self.assertIn("prochain démarrage", logs.output[0])
+                self.assertEqual(self.saved(), [[CHANNEL_ID, 1]])
+                self.assertEqual([call.args[0].id for call in self.bot.on_message.await_args_list], [2])
+                # Pas repris : il garde son essai pour le prochain démarrage.
+                self.assertEqual(self.bot._replayed, {(CHANNEL_ID, 2)})
+
+    async def test_kept_message_replayed_at_next_start(self):
+        self.reading_fails(discord.DiscordServerError(mock.Mock(status=503, reason="indisponible"), "panne"))
+        with self.assertLogs("chatbot.discord", "WARNING"):
+            await ChatBot.replay_waiting(self.bot)
+        restarted = fake_bot(self.file)
+        ChatBot.load_waiting(restarted)
+        self.channel.fetch_message.side_effect = lambda message_id: mock.Mock(id=message_id)
+        restarted.get_channel.return_value = self.channel
+        await ChatBot.replay_waiting(restarted)
+        self.assertEqual([call.args[0].id for call in restarted.on_message.await_args_list], [1])
+        self.assertEqual(self.saved(), [])
+
+    async def test_channel_read_failure_keeps_message(self):
+        self.bot.get_channel.return_value = None
+        self.bot.fetch_channel = mock.AsyncMock(
+            side_effect=discord.DiscordServerError(mock.Mock(status=503, reason="indisponible"), "panne"))
+        with self.assertLogs("chatbot.discord", "WARNING"):
+            await ChatBot.replay_waiting(self.bot)
+        self.assertEqual(self.saved(), [[CHANNEL_ID, 1], [CHANNEL_ID, 2]])
+        self.bot.on_message.assert_not_awaited()
+
+    async def test_deleted_or_forbidden_message_leaves_file_with_a_trace(self):
+        errors = (discord.NotFound(mock.Mock(status=404, reason="inconnu"), "supprimé"),
+                  discord.Forbidden(mock.Mock(status=403, reason="interdit"), "accès refusé"))
+        for error in errors:
+            with self.subTest(type(error).__name__):
+                self.file.write_text(json.dumps([[CHANNEL_ID, 1], [CHANNEL_ID, 2]]), encoding="utf-8")
+                self.bot = fake_bot(self.file)
+                ChatBot.load_waiting(self.bot)
+                self.bot.get_channel.return_value = self.channel
+                self.reading_fails(error)
+                with self.assertLogs("chatbot.discord", "INFO") as logs:
+                    await ChatBot.replay_waiting(self.bot)
+                self.assertIn("non repris", logs.output[0])
+                self.assertEqual(self.saved(), [])
 
     async def test_replay_error_is_logged_and_others_still_replayed(self):
         self.bot.on_message.side_effect = [RuntimeError("panne"), None]
