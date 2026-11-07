@@ -825,9 +825,11 @@ class ChatBot(commands.Bot):
         except Exception:
             logger.exception("Erreur inattendue pendant une réponse différée")
 
-    async def on_status_change(self, before: Status, after: Status) -> None:
+    async def on_status_change(self, before: Status, after: Status, skipped: bool) -> None:
+        """skipped : statut abandonné avant sa fin avec /skip (voir PresenceManager.skip)."""
         if after.available:
-            await self.speak_up(before, after)
+            if not skipped:  # anime ou partie de jeu interrompu : il n'en a pas vu la fin, il n'en parle pas
+                await self.speak_up(before, after)
         else:
             await self.announce_departure(before, after)
 

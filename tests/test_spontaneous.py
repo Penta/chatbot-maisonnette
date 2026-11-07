@@ -231,6 +231,14 @@ class SpeakUpTest(unittest.IsolatedAsyncioTestCase):
         await self.speak_up(before=MUSIC)
         self.bot.claude.ask.assert_not_awaited()
 
+    async def test_quiet_after_a_skip(self):
+        # Un administrateur passe le statut avec /skip en plein anime : Rika ne l'a pas fini, elle n'en parle pas.
+        self.bot.speak_up = lambda before, after: ChatBot.speak_up(self.bot, before, after)
+        await ChatBot.on_status_change(self.bot, ANIME_EP4, self.after, True)
+        self.bot.claude.ask.assert_not_awaited()
+        await ChatBot.on_status_change(self.bot, ANIME_EP4, self.after, False)  # fin normale de l'anime
+        self.bot.claude.ask.assert_awaited_once()
+
     async def test_not_every_time(self):
         with mock.patch("bot.discord_bot.random.random", lambda: 0.5):
             await self.speak_up()

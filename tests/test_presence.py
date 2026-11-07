@@ -341,14 +341,25 @@ class RestoreTest(unittest.IsolatedAsyncioTestCase):
         set_status.assert_not_called()
         draw, set_status = await self.step(manager, T0 + timedelta(minutes=35))
         draw.assert_not_called()
-        set_status.assert_awaited_once_with(Status(Kind.ANIME, title="Frieren", episode=5))
+        set_status.assert_awaited_once_with(Status(Kind.ANIME, title="Frieren", episode=5), False)
 
     async def test_loop_draws_after_a_finished_status(self):
         self.save(self.episodes(3)[0][0], 10)
         manager = self.restore(T0 + timedelta(hours=1))
         draw, set_status = await self.step(manager, T0 + timedelta(hours=1))
         draw.assert_awaited_once()
-        set_status.assert_awaited_once_with(Status(Kind.ONLINE))
+        set_status.assert_awaited_once_with(Status(Kind.ONLINE), False)  # fin normale, pas un /skip
+
+    async def test_skip_marks_the_status_as_abandoned(self):
+        # /skip pendant l'épisode 4 d'un programme qui va jusqu'au 5 : l'anime n'est pas fini, il est abandonné.
+        self.save(self.episodes(3)[0][0], 10, self.episodes(4, 5))
+        manager = self.restore(T0 + timedelta(minutes=20))
+        draw = mock.AsyncMock(return_value=[(Status(Kind.ONLINE), 600)])
+        manager.bot = mock.Mock()
+        with mock.patch.object(manager, "draw", draw), mock.patch.object(manager, "apply", mock.AsyncMock()),                 mock.patch.object(manager, "save"), frozen_at(T0 + timedelta(minutes=20)):
+            await manager.skip()
+        manager.bot.dispatch.assert_called_once_with(
+            "status_change", Status(Kind.ANIME, title="Frieren", episode=4), Status(Kind.ONLINE), True)
 
 
 if __name__ == "__main__":

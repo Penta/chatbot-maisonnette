@@ -371,7 +371,7 @@ class PresenceManager:
             logger.info("Statut passé avant sa fin.")
             self.program = []
             self.step_end = datetime.min.replace(tzinfo=UTC)
-            await self._step()
+            await self._step(skipped=True)
         self._wake.set()  # la boucle recalcule son prochain réveil
         return self.status
 
@@ -390,8 +390,9 @@ class PresenceManager:
             except Exception:
                 logger.exception("Erreur inattendue pendant la mise à jour des listes de statuts")
 
-    async def _step(self) -> datetime:
-        """Passe à l'étape suivante quand la précédente est finie ; renvoie l'heure du prochain réveil."""
+    async def _step(self, skipped: bool = False) -> datetime:
+        """Passe à l'étape suivante quand la précédente est finie (ou abandonnée avec /skip : skipped) ; renvoie
+        l'heure du prochain réveil."""
         night = self.settings.presence_night
         now = datetime.now(UTC)
         local = now.astimezone(self.settings.timezone)
@@ -414,7 +415,7 @@ class PresenceManager:
                 logger.info("Nouveau statut pour %s.", format_duration(total * self.settings.presence_speed))
             status, seconds = self.program.pop(0)
             self.step_end = now + timedelta(seconds=seconds)
-            await self.set_status(status)
+            await self.set_status(status, skipped)
 
         if night:
             return min(self.step_end, self.next_hour(local, night[0]))
@@ -501,14 +502,15 @@ class PresenceManager:
         """Élément au hasard, différent de l'actuel quand c'est possible."""
         return random.choice([item for item in items if not is_current(item)] or items)
 
-    async def set_status(self, status: Status) -> None:
+    async def set_status(self, status: Status, skipped: bool = False) -> None:
+        """skipped : le statut précédent a été abandonné avant sa fin avec /skip."""
         before, self.status = self.status, status
         self._changed.set()  # réveille les réponses en attente
         self._changed = asyncio.Event()
         logger.info("Statut Discord : %s", status.describe() or "en ligne, sans activité")
         self.save()
         await self.apply()
-        self.bot.dispatch("status_change", before, status)  # appelle on_status_change du bot
+        self.bot.dispatch("status_change", before, status, skipped)  # appelle on_status_change du bot
 
     # ------------------------------------------------------------ nuit
 
