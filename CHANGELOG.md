@@ -82,49 +82,33 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
-- **Journal réglable.** `LOG_LEVEL` choisit le détail du journal (`DEBUG` pour enquêter, `INFO` par défaut), et `LOG_FILE=off` n'écrit que sur la console, pratique en conteneur. Le démarrage rappelle aussi les principaux réglages et les chemins des fichiers.
+- **Rika lit jusqu'à 4 images par message**, y compris dans un message cité ou transféré.
 
-- **Plusieurs images dans un même message.** Rika lit jusqu'à 4 images à la fois, dans l'ordre, y compris dans un message cité ou transféré, et peut les comparer ou parler de « la deuxième ». Si une image pose problème, le message d'erreur dit laquelle. Un PDF reste seul, sans image.
+- **Journal réglable.** `LOG_LEVEL` choisit le niveau de détail, et `LOG_FILE=off` n'écrit que sur la console, pratique en conteneur.
 
-- **Un message de démarrage plus soigné.** Le message « En ligne » affiche l'avatar du bot, sa version, le modèle Claude utilisé (« Sonnet 5.5 ») et l'heure du démarrage.
+- **Le message « En ligne » affiche la version, le modèle Claude et l'heure du démarrage.**
 
 ### Corrections
 
-- **Deux bots ne tournent plus en boucle.** Face à un bot qui lui répond à chaque fois, Rika pouvait enchaîner les réponses, et les appels à Claude, sans fin. Elle s'arrête maintenant après 5 messages de bots d'affilée dans un salon, jusqu'au prochain message d'un membre ou après 10 minutes de calme.
+- **Le bot vérifie ses réglages au démarrage, et s'arrête avec un message clair si l'un est faux.** Cela vaut pour les valeurs trop grandes (plafonds dans `.env.exemple`), les dossiers absents, `CHANNEL_ID`, la clé Anthropic, le modèle et `PRESENCE_WEIGHTS`. Si le bot refuse de démarrer après la mise à jour, le message dit quoi corriger.
 
-- **Une rafale de mentions ne lance plus un appel par message.** Comme dans son salon, les mentions envoyées pendant que Rika écrit, ou pendant une absence, reçoivent une seule réponse groupée, qui tient compte de celle qu'elle vient de poster : 10 « @Rika ? » d'affilée coûtaient 10 appels à Claude, ils en coûtent maintenant deux.
+- **Une réponse trop lente n'est plus relancée trois fois.** `.env.exemple` propose maintenant `MAX_TOKENS=6000` et `API_TIMEOUT=90`, que le bot vérifie au démarrage.
 
-- **Erreurs de démarrage plus claires.** Toutes les erreurs du `.env` sont listées d'un coup, au lieu d'une par redémarrage, et elles sont aussi écrites dans `bot.log`. Sans Internet, ou si Discord est en panne, un message clair remplace la trace technique.
+- **Deux bots ne tournent plus en boucle.** Rika s'arrête après 5 messages de bots d'affilée.
 
-- **Un `.env` entre guillemets marche aussi sous Docker.** `DISCORD_TOKEN="abc"` donnait « Token Discord invalide » avec `docker run --env-file` : le bot retire maintenant lui-même les guillemets. Le README explique les autres différences de `--env-file`.
+- **Une rafale de mentions reçoit une seule réponse groupée**, comme dans le salon dédié.
 
-- **« Réflexion : off » n'est plus affiché à tort.** Sur Opus 5.5, dont la réflexion ne peut pas être coupée, le journal de démarrage indiquait « off » avec `THINKING=off` ; il dit maintenant que c'est impossible sur ce modèle.
+- **Un `.env` entre guillemets marche aussi sous Docker** (`docker run --env-file`).
 
-- **Documentation des réglages alignée.** `.env.exemple` et le README décrivent maintenant exactement ce que fait le bot pour `THINKING`, `EFFORT` et `MAX_TOKENS`, avec les mêmes valeurs proposées.
+- **Une personnalité illisible ne rend plus Rika muette.** Elle garde la dernière valide, et le journal dit quoi corriger.
 
-- **« Modifier » ne signale plus de faux conflit.** Quand l'enregistrement était lent, la fenêtre de `/memoire` restait ouverte alors que le texte était sauvé, et un second clic disait à tort que le fichier avait changé entre-temps. La fenêtre se ferme maintenant dès l'envoi.
+- **Une longue réponse avec du code n'est plus coupée et ne fige plus le bot.**
 
-- **Une réponse trop lente n'est plus relancée trois fois.** Un membre pouvait attendre 4 minutes, recherches web refacturées à chaque essai, avant « Je mets trop de temps à répondre ». `API_TIMEOUT` borne maintenant l'attente totale, et le bot prévient au démarrage s'il est trop court pour `MAX_TOKENS`.
+- **Une date sans fuseau dans `presence_state.json` n'empêche plus le démarrage.**
 
-- **`MAX_TOKENS` vérifié en tenant compte de la réflexion.** Avec `MEMORY=on` et un effort élevé, une note de mémoire pouvait être perdue sans avertissement, faute de place. Le bot refuse maintenant de démarrer sous le minimum et prévient dans le message « En ligne » sous la valeur conseillée ; `.env.exemple` propose `MAX_TOKENS=6000` et `API_TIMEOUT=90`.
+- **« Modifier » ne signale plus de faux conflit dans `/memoire`.**
 
-- **Une personnalité illisible ne rend plus Rika muette.** Un fichier de personnalité illisible (pas en UTF-8, ou un dossier au lieu d'un fichier) faisait échouer chaque message. Rika garde maintenant la dernière personnalité valide, et le journal explique comment corriger le fichier.
-
-- **Les réglages ont un plafond.** Une valeur trop grande ne se voyait qu'au premier message, ou coûtait cher sans prévenir : `CONTEXT_MESSAGE_LIMIT=2000` pouvait coûter plusieurs dizaines de centimes par mention. Au-delà du plafond (100 pour `CONTEXT_MESSAGE_LIMIT`, les autres dans `.env.exemple`), le bot refuse maintenant de démarrer, avec un message clair.
-
-- **`PRESENCE_WEIGHTS` mieux vérifié.** Une virgule en trop est ignorée. Un statut écrit deux fois, ou `jeu` comme seul statut possible sans `STEAM_API_KEY`, arrête maintenant le bot avec un message clair.
-
-- **Un dossier absent est signalé au démarrage.** Si le dossier de `LOG_FILE`, `HISTORY_FILE` ou `MEMORY_DIR` n'existe pas ou n'est pas accessible en écriture (volume Docker mal monté, faute de frappe), le bot refuse de démarrer au lieu de tourner sans rien sauvegarder. L'historique résiste aussi mieux à une coupure de courant.
-
-- **Un `CHANNEL_ID` faux arrête le bot.** Avec un mauvais salon ou une permission manquante, le bot restait connecté sans répondre nulle part. Il vérifie maintenant le salon au démarrage et s'arrête en disant quoi corriger ; si Discord est seulement en panne, il patiente.
-
-- **Une clé Anthropic ou un modèle faux arrête le bot.** Une `ANTHROPIC_API_KEY` ou un `CLAUDE_MODEL` invalide ne se voyait qu'au premier message, avec « Je suis mal configuré ». Le bot les vérifie maintenant au démarrage ; seul un crédit épuisé ne se voit toujours qu'au premier message.
-
-- **Une longue réponse avec du code n'est plus coupée.** Quand un bloc de code commençait juste à la fin d'un morceau de 2000 caractères, ce morceau dépassait la limite de Discord et la suite de la réponse n'était pas envoyée. Le bloc passe maintenant au morceau suivant ; même chose pour les fiches de `/memoire`. Un bloc qui se termine juste à la fin d'un morceau n'affiche plus de bloc vide au début du suivant.
-
-- **Une date sans fuseau dans `presence_state.json` n'empêche plus le démarrage.** Après une modification à la main, une date comme `2026-11-03T10:00:00` arrêtait le bot dès le lancement. Le fichier est maintenant ignoré, avec un avertissement dans le journal, et Rika tire un nouveau statut.
-
-- **Une ligne de code très longue ne fige plus le bot.** Une réponse dont un bloc de code s'ouvrait sur une ligne de près de 2000 caractères (« ```py » suivi de texte) figeait tout le bot, dans tous les salons, jusqu'au redémarrage. Elle est maintenant découpée normalement.
+- **« Réflexion : off » n'est plus affiché à tort sur Opus 5.5.**
 
 ---
 
