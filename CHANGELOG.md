@@ -118,87 +118,59 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
-- **La mémoire des membres s'active soi-même.** Elle est désactivée par défaut, et chaque membre qui le souhaite l'active avec `/memoire`, après avoir lu ce qu'elle retient et qui peut voir sa fiche. Le message de bienvenue, envoyé en message privé au premier message de chacun, disparaît. Rien n'est noté sur un membre qui ne l'a pas activée, même quand les autres parlent de lui.
+- **La mémoire des membres s'active soi-même avec `/memoire`.** Elle est désactivée par défaut, et le message de bienvenue en privé disparaît. Au premier démarrage, elle reste activée pour ceux qui avaient déjà une fiche.
 
-  Au premier démarrage, la mémoire reste activée pour les membres qui avaient déjà une fiche et ne l'avaient pas désactivée ; elle est désactivée pour les autres.
+- **`MAX_TOKENS` passe à 4000 par défaut (1500 avant)**, pour que Rika puisse réécrire le fichier général quand il est plein. Si tu l'avais réglé plus bas, le bot le signale au démarrage.
 
-### Corrections — ce que Rika retient
+- **Premiers tests automatisés** : `python -m unittest` à la racine du projet.
 
-- **Une info sur un membre ne va que dans sa fiche.** En désactivant la mémoire, un membre efface aussi les lignes du fichier général qui le citent.
+### Corrections — mémoire et vie privée
 
-- **Une fiche effacée reste effacée.** Une fiche effacée par « Désactiver la mémoire » ne peut plus être recréée par une note en cours ni par une fenêtre `/memoire` restée ouverte.
+- **Une info sur un membre ne va que dans sa fiche.**
 
-- **Ce qu'on retire de sa fiche n'y revient plus.** Avant, Rika le retrouvait dans la conversation et le notait de nouveau au message suivant. Désormais, une fiche ou le fichier général modifié (ou effacé) avec `/memoire` est montré à Rika avec la date de la modification : elle ne note plus ce qui a été dit avant et n'y figure pas. Ce qu'on lui redit ensuite se note normalement. Même chose après « Désactiver la mémoire », si le membre la réactive. Les dates sont gardées dans `memories/modifications.json`.
+- **Ce qu'on efface de sa fiche n'y revient plus**, même après avoir désactivé puis réactivé la mémoire.
 
-- **Les surnoms sont mieux reconnus.** La ligne « Surnoms : … » est trouvée même si elle n'est pas la première de la fiche (ajoutée à la fin, ou fiche modifiée à la main), avec ou sans puce ; plusieurs lignes « Surnoms » sont regroupées. Avant, elles étaient ignorées sans rien dire. « Surnom : … » au singulier et « **Surnoms :** … » en gras sont aussi reconnus.
+- **Rika ne note plus les confidences, ses jugements, ni une information sensible qu'un membre n'a pas donnée lui-même**, et elle ne récite plus la fiche d'un membre aux autres.
 
-- **Chemins plus souples.** L'outil accepte `memories/membres/…` (sans « / » au début), comme `/memories/membres/…`.
+- **Les membres savent qui peut lire leur fiche, et que ce qu'ils racontent sur les autres est noté avec leur nom.** Chaque ouverture de la fiche d'un autre est notée dans le log.
 
-- **`MAX_TOKENS` passe à 4000 par défaut** (1500 avant), assez pour que Rika réécrive le fichier général quand il est plein. Avant, la réécriture était coupée et la note perdue, à chaque nouvel essai. Le bot prévient au démarrage si `MAX_TOKENS` est trop petit pour `MEMORY_SERVER_LIMIT`, et le log signale un appel d'outil coupé.
+- **Un administrateur ne peut plus écrire la fiche d'un membre qui n'a pas activé la mémoire.**
 
-### Corrections — vie privée
-
-- **Les données personnelles sont protégées.** Rika ne note plus les confidences ni ses jugements sur quelqu'un. Une information sensible (santé, sexualité, religion, opinions, origine, adresse, argent) ne se note que si le membre la donne lui-même, et elle ne l'évoque ensuite qu'avec lui. Elle se sert de ce qu'elle sait dans la conversation, mais ne récite plus la fiche d'un membre à quelqu'un d'autre. Les fiches déjà écrites ne sont pas modifiées.
-
-- **Les membres savent qui peut lire leur fiche.** Ils sont prévenus que les administrateurs du serveur peuvent la voir et la corriger (avant d'activer la mémoire, et sous leur fiche dans `/memoire`). Chaque ouverture de la fiche d'un autre membre avec `/memoire` est notée dans le log, sans son contenu.
-
-- **Les sources nommées sont annoncées.** Avant d'activer la mémoire, chacun est prévenu que les sources sont notées avec leur nom (« d'après Toto ») et visibles par la personne concernée : ce qu'on raconte sur un autre membre peut lui être montré dans sa fiche.
-
-- **Pas de fiche écrite sans accord.** Un administrateur ne peut plus écrire la fiche d'un membre qui n'a pas activé la mémoire (« Modifier » grisé, avec une explication) ; il peut toujours l'effacer.
+- **Les surnoms sont reconnus où qu'ils soient dans la fiche.**
 
 ### Corrections — sécurité
 
-- **Le bot ne sert plus que son propre serveur** (celui de `CHANNEL_ID`). Invité sur un autre serveur, il ignore les messages et refuse les commandes : un administrateur de ce serveur pouvait lire et réécrire la mémoire du vrai serveur avec `/memoire` et `/memoire-serveur`, et les réponses étaient payées par le propriétaire du bot. Les messages privés sont aussi ignorés. Le log signale au démarrage les autres serveurs où se trouve le bot, et le README explique comment décocher *Public Bot* et *User Install* dans le portail Discord.
+- **Le bot ne sert plus que son propre serveur.** Le README explique comment décocher *Public Bot* et *User Install* dans le portail Discord.
 
-- **Plus d'usurpation par le pseudo.** Rika voit chaque auteur avec son nom d'utilisateur Discord, unique (« Johnounet (johnk) »), quand il diffère de son pseudo, y compris pour l'auteur d'un message cité. Deux membres qui portent le même pseudo ne se confondent plus, et personne ne peut faire noter une info dans la fiche d'un autre en prenant son pseudo. Les fiches jointes indiquent celles des auteurs du message, et une fiche ne peut plus imiter l'en-tête d'une autre. Les messages déjà enregistrés gardent l'ancien format.
+- **Plus d'usurpation par le pseudo.** Rika distingue deux membres au même pseudo, et un surnom ne peut plus reprendre le nom d'un autre.
 
-- **On ne peut plus prendre le nom d'un autre comme surnom.** Un surnom qui reprend le nom Discord d'un autre membre (pseudo, nom d'utilisateur ou ancien pseudo) est ignoré dans la liste des membres : Rika ne note plus dans sa fiche ce qu'on raconte sur l'autre.
+- **Les notes restent des notes.** Rika ne note plus de règle pour tout le monde, même présentée comme venant d'un administrateur.
 
-- **Les notes restent des notes.** Le fichier général et la liste des membres sont présentés à Rika comme des notes, pas des consignes, et une note ne peut plus sortir de ce cadre, même avec une balise non fermée ou des chevrons pleine largeur. Rika ne note plus de règle qui s'appliquerait à tout le monde (façon d'écrire, sujet à éviter), même présentée comme votée ou venant d'un administrateur ; une préférence personnelle (« veut qu'on l'appelle Majesté ») se note toujours dans la fiche. Au plus 5 surnoms de 32 caractères par membre. Le texte écrit dans le fichier général apparaît dans le log, pour que l'administrateur puisse vérifier.
+- **Un membre ne peut plus vider le fichier général en désactivant sa mémoire.**
 
-- **Un membre ne peut plus vider le fichier général** en désactivant sa mémoire. Seuls ses noms Discord servent à retrouver les lignes qui le citent, plus les surnoms de sa fiche, qu'il écrit lui-même. Si plus de 3 lignes le citent (pseudo qui est un mot courant, comme « Soleil »), aucune n'est retirée et le log demande à l'administrateur de vérifier avec `/memoire-serveur`.
+- **Le token Discord et les clés n'apparaissent plus quand la configuration est affichée.**
 
-### Corrections — `/memoire` et les commandes
+### Corrections — `/memoire` et fiabilité
 
-- **`/memoire` ne promet plus d'effacer plus qu'il ne le fait.** Le bouton « Tout effacer » d'une fiche devient « Effacer la fiche », et la confirmation précise que ce qui a été dit récemment reste dans la conversation. « Désactiver la mémoire » ne dit plus que « plus rien ne sera retenu », et remplace maintenant le nom du membre par « un membre » là où il est cité comme source dans les fiches des autres (« d'après Bob », « selon Bob »).
+- **`/memoire` ne promet plus d'effacer plus qu'il ne le fait.**
 
-- **« Modifier » n'écrase plus les changements récents.** La fenêtre n'enregistre plus rien si le fichier a changé depuis son ouverture (note de Rika, désactivation d'un membre qui retire des lignes du fichier général). Avant, elle réécrivait le fichier tel qu'il était à l'ouverture : la note était perdue, ou la ligne retirée revenait. Quand un texte n'est pas enregistré (fichier changé, trop long…), il est renvoyé en fichier joint pour ne pas être perdu.
+- **La fenêtre « Modifier » n'écrase plus les changements récents**, respecte la limite du fichier général et s'ouvre même sur un fichier trop long.
 
-- **« Modifier » respecte la limite du fichier général** : 5000 caractères (`MEMORY_SERVER_LIMIT`). Sa deuxième zone de texte laissait en écrire 8000, refusés ensuite à l'enregistrement.
+- **Des messages d'erreur compréhensibles au lieu d'« Échec de l'interaction »**, et des boutons qui se grisent au bout de 10 minutes.
 
-- **Un fichier trop long s'ouvre de nouveau.** Un fichier plus long que sa limite (`MEMORY_*_LIMIT` baissée, fichier modifié sur le disque) s'ouvre en entier dans « Modifier », avec la limite rappelée pour le raccourcir. Avant, la fenêtre ne s'ouvrait pas (« Échec de l'interaction »). Au-delà de 20 000 caractères, trop pour une fenêtre Discord, son contenu est envoyé en fichier joint.
+- **La fiche d'un membre parti reste accessible** avec `/memoire membre:` et son identifiant.
 
-- **Des erreurs compréhensibles.** Une erreur dans une commande ou un bouton affiche « Une erreur est survenue » au lieu du seul « Échec de l'interaction » de Discord. Les boutons de `/memoire` se grisent au bout de 10 minutes, avec un message qui invite à relancer la commande, au lieu de rester affichés sans répondre. La fenêtre « Modifier » peut être validée pendant une heure, au lieu de 10 minutes.
+- **La mémoire coûte moins cher et ne ralentit plus le bot sur un grand serveur.**
 
-- **La fiche d'un membre parti reste accessible** avec `/memoire membre:` (par son identifiant). Avant, la commande échouait, et lui-même ne pouvait plus la lancer : sa fiche restait pour toujours. Un administrateur peut aussi désactiver sa mémoire à sa place, ce qui efface tout comme s'il l'avait fait.
+- **Une fiche ou un registre abîmé ne bloque plus le bot et ne réinitialise plus la mémoire.** Un `memories/registre.json` abîmé coupe la mémoire jusqu'à sa réparation, et le log dit quoi corriger.
 
-### Corrections — fiabilité et performances
-
-- **La mémoire coûte moins cher sur un grand serveur.** Le prompt ne liste plus que les membres qui ont une fiche, au lieu de tous ceux que le bot a vus ou qu'on a mentionnés. Au plus 5 fiches sont jointes à un message (les auteurs d'abord, puis l'auteur du message cité, puis les membres mentionnés) ; les autres sont seulement nommées, et Rika peut les lire si besoin.
-
-- **Le bot ne relit plus toutes les fiches à chaque message.** Elles sont lues une fois au démarrage, puis suivies à chaque note. Avec 500 membres, chaque message bloquait le bot près d'une seconde (mesuré sous Windows). Une fiche modifiée directement sur le disque n'est prise en compte dans la liste qu'au redémarrage.
-
-- **Une fiche illisible ne bloque plus le bot.** Une fiche ou un fichier général illisible (enregistré à la main dans un autre encodage, problème de droits) est signalé une fois dans le log, affiché avec « � » à la place des caractères invalides, et n'est plus modifié tant qu'il n'est pas corrigé. Une fiche enregistrée avec BOM (Bloc-notes) garde sa ligne « Surnoms ».
-
-- **Un registre abîmé coupe la mémoire au lieu de la réinitialiser.** Si `memories/registre.json` est abîmé ou mal modifié à la main, la mémoire des membres est coupée jusqu'à sa réparation, au lieu de repartir d'un registre vide qui réactivait la mémoire de ceux qui l'avaient désactivée. Le fichier n'est plus mis de côté ni réécrit ; le log et `/memoire` signalent la panne. Un registre corrigé à la main et enregistré avec BOM (Bloc-notes) reste lisible.
-
-- **Un registre impossible à enregistrer est signalé.** Si le registre ne peut pas être enregistré (disque plein, droits), « Désactiver la mémoire » et « Réactiver la mémoire » le disent, au lieu d'annoncer un réglage qui serait perdu au redémarrage du bot. Le réglage s'applique quand même, et la prochaine sauvegarde réussie du registre l'enregistre.
+- **Une coupure de courant ne laisse plus de fiche vide.**
 
 ### Corrections — démarrage et réponses
 
-- **Un modèle inconnu est signalé dès le démarrage** (`CLAUDE_MODEL` mal écrit, par exemple), et plus seulement au premier message. Les messages d'erreur citent `CLAUDE_MODEL` (et non `MODEL`, une variable qui n'existe pas).
+- **Un `CLAUDE_MODEL` ou une `TIMEZONE` mal écrits sont signalés clairement au démarrage.**
 
-- **`TIMEZONE` mal formée** (« Europe/Paris/ », « ../Paris ») ou trop longue : message d'erreur clair au démarrage, au lieu d'une trace Python.
-
-- **Plus de « […] » envoyé seul.** Une réponse coupée avant son premier mot n'envoie plus « […] » seul sur Discord (ni dans l'historique), mais un message d'explication.
-
-### Divers
-
-- **Secrets masqués.** Le token Discord et les clés Anthropic et Steam n'apparaissent plus quand la configuration est affichée (précaution : aucun log ne l'affiche aujourd'hui).
-
-- **Premiers tests automatisés** (mémoire des membres) : lancer `python -m unittest` à la racine du projet.
-
-- **Écritures plus sûres.** Les fiches et le registre des membres sont envoyés jusqu'au disque avant d'être remplacés : une coupure de courant ne laisse plus de fichier vide. Une écriture ratée ne laisse plus de fichier `.tmp` derrière elle.
+- **Plus de « […] » envoyé seul quand une réponse est coupée.**
 
 ---
 
