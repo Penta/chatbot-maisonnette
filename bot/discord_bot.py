@@ -26,6 +26,7 @@ from .claude_client import ClaudeClient, ClaudeError
 from .commands import memory_command, reset_command, server_memory_command, skip_command
 from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
+from .files import write_atomic
 from .history import ConversationHistory, render_line
 from .images import ImageError
 from .media import ImageData, fit_in_request
@@ -846,7 +847,8 @@ class ChatBot(commands.Bot):
 
     def _save_waiting(self) -> None:
         try:
-            self._waiting_file.write_text(json.dumps(sorted(self._waiting)), encoding="utf-8")
+            # Écrit à chaque message, dans la boucle du bot : sans fsync, qui le figerait sur un volume lent.
+            write_atomic(self._waiting_file, json.dumps(sorted(self._waiting)), flush_to_disk=False)
         except OSError as exc:
             logger.warning("Impossible d'écrire %s : %s", self._waiting_file, exc)
 

@@ -13,6 +13,7 @@ from unittest import mock
 from bot.attachments import HeldFiles
 from bot.claude_client import ClaudeError
 from bot.discord_bot import ChatBot, PendingMessage
+from bot.files import write_atomic
 
 CHANNEL_ID = 10
 
@@ -206,6 +207,33 @@ class MentionTest(WaitingTestCase):
         await ChatBot.handle_mention(self.bot, self.mention())
         self.bot.safe_reply.assert_awaited_once()
         self.assertEqual(self.saved(), [])
+
+
+class SafeWritingTest(WaitingTestCase):
+    """Le fichier est écrit à chaque message : un arrêt brutal en pleine écriture ne doit pas tout faire perdre."""
+
+    def test_interrupted_write_keeps_previous_file(self):
+        self.bot.remember_waiting(self.message(1))
+        with mock.patch("bot.files.os.replace", side_effect=OSError("arrêt brutal")), \
+                self.assertLogs("chatbot.discord", "WARNING"):
+            self.bot.remember_waiting(self.message(2))
+        self.assertEqual(self.saved(), [[CHANNEL_ID, 1]])
+
+    def test_no_forced_disk_flush(self):
+        # L'écriture se fait dans la boucle du bot : un fsync le figerait à chaque message sur un volume lent.
+        with mock.patch("bot.files.os.fsync") as fsync:
+            self.bot.remember_waiting(self.message(1))
+        fsync.assert_not_called()
+        self.assertEqual(self.saved(), [[CHANNEL_ID, 1]])
+
+    def test_no_temporary_file_left(self):
+        self.bot.remember_waiting(self.message(1))
+        self.assertEqual([path.name for path in self.file.parent.iterdir()], [self.file.name])
+
+    def test_other_files_still_flushed_by_default(self):
+        with mock.patch("bot.files.os.fsync") as fsync:
+            write_atomic(self.file.with_name("autre.json"), "{}")
+        fsync.assert_called_once()
 
 
 class ReplayOnlyOnceTest(WaitingTestCase):
