@@ -152,6 +152,28 @@ class MainChannelTest(WaitingTestCase):
         await ChatBot.handle_main_channel(self.bot, self.message())
         self.assertEqual(self.saved(), [])
 
+    async def test_one_write_per_message_during_absence(self):
+        # Chaque message déjà en file repasse par answer_later : le fichier ne change pas pour autant.
+        self.bot.available.return_value = False
+        self.bot.answer_later = ChatBot.answer_later.__get__(self.bot)
+        self.bot._answer_when_possible = mock.AsyncMock()
+        self.bot._save_waiting = mock.Mock(wraps=self.bot._save_waiting)
+        for message_id in range(1, 21):
+            await ChatBot.handle_main_channel(self.bot, self.message(message_id))
+        await asyncio.sleep(0)  # laisse se terminer l'attente lancée par answer_later
+        self.assertEqual(self.bot._save_waiting.call_count, 20)
+        self.assertEqual(len(self.saved()), 20)
+
+    async def test_replayed_message_written_again_when_deferred(self):
+        # Repris pendant une absence, il n'est plus dans le fichier : il doit y revenir pour attendre le retour.
+        self.bot._replayed.add((CHANNEL_ID, 1))
+        self.bot.available.return_value = False
+        self.bot.answer_later = ChatBot.answer_later.__get__(self.bot)
+        self.bot._answer_when_possible = mock.AsyncMock()
+        await ChatBot.handle_main_channel(self.bot, self.message(1))
+        await asyncio.sleep(0)
+        self.assertEqual(self.saved(), [[CHANNEL_ID, 1]])
+
     async def test_refused_for_lack_of_room_not_kept(self):
         self.bot.held_files = mock.Mock()
         self.bot.held_files.reserve.return_value = False

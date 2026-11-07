@@ -823,8 +823,10 @@ class ChatBot(commands.Bot):
                 return
 
     def remember_waiting(self, message: discord.Message) -> None:
-        self._waiting.add((message.channel.id, message.id))
-        self._save_waiting()
+        key = (message.channel.id, message.id)
+        if key not in self._waiting:  # déjà dans le fichier : inutile de le réécrire (voir handle_main_channel)
+            self._waiting.add(key)
+            self._save_waiting()
 
     def remember_queued(self, message: discord.Message) -> None:
         """Message en cours de traitement : gardé sur le disque jusqu'à sa réponse, pour un redémarrage. Sauf s'il
