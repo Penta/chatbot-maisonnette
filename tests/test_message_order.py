@@ -173,6 +173,28 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         self.bot.answer_later.assert_called_once()
         self.bot.claude.ask.assert_not_awaited()
 
+    async def test_absent_after_refused_attachment_defers_the_others(self):
+        # Alice écrit pendant que l'image de Paul se prépare, Rika s'absente, puis l'image est refusée.
+        self.slow[1] = asyncio.Event()
+        self.results[1] = None
+        paul = self.arrive(1)
+        await asyncio.sleep(0)
+        await self.arrive(2)
+        self.bot.available.return_value = False
+        self.slow[1].set()
+        await paul
+        self.assertEqual([call.args[0].id for call in self.bot.answer_later.call_args_list], [2])
+
+    async def test_absent_after_message_answered_not_deferred(self):
+        # Un autre message a emporté celui-ci pendant la pause, avant que Rika s'absente : plus rien n'attend.
+        self.bot.settings.reply_pause = 0.05
+        task = self.arrive(1)
+        await asyncio.sleep(0)
+        self.bot._pending[CHANNEL_ID].clear()
+        self.bot.available.return_value = False
+        await task
+        self.bot.answer_later.assert_not_called()
+
     async def test_absent_refused_attachment_not_deferred(self):
         self.bot.available.return_value = False
         self.results[1] = None

@@ -517,8 +517,10 @@ class ChatBot(commands.Bot):
         if self.available() and channel_id not in self._waiters:
             await asyncio.sleep(max(0, self.settings.reply_pause - (asyncio.get_running_loop().time() - arrival)))
         if not self.available() or channel_id in self._waiters:
-            if pending is not None:
-                self.answer_later(message, self.answer_main_channel)
+            # Tous ceux de la file, pas seulement ce message : refusé, il a peut-être été attendu par d'autres ;
+            # parti entre-temps avec une autre réponse, il n'a plus à attendre.
+            for queued in self._pending.get(channel_id, []):
+                self.answer_later(queued.message, self.answer_main_channel)
             return
         await self.answer_main_channel(message.channel)
 
