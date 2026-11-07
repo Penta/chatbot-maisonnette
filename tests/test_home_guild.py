@@ -19,6 +19,7 @@ def fake_bot(channel_found: bool = True) -> mock.Mock:
     bot.get_channel.return_value = mock.Mock(guild=mock.Mock(id=HOME)) if channel_found else None
     bot.home_guild_id = lambda: ChatBot.home_guild_id(bot)
     bot.handle_main_channel = mock.AsyncMock()
+    bot._last_main_message = None
     bot.handle_mention = mock.AsyncMock()
     bot.register_members = mock.AsyncMock()
     return bot

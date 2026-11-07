@@ -39,6 +39,7 @@ class OnMessageTest(unittest.IsolatedAsyncioTestCase):
         self.bot.settings.channel_id = CHANNEL_ID
         self.bot.home_guild_id.return_value = HOME
         self.bot._bot_streaks = BotStreaks()
+        self.bot._last_main_message = None
         self.bot.handle_main_channel = mock.AsyncMock()
         self.bot.register_members = mock.AsyncMock()
 
@@ -83,6 +84,7 @@ class MentionLogTest(unittest.IsolatedAsyncioTestCase):
         self.bot.settings.channel_id = CHANNEL_ID
         self.bot.home_guild_id.return_value = HOME
         self.bot._bot_streaks = BotStreaks()
+        self.bot._last_main_message = None
         self.bot.handle_main_channel = mock.AsyncMock()
         self.bot.register_members = mock.AsyncMock()
         self.bot.replies_to_me = mock.AsyncMock(return_value=False)

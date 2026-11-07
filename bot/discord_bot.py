@@ -419,6 +419,10 @@ class ChatBot(commands.Bot):
                 return
 
         in_main_channel = message.channel.id == self.settings.channel_id
+        # Noté dès l'arrivée, avant l'enregistrement des membres (qui peut lire le message cité) : un message spontané
+        # préparé pendant ce temps voit déjà que quelqu'un a écrit (voir speak_up).
+        if in_main_channel and (self._last_main_message is None or message.created_at > self._last_main_message):
+            self._last_main_message = message.created_at
         # Mention directe uniquement (@everyone et @here ne comptent pas).
         mentioned = self.user is not None and self.user in message.mentions
         if (in_main_channel or mentioned) and self.members:
@@ -491,8 +495,6 @@ class ChatBot(commands.Bot):
             logger.info("%s message(s) supprimé(s) dans le salon %s : mémoire mise à jour.", len(message_ids), channel_id)
 
     async def handle_main_channel(self, message: discord.Message) -> None:
-        if self._last_main_message is None or message.created_at > self._last_main_message:
-            self._last_main_message = message.created_at
         content = message.content.strip()
         # Place réservée avant tout téléchargement, et jusqu'à la réponse (voir answer_main_channel).
         if not self.held_files.reserve(message.id, readable_size(message.attachments)):
@@ -875,8 +877,10 @@ class ChatBot(commands.Bot):
 
         def member_waiting() -> bool:
             """Un message du salon attend sa réponse (ou se prépare) : c'est à lui que le bot répond."""
-            return bool(self._pending.get(channel.id) or self._preparing.get(channel.id) or channel.id in self._waiters)
+            return bool(self._pending.get(channel.id) or self._preparing.get(channel.id) or channel.id in self._waiters
+                        or self._last_main_message != seen)
 
+        seen = self._last_main_message  # un message arrivé depuis, même pas encore en attente, l'emporte
         async with self.history.lock(channel.id):
             # Vérifié sous le verrou : une réponse vient peut-être de partir, ou un message attend la sienne.
             if self.presence.status is not after or member_waiting():

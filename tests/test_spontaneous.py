@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+import discord
 from discord.utils import time_snowflake
 
 from bot.discord_bot import ChatBot
@@ -132,6 +133,7 @@ class SpeakUpTest(unittest.IsolatedAsyncioTestCase):
         bot.spontaneous = SpontaneousLog(Path(self._tmp.name) / "spontaneous_messages.json", per_day=1)
         bot.presence.status = self.after
         bot._pending, bot._preparing, bot._waiters = {}, {}, {}
+        bot._last_main_message = None
         bot.history.lock.return_value = asyncio.Lock()
         bot.history.get.return_value = []
         bot.history.add_exchange = mock.AsyncMock()
@@ -252,6 +254,35 @@ class SpeakUpTest(unittest.IsolatedAsyncioTestCase):
                 self.bot.history.add_exchange.assert_not_awaited()
                 self.assertEqual(self.bot.spontaneous.sent, [])
                 getattr(self.bot, waiting).clear()
+
+    async def test_not_sent_when_a_member_is_being_registered(self):
+        # Avec la mémoire, un membre qui écrit est d'abord enregistré (son nom, le message qu'il cite…), puis seulement
+        # mis en attente de réponse. Claude finit le message spontané pendant cet enregistrement : il n'est pas envoyé.
+        bot = self.bot
+        bot.user = mock.Mock()
+        bot.home_guild_id.return_value = 5
+        bot.handle_main_channel = mock.AsyncMock()
+        registering, registered = asyncio.Event(), asyncio.Event()
+
+        async def register(message):
+            registering.set()
+            await registered.wait()
+        bot.register_members = register
+        message = mock.Mock(webhook_id=None, author=mock.Mock(bot=False), type=discord.MessageType.default,
+                            channel=self.channel, mentions=[], created_at=NOW, guild=mock.Mock(id=5))
+        arrival = None
+
+        async def ask(*args, **kwargs):
+            nonlocal arrival
+            arrival = asyncio.create_task(ChatBot.on_message(bot, message))
+            await registering.wait()
+            return mock.Mock(text="L'épisode 4 de Frieren, quelle claque.", web_used=False)
+        bot.claude.ask.side_effect = ask
+        await self.speak_up()
+        self.channel.send.assert_not_awaited()
+        registered.set()
+        await arrival
+        bot.handle_main_channel.assert_awaited_once_with(message)
 
     async def test_quiet_after_a_skip(self):
         # Un administrateur passe le statut avec /skip en plein anime : Rika ne l'a pas fini, elle n'en parle pas.
