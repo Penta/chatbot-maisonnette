@@ -16,7 +16,7 @@ from .emojis import DISCORD_EMOJI, SHORT_EMOJI
 from .errors import UserFacingError
 from .media import ImageData
 from .memory import MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, MEMORY_TOOL, MemoryStore, ToolResult
-from .models import thinking_off
+from .models import cache_read_ratio, thinking_off
 from .prompts import (CUSTOM_STATUS_PROMPT, CUSTOM_STATUS_REQUESTS, DEFAULT_PERSONALITY, EMOJI_NOTE, GROUP_NOTE,
                       MEMBER_MEMORY_NOTE, MEMORY_NOTE, OUTPUT_NOTE, PRESENCE_NOTE, TOOL_NOTE, WEB_NOTE)
 from .text_utils import strip_reasoning
@@ -186,7 +186,7 @@ class ClaudeClient:
             system += self.memory.system_context()
 
         # Cache de prompt : les outils et la personnalité, identiques d'un message à l'autre, sont
-        # relus depuis le cache à 10 % du prix (pendant 5 minutes, prolongées à chaque message).
+        # relus depuis le cache à 10 % du prix, 5 % sur Opus 5.5 (pendant 5 minutes, prolongées à chaque message).
         # Le marqueur sur "system" couvre ce bloc fixe ; celui de premier niveau (ou celui placé avant
         # les fiches) couvre en plus l'historique, qui change à chaque message mais reprend le début
         # de la requête précédente.
@@ -419,8 +419,9 @@ class ClaudeClient:
         if price_input is None or price_output is None:
             cost = "inconnu (renseigne PRICE_INPUT_PER_MTOK et PRICE_OUTPUT_PER_MTOK dans le .env)"
         else:
-            # Écriture en cache : 125 % du prix d'entrée ; lecture depuis le cache : 10 %.
-            amount = ((input_tokens + cache_write * 1.25 + cache_read * 0.1) * price_input
+            # Écriture en cache : 125 % du prix d'entrée ; lecture depuis le cache : 10 % (5 % sur Opus 5.5).
+            read_ratio = cache_read_ratio(self.settings.model)
+            amount = ((input_tokens + cache_write * 1.25 + cache_read * read_ratio) * price_input
                       + output_tokens * price_output) / 1_000_000
             amount += searches * self.settings.price_web_search_per_1000 / 1000
             cost = f"{amount:.5f} $"

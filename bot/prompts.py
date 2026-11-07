@@ -10,7 +10,7 @@ DEFAULT_PERSONALITY = (
 
 
 # Les textes suivants sont ajoutés automatiquement à la fin de la personnalité, quel que soit le
-# contenu du fichier. Ils sont relus à chaque message (depuis le cache, à 10 % du prix) : chaque
+# contenu du fichier. Ils sont relus à chaque message (depuis le cache, à 10 % du prix, 5 % sur Opus 5.5) : chaque
 # phrase compte, mais chaque règle de MEMBER_MEMORY_NOTE répond à un abus réel, à ne pas perdre.
 
 # Les images ne sont pas gardées dans l'historique : un marqueur les remplace (IMAGE_MARKER, history.py).

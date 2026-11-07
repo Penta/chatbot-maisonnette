@@ -149,7 +149,7 @@ Pour une personnalité personnelle, monte le fichier dans le conteneur et indiqu
 
 Chaque message envoyé à Claude est facturé selon le nombre de tokens lus (personnalité, mémoire, message) et écrits (la réponse). Pour limiter la facture :
 
-- la personnalité et la mémoire sont mises en cache : relues dans les 5 minutes, elles coûtent 10 % du prix normal ;
+- la personnalité et la mémoire sont mises en cache : relues dans les 5 minutes, elles coûtent 10 % du prix normal (5 % sur Opus 5.5) ;
 - les images, PDF et fichiers ne sont payés qu'une fois, au message qui les contient ;
 - `claude-haiku-5-5` coûte environ 20 fois moins cher que `claude-sonnet-5-5` ; `THINKING=off` et un `EFFORT` bas réduisent aussi les réponses ;
 - chaque page de PDF coûte souvent plusieurs milliers de tokens, et chaque recherche web est payante en plus ;

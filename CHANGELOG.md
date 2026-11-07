@@ -22,6 +22,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Dans `/memoire`, les lignes à supprimer se lisent en entier et se cochent par leur numéro**, et un long fichier général s'affiche en plusieurs pages au lieu d'être coupé.
 
+- **Avec Opus 5.5, le coût estimé dans le journal n'est plus surévalué.**
+
 ---
 
 ## Version 5.14

@@ -24,6 +24,12 @@ PRICES: dict[str, tuple[float, float]] = {
     "claude-opus-5-5": (4.0, 20.0),
 }
 
+# Prix de la lecture depuis le cache, en part du prix d'entrée, quand il diffère des 10 % habituels.
+_CACHE_READ_RATIOS: dict[str, float] = {
+    "claude-opus-5-5": 0.05,  # 0,20 $ par million de tokens
+}
+_DEFAULT_CACHE_READ_RATIO = 0.1
+
 
 def is_known(model: str) -> bool:
     """Modèle connu du bot (tarifs et réglage de la réflexion) : sinon, peut-être une faute de frappe."""
@@ -41,3 +47,8 @@ def display_name(model: str) -> str:
 def thinking_off(model: str) -> dict | None:
     """Paramètre « thinking » à envoyer quand THINKING=off (None : ne rien envoyer)."""
     return _THINKING_OFF.get(model, _DEFAULT_THINKING_OFF)
+
+
+def cache_read_ratio(model: str) -> float:
+    """Part du prix d'entrée payée pour un token relu depuis le cache."""
+    return _CACHE_READ_RATIOS.get(model, _DEFAULT_CACHE_READ_RATIO)
