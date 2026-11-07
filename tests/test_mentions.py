@@ -6,8 +6,12 @@ import contextlib
 import unittest
 from unittest import mock
 
+import aiohttp
+import discord
+
 from bot.claude_client import ClaudeError
-from bot.discord_bot import ChatBot
+from bot.discord_bot import UNEXPECTED_ERROR, ChatBot
+from bot.discord_bot import typing as real_typing  # la classe de tests remplace bot.discord_bot.typing
 from bot.media import PDF_MEDIA_TYPE, ImageData
 
 CHANNEL_ID = 20
@@ -58,6 +62,19 @@ def fake_channel(history: list) -> mock.Mock:
 @mock.patch("bot.discord_bot.typing", lambda channel: contextlib.nullcontext())
 @mock.patch("bot.discord_bot.emoji_names", lambda guild: [])
 class MentionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_typing_failure_does_not_stop_the_answer(self):
+        errors = (discord.DiscordServerError(mock.Mock(status=503, reason="indisponible"), "panne"),
+                  aiohttp.ClientConnectionError("réseau coupé"), TimeoutError("délai dépassé"))
+        for error in errors:
+            with self.subTest(type(error).__name__):
+                channel = mock.Mock()
+                channel.typing.return_value.__aenter__ = mock.AsyncMock(side_effect=error)
+                reached = False
+                with self.assertLogs("chatbot.discord", "WARNING"):
+                    async with real_typing(channel):
+                        reached = True
+                self.assertTrue(reached)
+
     async def test_burst_grouped(self):
         # 10 mentions en rafale : la première part seule, les 9 autres attendent puis partent ensemble.
         bot = fake_bot()
@@ -147,6 +164,61 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         bot.claude.ask.side_effect = ClaudeError("Erreur.")
         await ChatBot.answer_mention(bot, [first, second])
         self.assertCountEqual(bot.safe_reply.await_args_list, [mock.call(first, "Erreur."), mock.call(second, "Erreur.")])
+
+    async def test_answers_without_context_when_discord_fails(self):
+        # Le contexte n'est qu'un complément : la panne ne doit pas priver la personne de sa réponse.
+        errors = (discord.DiscordServerError(mock.Mock(status=503, reason="indisponible"), "panne"),
+                  aiohttp.ClientConnectionError("réseau coupé"), TimeoutError("délai dépassé"))
+        for error in errors:
+            with self.subTest(type(error).__name__):
+                bot = fake_bot()
+                channel = fake_channel([])
+
+                async def failing(limit, before, error=error):
+                    raise error
+                    yield  # générateur, comme channel.history
+                channel.history = failing
+                message = fake_mention(1, "salut", channel)
+                with self.assertLogs("chatbot.discord", "WARNING") as logs:
+                    await ChatBot.answer_mention(bot, [message])
+                self.assertIn("sans ce contexte", logs.output[0])
+                bot.claude.ask.assert_awaited_once()
+                bot.send_answer.assert_awaited_once()
+                bot.safe_reply.assert_not_awaited()
+
+    async def test_context_read_before_the_failure_is_kept(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        earlier = mock.Mock(id=1, clean_content="bonjour", attachments=[], stickers=[])
+        earlier.author.display_name = earlier.author.name = "membre1"
+
+        async def failing(limit, before):
+            yield earlier
+            raise discord.DiscordServerError(mock.Mock(status=503, reason="indisponible"), "panne")
+        channel.history = failing
+        with self.assertLogs("chatbot.discord", "WARNING"):
+            await ChatBot.answer_mention(bot, [fake_mention(2, "salut", channel)])
+        self.assertIn("membre1 : bonjour", bot.claude.ask.await_args.args[1][0][0])
+
+    async def test_unexpected_error_while_preparing_call_warns_author(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        bot.mention_context = mock.AsyncMock(side_effect=RuntimeError("panne"))
+        message = fake_mention(1, "salut", channel)
+        with self.assertLogs("chatbot.discord", "ERROR"):
+            await ChatBot.answer_mention(bot, [message])
+        bot.safe_reply.assert_awaited_once_with(message, UNEXPECTED_ERROR)
+
+    async def test_unreadable_mention_warned_and_others_answered(self):
+        bot = fake_bot()
+        channel = fake_channel([])
+        first, second = fake_mention(1, "salut", channel), fake_mention(2, "coucou", channel)
+        bot.mention_part = mock.AsyncMock(side_effect=[aiohttp.ClientConnectionError("réseau coupé"), ("coucou", [])])
+        with self.assertLogs("chatbot.discord", "ERROR"):
+            await ChatBot.answer_mention(bot, [first, second])
+        bot.safe_reply.assert_awaited_once_with(first, UNEXPECTED_ERROR)
+        bot.send_answer.assert_awaited_once()
+        self.assertEqual(bot.send_answer.await_args.args[0], second)
 
     async def test_long_text_files_split(self):
         # Quatre mentions avec un fichier texte de 100 Ko : trop longues pour partir dans la même requête.

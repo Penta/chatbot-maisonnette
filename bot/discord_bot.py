@@ -106,7 +106,7 @@ async def typing(channel: discord.abc.Messageable):
     indicator = channel.typing()
     try:
         await indicator.__aenter__()  # seul ce premier envoi peut échouer : les suivants sont protégés
-    except discord.HTTPException as exc:
+    except (discord.HTTPException, aiohttp.ClientError, OSError) as exc:
         logger.warning("Indicateur « en train d'écrire » impossible dans #%s : %s", channel, exc)
         indicator = None
     try:
@@ -650,7 +650,13 @@ class ChatBot(commands.Bot):
         channel = mentions[-1].channel
         answered, parts = [], []
         for message in mentions:
-            if part := await self.mention_part(message):
+            try:
+                part = await self.mention_part(message)
+            except Exception:
+                logger.exception("Erreur inattendue pendant la lecture d'une mention")
+                await self.safe_reply(message, UNEXPECTED_ERROR)
+                continue
+            if part:
                 answered.append(message)
                 parts.append(part)
         # Mentions à pièce jointe refusée : leurs auteurs ont été prévenus, elles restent hors du contexte.
@@ -668,25 +674,25 @@ class ChatBot(commands.Bot):
             del answered[:count], parts[:count]
             last = group[-1]
 
-            # Contexte jusqu'à maintenant, relu pour chaque réponse : elle voit celle que le bot vient d'envoyer
-            # (postée après ces mentions). En retard, jusqu'à la dernière mention : la discussion qui a suivi
-            # recouvrirait celle-ci ; les réponses déjà envoyées sont alors ajoutées à la fin.
-            # Seules les mentions pas encore traitées sont décrites à part : les autres sont des messages normaux.
-            pending = refused | {m.id for m in group} | {m.id for m in answered}
-            lines = await self.mention_context(channel, pending, before=mentions[-1] if late else None) + sent
-            channel_name = f"#{channel.name}" if hasattr(channel, "name") else "un message privé"
-            header = []
-            if late:
-                header.append(self.presence.late_note(late, several=len(group_parts) > 1))
-            if note := self.presence_note():
-                header.append(note)
-            if lines:
-                header.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
-            text, images = group_parts[0]
-            group_parts[0] = ("\n\n".join([*header, text]), images)
-
             async with typing(channel):
                 try:
+                    # Contexte jusqu'à maintenant, relu pour chaque réponse : elle voit celle que le bot vient
+                    # d'envoyer (postée après ces mentions). En retard, jusqu'à la dernière mention : la discussion
+                    # qui a suivi recouvrirait celle-ci ; les réponses déjà envoyées sont alors ajoutées à la fin.
+                    # Seules les mentions pas encore traitées sont décrites à part : les autres sont des messages
+                    # normaux.
+                    pending = refused | {m.id for m in group} | {m.id for m in answered}
+                    lines = await self.mention_context(channel, pending, before=mentions[-1] if late else None) + sent
+                    channel_name = f"#{channel.name}" if hasattr(channel, "name") else "un message privé"
+                    header = []
+                    if late:
+                        header.append(self.presence.late_note(late, several=len(group_parts) > 1))
+                    if note := self.presence_note():
+                        header.append(note)
+                    if lines:
+                        header.append(f"Contexte : derniers messages dans {channel_name}\n" + "\n".join(lines))
+                    text, images = group_parts[0]
+                    group_parts[0] = ("\n\n".join([*header, text]), images)
                     answer = await self.claude.ask([], group_parts, emojis=emoji_names(last.guild), cache_history=False,
                                                    member_notes=await self.member_notes(group))
                 except ClaudeError as exc:
@@ -721,6 +727,9 @@ class ChatBot(commands.Bot):
                         lines.append(f"{author_name(msg.author)} : {content}")
             except discord.Forbidden:
                 logger.warning("Pas la permission de lire l'historique de #%s.", channel)
+            except (discord.HTTPException, aiohttp.ClientError, OSError) as exc:
+                # Le contexte n'est qu'un complément : la panne ne prive pas la personne de sa réponse.
+                logger.warning("Derniers messages de #%s illisibles, réponse sans ce contexte : %s", channel, exc)
         lines.reverse()
         return lines
 
