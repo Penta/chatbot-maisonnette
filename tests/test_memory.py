@@ -840,6 +840,15 @@ class EditLineTest(MemoryTestCase):
         await window.on_submit(interaction_mock(done=True))
         self.assertEqual(self.store.read(self.FICHE), "habite à Villeurbanne\njoue à Zelda")
 
+    async def test_same_as_another_line_not_doubled(self):
+        # Comme « Ajouter des lignes » : une ligne modifiée pour dire mot pour mot la même chose qu'une autre
+        # ne la double pas.
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda\njoue à Elden Ring")
+        window = await self.window(self.card(), 2)
+        window.input._value = " joue à Elden Ring "
+        await window.on_submit(interaction_mock(done=True))
+        self.assertEqual(self.store.read(self.FICHE), "habite à Lyon\njoue à Elden Ring")
+
     async def test_emptied_line_deleted(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
         window = await self.window(self.card(), 1)

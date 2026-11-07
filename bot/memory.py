@@ -418,8 +418,9 @@ class MemoryStore:
     async def edit_line(self, name: str, index: int, text: str, by: str, expected: str) -> str | None:
         """Remplace le texte d'une ligne (numérotée à partir de 0, voir lines), à sa place : mêmes droits
         qu'add_lines (by : son nom, pour les logs). Modifier une ligne revient à la supprimer et à en écrire
-        une autre : rien de plus que ce qu'add_lines permet déjà, source citée comprise. Texte vide : la
-        ligne est supprimée. expected : comme pour delete_lines. Renvoie un message d'erreur, ou None."""
+        une autre : rien de plus que ce qu'add_lines permet déjà, source citée comprise. Texte vide, ou
+        identique à une autre ligne : la ligne est supprimée. expected : comme pour delete_lines. Renvoie un
+        message d'erreur, ou None."""
         member = MEMBER_FILE.match(name)
         if name != SERVER_FILE and not member:
             return "Ce fichier ne peut pas être modifié à la main."
@@ -433,7 +434,9 @@ class MemoryStore:
                 return ("Le fichier a changé entre-temps (nouvelle note, ou autre modification) : rien n'a été "
                         "modifié. Recommence avec « Modifier une ligne ».")
             lines = [line for line in current.splitlines() if line.strip()]
-            lines[index:index + 1] = [new_line] if new_line else []
+            # Mot pour mot une autre ligne : elle n'est pas doublée (comme dans add_lines), la ligne modifiée part.
+            others = {line.strip() for i, line in enumerate(lines) if i != index}
+            lines[index:index + 1] = [new_line] if new_line and new_line not in others else []
             after = "\n".join(lines)
             if error := self._too_big(name, after, current):
                 if member:  # message pour le membre, pas pour Claude (le nom du fichier ne lui dit rien)
