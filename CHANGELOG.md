@@ -8,6 +8,10 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.15
 
+*Publiée le 7 novembre 2026*
+
+> **En bref :** des fiches de mémoire qu'on corrige soi-même, des GIF enfin visibles, et une Rika qui peut lancer la conversation d'elle-même.
+
 ### Changements
 
 - **Chacun peut modifier une ligne de sa fiche dans `/memoire`**, et les administrateurs celles du fichier général dans `/memoire-serveur`.
@@ -22,7 +26,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika ne répond plus à un message supprimé avant sa réponse**, et ne le garde pas en mémoire.
 
-- **Dans `/memoire`, les lignes à supprimer se lisent en entier et se cochent par leur numéro**, et un long fichier général s'affiche en plusieurs pages au lieu d'être coupé.
+- **Dans `/memoire` et `/memoire-serveur`, les lignes à supprimer se lisent en entier et se cochent par leur numéro**, et un long fichier général s'affiche en plusieurs pages au lieu d'être coupé.
 
 - **Avec Opus 5.5, le coût estimé dans le journal n'est plus surévalué.**
 
