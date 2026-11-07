@@ -222,7 +222,7 @@ class MemoryStore:
                 owners.setdefault(discord_name.casefold(), set()).add(member_id)
         for member_id, entry in self.members.members().items():
             # Mémoire pas activée (membre seulement mentionné, ou qui ne la veut pas) : rien n'est noté
-            # sur ce membre, même si une ancienne fiche existe encore.
+            # sur ce membre.
             if not entry["memory"] or member_id not in self.index():
                 continue
             name = display_name(entry)

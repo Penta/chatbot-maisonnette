@@ -913,35 +913,6 @@ class NotEnabledWriteTest(MemoryTestCase):
         self.assertIsNone(await self.store.erase("membres/333.md", by="admin"))
         self.assertFalse((self.root / "memories" / "membres" / "333.md").exists())
 
-    async def test_old_file_hidden(self):
-        self.write("membres/333.md", "habite à Lyon")  # ancienne fiche
-        buttons = {item.label: item.disabled for item in self.card.view().children}
-        self.assertFalse(buttons["Effacer la fiche"])
-        text = self.card.embeds()[0].description
-        self.assertIn("Carl n'a pas activé la mémoire", text)
-        self.assertIn("ancienne fiche", text)
-        self.assertNotIn("Lyon", text)
-
-    async def test_old_file_lines_hidden_from_admin(self):
-        # Le menu de suppression montrerait les lignes que la fiche cache : un administrateur ne peut
-        # que l'effacer en entier.
-        self.write("membres/333.md", "habite à Lyon")
-        buttons = {item.label: item.disabled for item in self.card.view().children}
-        self.assertTrue(buttons["Supprimer des lignes"])
-        interaction = interaction_mock()
-        await self.card.choose_lines(interaction)
-        shown = interaction.response.edit_message.call_args.kwargs
-        self.assertNotIn("Lyon", shown["content"] + "".join(e.description or "" for e in shown["embeds"]))
-        self.assertFalse(any(isinstance(item, discord.ui.Select) for item in shown["view"].children))
-
-    async def test_member_sees_own_old_file_lines(self):
-        await self.members.set_memory(MEMBER_ID, False)
-        self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
-        card = MemoryCard(self.store, Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True),
-                          owner_id=MEMBER_ID, bot_name="Rika")
-        buttons = {item.label: item.disabled for item in card.view().children}
-        self.assertFalse(buttons["Supprimer des lignes"])
-
 
 class LineLimitTest(MemoryTestCase):
     """Claude ne garde que l'essentiel : MAX_LINES lignes au plus dans un fichier."""

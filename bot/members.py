@@ -12,8 +12,9 @@ from .files import write_atomic
 
 logger = logging.getLogger("chatbot.members")
 
-# Version 2 : mémoire à activer soi-même avec /memoire (depuis la 5.11).
-FILE_VERSION = 2
+# Version 2 : mémoire à activer soi-même avec /memoire (depuis la 5.11). Version 3 : plus aucune fiche
+# pour un membre qui ne l'a pas activée (voir _remove_old_files).
+FILE_VERSION = 3
 # Noms Discord d'un membre : nom d'utilisateur (unique), nom d'affichage, pseudo sur le serveur.
 NAME_KEYS = ("username", "global_name", "nickname")
 # Anciens pseudos gardés par membre, du plus ancien au plus récent.
@@ -110,8 +111,9 @@ class MemberRegistry:
             raw = json.loads(self.file_path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict) or not isinstance(raw.get("members"), dict):
                 raise ValueError("« members » absent ou n'est pas un dictionnaire")
-            if raw.get("version") != FILE_VERSION:
-                raise ValueError(f"format {raw.get('version')!r} inconnu (attendu : {FILE_VERSION})")
+            version = raw.get("version")
+            if version not in (2, FILE_VERSION):
+                raise ValueError(f"format {version!r} inconnu (attendu : {FILE_VERSION})")
             data = {key: self._sanitize(key, value) for key, value in raw["members"].items()}
         except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
             self.broken = str(exc)
@@ -119,7 +121,34 @@ class MemberRegistry:
                          "réparation. Corrige %s puis redémarre le bot ; le supprimer repartirait de zéro, "
                          "en désactivant la mémoire de tous ceux qui l'avaient activée.", exc, self.file_path)
             return {}
+        if version == 2:
+            self._remove_old_files(data)
         return data
+
+    def _remove_old_files(self, data: dict[str, dict]) -> None:
+        """Passage à la version 3, une seule fois : efface les fiches écrites avant la 5.11 (mémoire alors
+        activée par défaut) sur les membres qui ne l'ont pas activée depuis. Rika ne s'en servait plus, et
+        personne ne pouvait les lire. Fait à la conversion seulement : un registre perdu ou illisible, où
+        plus personne n'a activé la mémoire, n'efface jamais les fiches."""
+        directory = self.file_path.parent / "membres"
+        removed = 0
+        for path in sorted(directory.glob("*.md")) if directory.is_dir() else []:
+            entry = data.get(path.stem)
+            if not path.stem.isdigit() or (entry is not None and entry["memory"]):
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError as exc:  # refait au prochain démarrage : le registre reste en version 2
+                logger.error("Impossible d'effacer l'ancienne fiche %s : %s", path, exc)
+                return
+        try:
+            write_atomic(self.file_path, json.dumps({"version": FILE_VERSION, "members": data},
+                                                    ensure_ascii=False, indent=2))
+        except OSError as exc:  # refait au prochain démarrage ; les fiches déjà effacées le restent
+            logger.error("Impossible de sauvegarder le registre des membres : %s", exc)
+        logger.info("Registre des membres : %d ancienne(s) fiche(s) effacée(s), sur des membres qui n'ont "
+                    "pas activé la mémoire.", removed)
 
     @staticmethod
     def _sanitize(key: str, value) -> dict:

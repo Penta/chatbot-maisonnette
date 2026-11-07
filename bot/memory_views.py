@@ -88,13 +88,6 @@ class MemoryCard:
     def memory_enabled(self) -> bool:
         return self.target.member_id is None or self.store.members.memory_enabled(self.target.member_id)
 
-    @property
-    def lines_visible(self) -> bool:
-        """Les lignes du fichier peuvent être montrées (menu « Supprimer des lignes ») : pas celles de
-        l'ancienne fiche d'un membre qui n'a pas activé la mémoire, que embeds cache aux administrateurs
-        (ils peuvent seulement l'effacer). Le membre, lui, voit toujours les siennes."""
-        return self.memory_enabled or self.target.is_self
-
     def about(self) -> str:
         """« sur toi », « sur Penta » ou « sur le serveur »."""
         if self.target.member_id is None:
@@ -116,9 +109,6 @@ class MemoryCard:
             else:
                 text = (f"{self.target.name} n'a pas activé la mémoire : {self.bot_name} ne retient rien "
                         f"sur ce membre.")
-            if content:  # fiche écrite avant que la mémoire soit à activer soi-même : ni lue ni complétée
-                text += (f"\n\nUne ancienne fiche ({len(content)} caractères) est gardée : elle ne sert pas "
-                         f"tant que la mémoire n'est pas activée.")
             return [discord.Embed(title=title, description=text, color=discord.Color.light_grey())]
         # Le membre doit savoir que sa fiche n'est pas vue par lui seul (voir /memoire membre:@…).
         note = ADMINS_NOTE if self.target.member_id is not None and self.target.is_self else ""
@@ -145,8 +135,7 @@ class MemoryCard:
         content = self.store.read(self.target.file)
         # Un fichier ne se modifie à la main que ligne par ligne (voir MemoryStore.delete_lines) : on en
         # supprime des lignes, l'administrateur ajoute des lignes au fichier général, et le membre à sa
-        # propre fiche, dont il écrit aussi les surnoms. Mémoire pas activée : la fiche ne peut que
-        # perdre des lignes.
+        # propre fiche, dont il écrit aussi les surnoms. Mémoire pas activée : il n'y a pas de fiche.
         if self.target.member_id is None:
             add_button(view, "Ajouter des lignes", "➕", discord.ButtonStyle.primary, self.ask_add)
         elif self.target.is_self:
@@ -155,7 +144,7 @@ class MemoryCard:
             add_button(view, "Surnoms", "🏷️", discord.ButtonStyle.primary, self.ask_nicknames,
                        disabled=not self.memory_enabled)
         add_button(view, "Supprimer des lignes", "✂️", discord.ButtonStyle.secondary, self.choose_lines,
-                   disabled=not content or not self.lines_visible)
+                   disabled=not content)
         add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
                    discord.ButtonStyle.secondary, self.ask_erase, disabled=not content)
         # Seul le membre lui-même active ou désactive la mémoire. Parti du serveur, il ne peut plus lancer
@@ -193,12 +182,7 @@ class MemoryCard:
 
     async def choose_lines(self, interaction: discord.Interaction) -> None:
         """Remplace le fichier affiché par ses lignes numérotées et un menu pour cocher celles à supprimer."""
-        # Bouton affiché avant un changement : fiche effacée entre-temps (autre message /memoire,
-        # désactivation), ou mémoire du membre désactivée depuis (lignes à ne plus montrer).
-        if not self.lines_visible:
-            await self.refresh(interaction, "La mémoire n'est pas activée pour ce membre : sa fiche ne peut "
-                                            "qu'être effacée.")
-            return
+        # Bouton affiché avant un changement : fiche effacée entre-temps (autre message /memoire, désactivation).
         original = self.store.read(self.target.file)  # les numéros valent pour ce contenu (voir delete_lines)
         if not original:
             await self.refresh(interaction, "Le fichier est vide : rien à supprimer.")
