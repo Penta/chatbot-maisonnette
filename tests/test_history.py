@@ -304,92 +304,16 @@ class BrokenFileTest(HistoryTestCase):
         self.assertEqual(self.other_files(), [older.name, self.backup_name])
 
 
-class OldFormatTest(HistoryTestCase):
-    """Fichiers des versions précédentes : convertis, et une copie de l'ancien est gardée."""
+    async def test_old_format_set_aside(self):
+        # Formats d'avant la 5.8 (version 2, ou sans numéro au temps de Mistral) : plus convertis.
+        await self.assert_set_aside(self.write({"version": 2, "channels": {str(CHANNEL): [
+            {"role": "user", "content": "Salut"}, {"role": "assistant", "content": "Bonjour"}]}}))
 
-    def assert_old_copy(self, version: int, content: bytes) -> None:
-        self.assertEqual(self.other_files(), [f"conversation_history.json.v{version}-{STAMP}"])
-        self.assertEqual((self.root / self.other_files()[0]).read_bytes(), content)
-        self.assertEqual(self.path.read_bytes(), content)  # rien n'est réécrit avant la prochaine sauvegarde
 
-    async def test_version_2(self):
-        content = self.write({"version": 2, "channels": {str(CHANNEL): [
-            {"role": "user", "content": f"{DATE}, Bob a écrit : Regarde [image jointe]"},
-            {"role": "assistant", "content": "<think>C'est un chat.</think>\nJoli chat !"},
-        ]}})
-        with self.assertLogs("chatbot.history", "INFO"):
-            history = self.load()
-        self.assertEqual(history.get(CHANNEL), [
-            {"role": "user", "content": f"{DATE}, Bob a écrit : Regarde {IMAGE_MARKER}"},
-            {"role": "assistant", "content": "Joli chat !"},
-        ])
-        self.assert_old_copy(2, content)
+class FileContentTest(HistoryTestCase):
+    """Contenu d'un fichier au format actuel : ce qui est lisible est gardé tel quel."""
 
-    async def test_mistral_format(self):
-        # Premier format, sans numéro de version : un dictionnaire par salon, contenu en blocs.
-        content = self.write({str(CHANNEL): {"messages": [
-            {"role": "system", "content": "Tu es Rika."},
-            {"role": "user", "content": [
-                {"type": "text", "text": "Bob : regarde"},
-                {"type": "image_url", "image_url": {"url": "https://cdn.discordapp.com/chat.png"}},
-            ]},
-            {"role": "assistant", "content": [{"type": "text", "text": "Joli chat !"}]},
-        ]}})
-        with self.assertLogs("chatbot.history", "INFO"):
-            history = self.load()
-        self.assertEqual(history.get(CHANNEL), [
-            {"role": "user", "content": f"Bob : regarde {IMAGE_MARKER}"},
-            {"role": "assistant", "content": "Joli chat !"},
-        ])
-        self.assert_old_copy(1, content)
-
-    async def test_rendered_text_unchanged(self):
-        # Le texte envoyé à Claude reste le même après la conversion : le cache de prompt est conservé.
-        user = f"{DATE}, Bob a écrit : Quel temps fait-il ? {IMAGE_MARKER} {WEB_MARKER}"
-        self.write({"version": 2, "channels": {str(CHANNEL): [
-            {"role": "user", "content": user}, {"role": "assistant", "content": "Il pleut."}]}})
-        with self.assertLogs("chatbot.history", "INFO"):
-            history = self.load()
-        self.assertEqual(history.get(CHANNEL), [
-            {"role": "user", "content": user}, {"role": "assistant", "content": "Il pleut."}])
-
-    async def test_same_role_merged(self):
-        self.write({"version": 2, "channels": {str(CHANNEL): [
-            {"role": "user", "content": "un"}, {"role": "user", "content": "deux"},
-            {"role": "assistant", "content": "trois"}, {"role": "assistant", "content": "quatre"},
-        ]}})
-        with self.assertLogs("chatbot.history", "INFO"):
-            history = self.load()
-        self.assertEqual(history.get(CHANNEL), [
-            {"role": "user", "content": "un\ndeux"}, {"role": "assistant", "content": "trois\nquatre"}])
-
-    async def test_unreadable_messages_dropped(self):
-        self.write({"version": 2, "channels": {str(CHANNEL): [
-            "pas un message", {"role": "tool", "content": "résultat"}, {"role": "user", "content": "  "},
-            {"role": "user", "content": None}, {"role": "user", "content": [{"type": "audio"}, "bloc"]},
-            {"role": "user", "content": "Salut"},
-            {"role": "assistant", "content": "<think>rien d'autre</think>"},
-            {"role": "assistant", "content": "Bonjour"},
-        ], "456": "pas une liste"}})
-        with self.assertLogs("chatbot.history", "INFO"):
-            history = self.load()
-        self.assertEqual(history.get(CHANNEL), [
-            {"role": "user", "content": "Salut"}, {"role": "assistant", "content": "Bonjour"}])
-        self.assertEqual(history.get(456), [])
-
-    async def test_converted_file_saved_in_current_format(self):
-        self.write({"version": 2, "channels": {str(CHANNEL): [
-            {"role": "user", "content": "Salut"}, {"role": "assistant", "content": "Bonjour"}]}})
-        with self.assertLogs("chatbot.history", "INFO"):
-            history = self.load()
-        await history.add_exchange(CHANNEL, [line(1, "Encore moi")], "Re")
-        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["version"], FILE_VERSION)
-        with self.assertNoLogs("chatbot.history"):
-            reloaded = self.load()  # plus de conversion, ni de nouvelle copie
-        self.assertEqual(reloaded.get(CHANNEL), history.get(CHANNEL))
-        self.assertEqual(len(self.other_files()), 1)
-
-    async def test_current_format_not_copied(self):
+    async def test_loaded_without_copy(self):
         self.write({"version": FILE_VERSION, "channels": {str(CHANNEL): [
             {"role": "user", "lines": [line(1, "Salut")]}, {"role": "assistant", "content": "Bonjour"}]}})
         with self.assertNoLogs("chatbot.history"):

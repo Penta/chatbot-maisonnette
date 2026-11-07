@@ -12,8 +12,7 @@ from .files import write_atomic
 
 logger = logging.getLogger("chatbot.members")
 
-# Version 2 : mémoire à activer soi-même avec /memoire (en version 1, elle l'était par défaut, après un
-# message de bienvenue : voir _migrate).
+# Version 2 : mémoire à activer soi-même avec /memoire (depuis la 5.11).
 FILE_VERSION = 2
 # Noms Discord d'un membre : nom d'utilisateur (unique), nom d'affichage, pseudo sur le serveur.
 NAME_KEYS = ("username", "global_name", "nickname")
@@ -111,11 +110,8 @@ class MemberRegistry:
             raw = json.loads(self.file_path.read_text(encoding="utf-8-sig"))
             if not isinstance(raw, dict) or not isinstance(raw.get("members"), dict):
                 raise ValueError("« members » absent ou n'est pas un dictionnaire")
-            # Absente : ancien registre, à convertir. Invalide : à corriger, car la convertir par erreur
-            # désactiverait la mémoire de tous (bool à part : true vaut 1 en Python).
-            version = raw.get("version", 1)
-            if not isinstance(version, int) or isinstance(version, bool):
-                raise ValueError("« version » doit être un nombre entier")
+            if raw.get("version") != FILE_VERSION:
+                raise ValueError(f"format {raw.get('version')!r} inconnu (attendu : {FILE_VERSION})")
             data = {key: self._sanitize(key, value) for key, value in raw["members"].items()}
         except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
             self.broken = str(exc)
@@ -123,30 +119,7 @@ class MemberRegistry:
                          "réparation. Corrige %s puis redémarre le bot ; le supprimer repartirait de zéro, "
                          "en désactivant la mémoire de tous ceux qui l'avaient activée.", exc, self.file_path)
             return {}
-        if version < 2:
-            self._migrate(raw["members"], data)
         return data
-
-    def _migrate(self, raw: dict, data: dict[str, dict]) -> None:
-        """Passage à la mémoire à activer soi-même : elle ne reste activée que pour les membres qui avaient
-        reçu le message de bienvenue, ne l'avaient pas désactivée et ont une fiche non vide (rangée à côté
-        du registre, dans membres/). Les autres l'activeront avec /memoire s'ils le souhaitent."""
-        kept = 0
-        for key, entry in data.items():
-            path = self.file_path.parent / "membres" / f"{key}.md"
-            try:
-                has_file = path.is_file() and path.stat().st_size > 0
-            except OSError:
-                has_file = False
-            entry["memory"] = entry["memory"] and raw[key].get("notified") is True and has_file
-            kept += entry["memory"]
-        logger.info("Registre des membres : la mémoire est désormais à activer avec /memoire. Gardée "
-                    "activée pour %d membre(s) qui ont une fiche, désactivée pour %d.", kept, len(data) - kept)
-        try:
-            write_atomic(self.file_path, json.dumps({"version": FILE_VERSION, "members": data},
-                                                    ensure_ascii=False, indent=2))
-        except OSError as exc:  # refait au prochain démarrage, ou à la prochaine sauvegarde réussie
-            logger.error("Impossible de sauvegarder le registre des membres : %s", exc)
 
     @staticmethod
     def _sanitize(key: str, value) -> dict:

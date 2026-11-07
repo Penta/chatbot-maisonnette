@@ -9,7 +9,7 @@ from unittest import mock
 from bot.members import MemberRegistry
 
 ENTRY = {"username": "bob", "global_name": "Bob", "nickname": None, "former_names": [],
-         "notified": True, "memory": False, "first_seen": "2026-10-31"}
+         "memory": False, "first_seen": "2026-10-31"}
 
 
 class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
@@ -24,7 +24,7 @@ class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
 
     def load(self, members: dict | None = None, text: str | None = None) -> MemberRegistry:
         if text is None:
-            text = json.dumps({"version": 1, "members": members})
+            text = json.dumps({"version": 2, "members": members})
         self.path.write_text(text, encoding="utf-8")
         return MemberRegistry(self.path)
 
@@ -36,14 +36,14 @@ class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])  # ni copie, ni fichier temporaire
 
     async def test_truncated_file(self):
-        text = json.dumps({"version": 1, "members": {"111": ENTRY}})
+        text = json.dumps({"version": 2, "members": {"111": ENTRY}})
         with self.assertLogs("chatbot.members", "ERROR"):
             registry = self.load(text=text[:-20])
         await self.assert_broken_and_kept(registry)
 
-    async def test_version_not_an_integer(self):
-        # true compterait pour 1 et 1.5 passerait la comparaison : la conversion désactiverait la mémoire de tous.
-        for version in ("2", None, True, 1.5):
+    async def test_unknown_version(self):
+        # Les registres d'avant la 5.11 (version 1, ou sans version) ne sont plus convertis.
+        for version in (1, "2", None, 3):
             with self.subTest(version=version):
                 text = json.dumps({"version": version, "members": {"111": ENTRY}})
                 with self.assertLogs("chatbot.members", "ERROR"):
@@ -76,7 +76,7 @@ class BrokenRegistryTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_file_with_bom(self):
         # Registre corrigé à la main puis enregistré avec BOM (Bloc-notes) : toujours lisible.
-        self.path.write_text(json.dumps({"version": 1, "members": {"111": ENTRY}}), encoding="utf-8-sig")
+        self.path.write_text(json.dumps({"version": 2, "members": {"111": ENTRY}}), encoding="utf-8-sig")
         registry = MemberRegistry(self.path)
         self.assertIsNone(registry.broken)
         self.assertFalse(registry.memory_enabled(111))
@@ -128,53 +128,6 @@ class SaveFailureTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.registry.memory_enabled(111))
         self.assertFalse(self.registry.memory_enabled(999))  # membre inconnu
         self.assertFalse(self.saved_memory())
-
-class OptInMigrationTest(unittest.TestCase):
-    """Registre en version 1 (mémoire activée par défaut) : elle ne reste activée que pour les membres
-    prévenus, qui ne l'avaient pas désactivée et ont une fiche."""
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.path = Path(self._tmp.name) / "registre.json"
-        (self.path.parent / "membres").mkdir()
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def load(self, version: int, members: dict, files: dict[str, str]) -> MemberRegistry:
-        for key, text in files.items():
-            (self.path.parent / "membres" / f"{key}.md").write_text(text, encoding="utf-8")
-        self.path.write_text(json.dumps({"version": version, "members": members}), encoding="utf-8")
-        return MemberRegistry(self.path)
-
-    def test_kept_only_with_file(self):
-        members = {
-            "1": {**ENTRY, "notified": True, "memory": True},   # prévenu, avec une fiche : gardé
-            "2": {**ENTRY, "notified": True, "memory": True},   # prévenu, sans fiche
-            "3": {**ENTRY, "notified": False, "memory": True},  # fiche écrite par un administrateur
-            "4": {**ENTRY, "notified": True, "memory": False},  # avait désactivé la mémoire
-            "5": {**ENTRY, "notified": True, "memory": True},   # fiche vide
-        }
-        with self.assertLogs("chatbot.members", "INFO") as logs:
-            registry = self.load(1, members, {"1": "habite à Lyon", "3": "habite à Rome", "4": "x", "5": ""})
-        self.assertEqual([key for key in members if registry.memory_enabled(key)], ["1"])
-        self.assertTrue(any("Gardée activée pour 1 membre(s)" in line for line in logs.output))
-        saved = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertEqual(saved["version"], 2)
-        self.assertEqual([key for key, entry in saved["members"].items() if entry["memory"]], ["1"])
-        self.assertNotIn("notified", saved["members"]["1"])
-
-    def test_version_2_untouched(self):
-        members = {"1": {**ENTRY, "memory": True}, "2": {**ENTRY, "memory": False}}
-        registry = self.load(2, members, {})
-        self.assertTrue(registry.memory_enabled("1"))  # activée par le membre, même sans fiche
-        self.assertFalse(registry.memory_enabled("2"))
-
-    def test_write_failure(self):
-        with mock.patch("bot.members.write_atomic", side_effect=OSError("disque plein")),                 self.assertLogs("chatbot.members", "ERROR"):
-            registry = self.load(1, {"1": {**ENTRY, "notified": True, "memory": True}}, {})
-        self.assertFalse(registry.memory_enabled("1"))  # appliqué quand même, réécrit à la prochaine sauvegarde
-        self.assertIsNone(registry.broken)
 
 
 if __name__ == "__main__":

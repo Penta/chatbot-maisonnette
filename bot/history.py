@@ -6,12 +6,10 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 
 from .files import write_atomic
-from .text_utils import strip_reasoning
 
 logger = logging.getLogger("chatbot.history")
 
@@ -19,7 +17,6 @@ FILE_VERSION = 3
 
 # Remplace une image dans la mémoire (les images elles-mêmes ne sont pas conservées).
 IMAGE_MARKER = "[image jointe : tu l'as vue et analysée à ce moment-là, mais elle n'est plus conservée en mémoire]"
-_OLD_IMAGE_MARKER = "[image jointe]"
 # Ajouté au message de l'utilisateur quand Claude a fait une recherche web pour y répondre
 # (les recherches et leurs résultats ne sont pas conservés).
 WEB_MARKER = "[recherche web : tu as réellement cherché sur Internet pour répondre à ce message, mais les résultats ne sont plus conservés en mémoire]"
@@ -192,21 +189,19 @@ class ConversationHistory:
         except (ValueError, OSError) as exc:  # JSON invalide, mauvais encodage ou structure inattendue
             self._set_aside(exc)
             return {}
-        if raw.get("version") != FILE_VERSION:
-            self._keep_old_copy(raw.get("version") or 1)
         return {str(cid): self._trim(self._sanitize(msgs)) for cid, msgs in channels.items()}
 
     @staticmethod
     def _channels(raw) -> dict:
-        """Messages de chaque salon, quel que soit le format du fichier (ValueError s'il est inattendu)."""
+        """Messages de chaque salon (ValueError si le fichier est inattendu)."""
         if not isinstance(raw, dict):
             raise ValueError(f"le fichier contient un {type(raw).__name__} au lieu d'un dictionnaire")
-        if raw.get("version") in (2, FILE_VERSION):
-            channels = raw.get("channels") or {}
-            if not isinstance(channels, dict):
-                raise ValueError(f"« channels » est un {type(channels).__name__} au lieu d'un dictionnaire")
-            return channels
-        return {cid: val.get("messages") for cid, val in raw.items() if isinstance(val, dict)}
+        if raw.get("version") != FILE_VERSION:
+            raise ValueError(f"format {raw.get('version')!r} inconnu (attendu : {FILE_VERSION})")
+        channels = raw.get("channels") or {}
+        if not isinstance(channels, dict):
+            raise ValueError(f"« channels » est un {type(channels).__name__} au lieu d'un dictionnaire")
+        return channels
 
     def _set_aside(self, exc: Exception) -> None:
         """Met de côté un fichier illisible, sous un nom daté : il sera remplacé à la prochaine
@@ -219,23 +214,10 @@ class ConversationHistory:
         except OSError as err:
             logger.error("Copie de secours impossible : %s", err)
 
-    def _keep_old_copy(self, version: int) -> None:
-        """Copie un fichier d'un ancien format avant sa conversion : une version précédente
-        du bot ne sait pas lire le nouveau format et repartirait d'une mémoire vide."""
-        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        backup = self.file_path.with_name(f"{self.file_path.name}.v{version}-{stamp}")
-        try:
-            shutil.copy2(self.file_path, backup)
-        except OSError as err:
-            logger.error("Copie de l'ancien historique impossible : %s", err)
-            return
-        logger.info("Historique au format %s : conversion au format %s. Copie de l'ancien fichier : %s",
-                    version, FILE_VERSION, backup)
-
     @classmethod
     def _sanitize(cls, messages) -> list[dict]:
-        """Met les messages au format actuel (en convertissant les anciens formats, dont celui
-        de Mistral), et fusionne les messages consécutifs d'un même rôle."""
+        """Garde les messages lisibles, et fusionne les messages consécutifs d'un même rôle (laissés
+        côte à côte par un message illisible retiré entre eux)."""
         if not isinstance(messages, list):
             return []
         clean: list[dict] = []
@@ -257,40 +239,17 @@ class ConversationHistory:
 
     @classmethod
     def _entry(cls, msg) -> dict | None:
-        """Un message du fichier au format actuel, ou None s'il est vide ou illisible."""
-        if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant"):
+        """Un message du fichier, ou None s'il est vide ou illisible."""
+        if not isinstance(msg, dict):
             return None
-        if msg["role"] == "user" and isinstance(msg.get("lines"), list):
+        if msg.get("role") == "assistant":
+            content = msg.get("content")
+            return {"role": "assistant", "content": content} if isinstance(content, str) and content.strip() else None
+        if msg.get("role") == "user" and isinstance(msg.get("lines"), list):
             lines = [line for line in msg["lines"] if cls._readable(line)]
-            if not lines:
-                return None
-            return {"role": "user", "lines": lines, **({"web": True} if msg.get("web") else {})}
-
-        # Anciens formats : un seul texte par message.
-        content = msg.get("content")
-        if isinstance(content, list):
-            parts = []
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-                elif block.get("type") in ("image", "image_url"):
-                    parts.append(IMAGE_MARKER)
-            content = " ".join(p for p in parts if p)
-        if not isinstance(content, str) or not content.strip():
-            return None
-        if msg["role"] == "assistant":
-            # Réflexion affichée par erreur avant la 5.8 : le modèle l'imiterait en la relisant.
-            content = strip_reasoning(content)
-            return {"role": "assistant", "content": content} if content else None
-        # Le texte converti reste identique une fois rendu : le cache de prompt est conservé.
-        web = content.endswith(f" {WEB_MARKER}")
-        if web:
-            content = content[: -len(WEB_MARKER) - 1]
-        if content.endswith(_OLD_IMAGE_MARKER):
-            content = content[: -len(_OLD_IMAGE_MARKER)] + IMAGE_MARKER
-        return {"role": "user", "lines": [{"content": content}], **({"web": True} if web else {})}
+            if lines:
+                return {"role": "user", "lines": lines, **({"web": True} if msg.get("web") else {})}
+        return None
 
     @staticmethod
     def _readable(line) -> bool:

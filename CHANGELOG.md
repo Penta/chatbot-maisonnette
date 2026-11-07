@@ -20,6 +20,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les versions des dépendances sont figées, et Python 3.11 est le minimum.** `requirements.txt` indique les versions exactes testées : une nouvelle version d'une bibliothèque n'arrive plus sans changement du dépôt. Hors Docker, vérifie ta version de Python, puis relance `pip install -r requirements.txt`.
 
+- **Les fichiers d'avant la 5.8 et la 5.11 ne sont plus convertis.** Un historique d'avant la 5.8 est mis de côté (`conversation_history.json.corrompu-<date>`) et la conversation repart de zéro ; un `registre.json` d'avant la 5.11 coupe la mémoire des membres. Depuis une version aussi ancienne, passe d'abord par la 5.13.
+
 - **Des consignes plus courtes pour Claude.** Les notes ajoutées à la personnalité gardent les mêmes règles en environ 600 tokens de moins par message (un quart de moins, tous réglages activés), ce qui allège un peu le coût. Rien à régler.
 
 ### Corrections
@@ -30,7 +32,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika ne joue plus à un jeu Steam pas encore sorti.** Les jeux annoncés sur la boutique sont maintenant écartés du statut « joue à », comme les jeux pour adultes. Rien à régler.
 
-- **Une « version » invalide dans `registre.json` n'empêche plus le bot de démarrer.** Le bot démarre avec la mémoire des membres coupée et le log indique quoi corriger : `version` doit être un nombre entier, sans guillemets. Corrige le fichier puis redémarre.
+- **Une « version » invalide dans `registre.json` n'empêche plus le bot de démarrer.** Le bot démarre avec la mémoire des membres coupée et le log indique quoi corriger : `version` doit valoir `2`, sans guillemets. Corrige le fichier puis redémarre.
 
 - **Les membres savent qu'un administrateur peut effacer leur fiche.** La question d'activation de la mémoire et la note sous la fiche dans `/memoire` ne parlaient que de supprimer des lignes : elles disent maintenant tout ce que les administrateurs peuvent faire. Rien à régler.
 
