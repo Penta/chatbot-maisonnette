@@ -34,7 +34,11 @@ DAY = timedelta(hours=24)
 # fiche jointe. Au-delà, le salon est considéré comme calme.
 RECENT_MESSAGES = 50
 SILENCE = "RIEN"  # réponse de Claude quand rien de naturel ne lui vient
-_SILENCE = re.compile(rf"\W*{SILENCE}\W*", re.IGNORECASE)
+_SILENCE = re.compile(rf"\W*{SILENCE}\W*", re.IGNORECASE)  # le mot seul, en majuscules ou non
+# Le mot en majuscules, accompagné d'une explication : seul sur une ligne, ou en tête suivi d'une ponctuation
+# (« RIEN, je n'ai pas d'idée »). « RIEN ne vaut ce final » est un vrai message.
+_SILENCE_LINE = re.compile(rf"^\W*{SILENCE}\W*$", re.MULTILINE)
+_SILENCE_FIRST = re.compile(rf"\W*{SILENCE}\s*(?:[^\w\s]|$)")
 TOPICS = (Kind.ANIME, Kind.GAME)  # activités dont la fin donne envie d'en parler
 
 
@@ -47,8 +51,10 @@ def finished_activity(before: Status, after: Status) -> bool:
 
 
 def is_silence(text: str) -> bool:
-    """Claude a choisi de ne rien dire (SILENCE, avec ou sans ponctuation, ou rien du tout)."""
-    return not text.strip() or _SILENCE.fullmatch(text) is not None
+    """Claude a choisi de ne rien dire (SILENCE, avec ou sans ponctuation ni explication, ou rien du tout).
+    Dans le doute, mieux vaut se taire : un silence ne se voit pas, « RIEN, je n'ai pas d'idée » dans le salon si."""
+    return (not text.strip() or _SILENCE.fullmatch(text) is not None or _SILENCE_LINE.search(text) is not None
+            or _SILENCE_FIRST.match(text) is not None)
 
 
 def occasion_note(finished: Status, now: datetime) -> str:

@@ -50,8 +50,16 @@ class SilenceTest(unittest.TestCase):
         for text in ("RIEN", "RIEN.", " rien\n", "**Rien**", ""):
             self.assertTrue(is_silence(text), text)
 
+    def test_silence_with_an_explanation(self):
+        # Claude explique son silence : le mot RIEN suffit, rien n'est envoyé dans le salon.
+        for text in ("RIEN, je n'ai pas d'idée.", "RIEN.\nJe préfère attendre que quelqu'un parle.",
+                     "RIEN — rien ne me vient.", "(Pas d'idée qui sonne naturelle.)\nRIEN"):
+            self.assertTrue(is_silence(text), text)
+
     def test_real_message(self):
-        self.assertFalse(is_silence("Rien à dire de plus, cet épisode était parfait."))
+        for text in ("Rien à dire de plus, cet épisode était parfait.", "RIEN ne vaut un bon épisode de Frieren.",
+                     "Je n'ai rien compris à la fin, mais RIEN ne m'a préparée à ça."):
+            self.assertFalse(is_silence(text), text)
 
     def test_occasion_note_names_what_was_finished(self):
         note = occasion_note(ANIME_EP4, datetime(2026, 11, 7, 16, 42, tzinfo=ZoneInfo("Europe/Paris")))
