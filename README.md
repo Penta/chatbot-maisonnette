@@ -51,7 +51,7 @@ Avec `MEMORY=on` :
 
 Il te faut :
 
-- **Python 3.10 ou plus récent** (ou Docker, voir plus bas) ;
+- **Python 3.11 ou plus récent** (ou Docker, voir plus bas) ;
 - **une application Discord** avec un bot (voir l'étape suivante) ;
 - **une clé API Anthropic** : elle se crée sur https://platform.claude.com, rubrique API Keys. L'API est payante à l'usage, séparément de l'abonnement Claude Pro (voir [Coûts](#coûts-et-logs)) ;
 - en option, **une clé API Steam** (gratuite, https://steamcommunity.com/dev/apikey) pour le statut « joue à ». Sans elle, le bot ne joue simplement à rien.
