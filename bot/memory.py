@@ -383,10 +383,11 @@ class MemoryStore:
         """Supprime ces lignes (numérotées à partir de 0, voir lines) : modification faite avec /memoire
         (by : son nom, pour les logs). Renvoie un message d'erreur, ou None.
 
-        Les fichiers ne se modifient à la main que ligne par ligne, sans pouvoir changer le texte d'une
-        ligne : personne ne peut fabriquer une information « d'après » quelqu'un. Toujours permis, même
-        si la mémoire n'est pas activée. expected : le contenu (lu avec read) d'où viennent les
-        numéros ; si le fichier a changé depuis, rien n'est supprimé, pour ne pas retirer la mauvaise ligne."""
+        Les fichiers ne se modifient à la main que ligne par ligne (voir add_lines), sans pouvoir changer
+        le texte d'une ligne : personne ne peut changer ce que dit une note de Claude, ni la source
+        qu'elle cite. Toujours permis, même si la mémoire n'est pas activée. expected : le contenu (lu
+        avec read) d'où viennent les numéros ; si le fichier a changé depuis, rien n'est supprimé, pour ne
+        pas retirer la mauvaise ligne."""
         async with self._lock:
             current = self.read(name)
             if current != expected:
