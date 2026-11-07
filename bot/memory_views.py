@@ -1,33 +1,37 @@
 """Affichage et modification des fichiers de mémoire sur Discord : /memoire et /memoire-serveur.
 
-Tout s'affiche dans des messages éphémères : seule la personne qui a lancé la commande les voit."""
+Tout s'affiche dans des messages éphémères : seule la personne qui a lancé la commande les voit. Ces messages
+utilisent la mise en page de Discord par blocs (textes, rangées de boutons) : chaque ligne s'y lit en entier,
+alors qu'un menu déroulant la couperait à 100 caractères."""
 
 from __future__ import annotations
 
 import io
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import discord
 
 from .members import MemberRegistry, display_name
 from .memory import MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, NOT_SAVED, SERVER_FILE, MemoryStore
-from .text_utils import split_message
 
 logger = logging.getLogger("chatbot.memory")
 
 # Longueur maximale d'une zone de texte dans une fenêtre Discord.
 INPUT_MAX = 4000
-# Choix d'un menu de Discord : 25 au plus, de 100 caractères. Menus au plus dans un message (5 rangées,
-# dont une pour le bouton « Annuler ») : un fichier écrit avant la limite de MAX_LINES lignes peut en
-# avoir plus de 25.
-MENU_OPTIONS = 25
-OPTION_LABEL_MAX = 100
-MAX_MENUS = 4
-# Texte maximal d'un embed (4096 pour Discord), et de tous les embeds d'un message (6000).
-EMBED_MAX = 4000
-EMBEDS_TOTAL_MAX = 5500
+# Limites de Discord pour un message mis en page par blocs : 40 éléments au plus (textes, rangées, boutons,
+# chacun compte) et 4000 caractères de texte en tout.
+TEXT_MAX = 4000
+MAX_ITEMS = 40
+# Texte du fichier sur une page : le reste du message (titre, bas de page, phrase au-dessus, avis
+# d'expiration) tient dans la marge. Un fichier plus long s'affiche en plusieurs pages.
+PAGE_TEXT_MAX = 3300
+# « Supprimer des lignes » : un bouton numéroté par ligne, en rangées de 5. 25 boutons par page (5 rangées,
+# plus une pour les autres boutons) restent sous les 40 éléments ; une fiche de MAX_LINES lignes tient ainsi
+# sur une seule page.
+NUMBERS_PER_ROW = 5
+NUMBERS_PER_PAGE = 25
 # Durée pendant laquelle les boutons répondent (ensuite, il suffit de relancer la commande).
 VIEW_TIMEOUT = 600
 # Durée pendant laquelle une fenêtre (« Ajouter des lignes », « Surnoms ») peut être validée : Discord la
@@ -39,6 +43,9 @@ MODAL_TIMEOUT = 3600
 # Sous la fiche d'un membre, quand il la consulte lui-même.
 ADMINS_NOTE = "Les administrateurs du serveur peuvent aussi voir ta fiche, en supprimer des lignes ou l'effacer."
 ERROR_MESSAGE = "Une erreur est survenue. Si ça se reproduit, préviens l'administrateur du bot."
+EXPIRED = "Ces boutons ont expiré : relance la commande pour continuer."
+CHOOSE_HELP = ("Clique sur les numéros des lignes à supprimer : elles apparaissent barrées. Rien n'est "
+               "supprimé avant le bouton « Supprimer », et la suppression est définitive.")
 
 Callback = Callable[[discord.Interaction], Awaitable[None]]
 
@@ -72,6 +79,15 @@ class Target:
     departed: bool = False  # membre parti du serveur : un administrateur désactive sa mémoire à sa place
 
 
+@dataclass
+class Choice:
+    """Écran « Supprimer des lignes » en cours : lignes affichées et numéros cochés."""
+    original: str          # contenu du fichier à l'ouverture : les numéros valent pour lui (voir delete_lines)
+    lines: list[str]       # lignes telles qu'affichées (membres cités par leur nom)
+    chosen: set[int] = field(default_factory=set)  # index des lignes cochées
+    page: int = 0
+
+
 class MemoryCard:
     """Ce que voit la personne qui a lancé la commande : le fichier et les boutons pour le modifier."""
 
@@ -80,6 +96,8 @@ class MemoryCard:
         self.target = target
         self.owner_id = owner_id
         self.bot_name = bot_name
+        self.page = 0  # page affichée d'un fichier trop long pour un seul message
+        self._choice: Choice | None = None
         self._view: OwnerView | None = None  # boutons affichés en ce moment
 
     # ---------------------------------------------------------------- état
@@ -96,130 +114,155 @@ class MemoryCard:
 
     # ----------------------------------------------------------- affichage
 
-    def embeds(self) -> list[discord.Embed]:
+    def view(self, note: str | None = None) -> OwnerView:
+        """Écran principal : le fichier, ses boutons, et une courte phrase au-dessus (note) après une action."""
+        view = OwnerView(self.owner_id)
+        if note:
+            view.add_item(discord.ui.TextDisplay(note))
         if self.target.member_id is None:
             title = "Fichier général du serveur"
         else:
             title = "Ta fiche mémoire" if self.target.is_self else f"Fiche mémoire de {self.target.name}"
         content = self.store.read(self.target.file)
+        # Le membre doit savoir que sa fiche n'est pas vue par lui seul (voir /memoire membre:@…).
+        footer = [ADMINS_NOTE] if self.target.member_id is not None and self.target.is_self else []
+        color, pages = discord.Color.blurple(), 1
         if not self.memory_enabled:
+            color, footer = discord.Color.light_grey(), []
             if self.target.is_self:
                 text = (f"La mémoire n'est pas activée pour toi : {self.bot_name} ne retient rien sur toi. "
                         f"Active-la pour que {self.bot_name} se souvienne de toi au fil des conversations.")
             else:
                 text = (f"{self.target.name} n'a pas activé la mémoire : {self.bot_name} ne retient rien "
                         f"sur ce membre.")
-            return [discord.Embed(title=title, description=text, color=discord.Color.light_grey())]
-        # Le membre doit savoir que sa fiche n'est pas vue par lui seul (voir /memoire membre:@…).
-        note = ADMINS_NOTE if self.target.member_id is not None and self.target.is_self else ""
-        if not content:
-            embed = discord.Embed(title=title, description=f"{self.bot_name} n'a encore rien retenu {self.about()}.",
-                                  color=discord.Color.blurple())
-            if note:
-                embed.set_footer(text=note)
-            return [embed]
-        size = len(content)
-        content = self.store.with_names(content)  # membres cités par leur nom actuel (« <@222> » → « Alice »)
-        if len(content) > EMBEDS_TOTAL_MAX:  # seulement si MEMORY_*_LIMIT dépasse ce que Discord affiche
-            content = content[:EMBEDS_TOTAL_MAX] + "\n[…]"
-        embeds = [discord.Embed(description=chunk, color=discord.Color.blurple())
-                  for chunk in split_message(content, EMBED_MAX)]
-        embeds[0].title = title
-        footer = (f"{size}/{self.store.limit(self.target.file)} caractères, "
-                  f"{len(self.store.lines(self.target.file))}/{MAX_LINES} lignes")
-        embeds[-1].set_footer(text=f"{footer} · {note}" if note else footer)
-        return embeds
+        elif not content:
+            text = f"{self.bot_name} n'a encore rien retenu {self.about()}."
+        else:
+            # Membres cités par leur nom actuel (« <@222> » → « Alice »).
+            lines = [clip(line) for line in self.store.with_names(content).split("\n")]
+            bounds = paginate([len(line) for line in lines], PAGE_TEXT_MAX)
+            pages, self.page = len(bounds), min(self.page, len(bounds) - 1)
+            start, end = bounds[self.page]
+            text = "\n".join(lines[start:end])
+            footer.insert(0, f"{len(content)}/{self.store.limit(self.target.file)} caractères, "
+                             f"{len(self.store.lines(self.target.file))}/{MAX_LINES} lignes")
+        body = f"### {title}\n{text}" + "".join(f"\n-# {line}" for line in footer)
+        view.add_item(discord.ui.Container(discord.ui.TextDisplay(body), accent_colour=color))
+        view.add_item(discord.ui.ActionRow(*self.buttons(content)))
+        if pages > 1:
+            view.add_item(discord.ui.ActionRow(*page_buttons(self.page, pages, self.turn_page)))
+        return view
 
-    def view(self) -> discord.ui.View:
-        view = OwnerView(self.owner_id)
-        content = self.store.read(self.target.file)
+    def buttons(self, content: str) -> list[discord.ui.Button]:
+        """Boutons de l'écran principal (5 au plus : une rangée)."""
+        buttons = []
         # Un fichier ne se modifie à la main que ligne par ligne (voir MemoryStore.delete_lines) : on en
         # supprime des lignes, l'administrateur ajoute des lignes au fichier général, et le membre à sa
         # propre fiche, dont il écrit aussi les surnoms. Mémoire pas activée : il n'y a pas de fiche.
         if self.target.member_id is None:
-            add_button(view, "Ajouter des lignes", "➕", discord.ButtonStyle.primary, self.ask_add)
+            buttons.append(button("Ajouter des lignes", self.ask_add, discord.ButtonStyle.primary, "➕"))
         elif self.target.is_self:
-            add_button(view, "Ajouter des lignes", "➕", discord.ButtonStyle.primary, self.ask_add,
-                       disabled=not self.memory_enabled)
-            add_button(view, "Surnoms", "🏷️", discord.ButtonStyle.primary, self.ask_nicknames,
-                       disabled=not self.memory_enabled)
-        add_button(view, "Supprimer des lignes", "✂️", discord.ButtonStyle.secondary, self.choose_lines,
-                   disabled=not content)
-        add_button(view, "Tout effacer" if self.target.member_id is None else "Effacer la fiche", "🗑️",
-                   discord.ButtonStyle.secondary, self.ask_erase, disabled=not content)
+            buttons.append(button("Ajouter des lignes", self.ask_add, discord.ButtonStyle.primary, "➕",
+                                  disabled=not self.memory_enabled))
+            buttons.append(button("Surnoms", self.ask_nicknames, discord.ButtonStyle.primary, "🏷️",
+                                  disabled=not self.memory_enabled))
+        buttons.append(button("Supprimer des lignes", self.choose_lines, emoji="✂️", disabled=not content))
+        buttons.append(button("Tout effacer" if self.target.member_id is None else "Effacer la fiche",
+                              self.ask_erase, emoji="🗑️", disabled=not content))
         # Seul le membre lui-même active ou désactive la mémoire. Parti du serveur, il ne peut plus lancer
         # /memoire : un administrateur peut alors la désactiver à sa place, pour tout effacer.
         if self.target.member_id is not None and (self.target.is_self or self.target.departed):
             if self.memory_enabled:
-                add_button(view, "Désactiver la mémoire", "🚫", discord.ButtonStyle.danger, self.ask_disable)
+                buttons.append(button("Désactiver la mémoire", self.ask_disable, discord.ButtonStyle.danger, "🚫"))
             elif self.target.is_self:
-                add_button(view, "Activer la mémoire", "✅", discord.ButtonStyle.success, self.ask_enable)
-        return view
+                buttons.append(button("Activer la mémoire", self.ask_enable, discord.ButtonStyle.success, "✅"))
+        return buttons
+
+    async def turn_page(self, interaction: discord.Interaction, page: int) -> None:
+        self.page = page
+        await self.refresh(interaction)
 
     async def send(self, interaction: discord.Interaction) -> None:
-        await self.show(interaction, self.view(), self.embeds(), new=True)
+        await self.show(interaction, self.view(), new=True)
 
     async def refresh(self, interaction: discord.Interaction, note: str | None = None) -> None:
         """Réaffiche le fichier à jour dans le même message, avec une courte phrase au-dessus."""
-        await self.show(interaction, self.view(), self.embeds(), note)
+        await self.show(interaction, self.view(note))
 
-    async def show(self, interaction: discord.Interaction, view: OwnerView, embeds: list[discord.Embed],
-                   note: str | None = None, new: bool = False) -> None:
-        """Affiche ces boutons dans un nouveau message éphémère (new), ou à la place des précédents."""
+    async def show(self, interaction: discord.Interaction, view: OwnerView, new: bool = False) -> None:
+        """Affiche cet écran dans un nouveau message éphémère (new), ou à la place du précédent."""
         if self._view is not None:
             self._view.stop()  # sans quoi son expiration griserait les nouveaux boutons
         self._view, view.interaction = view, interaction
         if new and interaction.response.is_done():  # réponse différée (voir memory_command)
-            await interaction.followup.send(embeds=embeds, view=view, ephemeral=True)
+            await interaction.followup.send(view=view, ephemeral=True)
         elif new:
-            await interaction.response.send_message(embeds=embeds, view=view, ephemeral=True)
+            await interaction.response.send_message(view=view, ephemeral=True)
         elif interaction.response.is_done():  # réponse différée, avant une écriture (voir ANSWER_FIRST)
-            await interaction.edit_original_response(content=note, embeds=embeds, view=view)
+            await interaction.edit_original_response(view=view)
         else:
-            await interaction.response.edit_message(content=note, embeds=embeds, view=view)
+            await interaction.response.edit_message(view=view)
 
     # -------------------------------------------------------------- actions
 
     async def choose_lines(self, interaction: discord.Interaction) -> None:
-        """Remplace le fichier affiché par ses lignes numérotées et un menu pour cocher celles à supprimer."""
+        """Remplace le fichier affiché par ses lignes numérotées, avec un bouton par numéro pour les cocher."""
         # Bouton affiché avant un changement : fiche effacée entre-temps (autre message /memoire, désactivation).
-        original = self.store.read(self.target.file)  # les numéros valent pour ce contenu (voir delete_lines)
+        original = self.store.read(self.target.file)
         if not original:
             await self.refresh(interaction, "Le fichier est vide : rien à supprimer.")
             return
-        lines = [self.store.with_names(line) for line in self.store.lines(self.target.file)]
-        view = OwnerView(self.owner_id)
-        for start in range(0, min(len(lines), MENU_OPTIONS * MAX_MENUS), MENU_OPTIONS):
-            chunk = lines[start:start + MENU_OPTIONS]
-            placeholder = "Lignes à supprimer"
-            if len(lines) > MENU_OPTIONS:
-                placeholder += f" ({start + 1} à {start + len(chunk)})"
-            menu = discord.ui.Select(
-                placeholder=placeholder, min_values=1, max_values=len(chunk),
-                options=[discord.SelectOption(label=shorten(f"{start + i + 1}. {line}"), value=str(start + i))
-                         for i, line in enumerate(chunk)])
-            menu.callback = self._deleter(menu, original)
-            view.add_item(menu)
-        add_button(view, "Annuler", "↩️", discord.ButtonStyle.secondary, self.refresh)
-        text = "\n".join(f"**{i + 1}.** {line}" for i, line in enumerate(lines))
-        if len(lines) > MENU_OPTIONS * MAX_MENUS:
-            text += (f"\n\nSeules les {MENU_OPTIONS * MAX_MENUS} premières lignes peuvent être choisies : "
-                     f"supprimes-en d'abord, les suivantes apparaîtront.")
-        embeds = [discord.Embed(description=chunk, color=discord.Color.orange())
-                  for chunk in split_message(text[:EMBEDS_TOTAL_MAX], EMBED_MAX)]
-        embeds[0].title = "Coche les lignes à supprimer (c'est définitif)"
-        await self.show(interaction, view, embeds)
+        self._choice = Choice(original, [self.store.with_names(line) for line in self.store.lines(self.target.file)])
+        await self.show(interaction, self.choice_view())
 
-    def _deleter(self, menu: discord.ui.Select, original: str) -> Callback:
-        """Action du menu : supprime les lignes cochées, puis réaffiche le fichier."""
-        async def delete(interaction: discord.Interaction) -> None:
-            await interaction.response.defer()  # voir ANSWER_FIRST
-            indexes = [int(value) for value in menu.values]
-            error = await self.store.delete_lines(self.target.file, indexes, by=str(interaction.user),
-                                                  expected=original)
-            plural = "s" if len(indexes) > 1 else ""
-            await self.refresh(interaction, error or f"{len(indexes)} ligne{plural} supprimée{plural}.")
-        return delete
+    def choice_view(self) -> OwnerView:
+        """Écran « Supprimer des lignes » : les lignes en entier, les cochées barrées, et leurs boutons."""
+        choice = self._choice
+        # Pages calculées comme si tout était coché (barré) : elles ne bougent pas quand on coche.
+        bounds = paginate([len(numbered(i, line, True)) for i, line in enumerate(choice.lines)], PAGE_TEXT_MAX,
+                          NUMBERS_PER_PAGE)
+        choice.page = min(choice.page, len(bounds) - 1)
+        start, end = bounds[choice.page]
+        text = "\n".join(numbered(i, choice.lines[i], i in choice.chosen) for i in range(start, end))
+        body = f"### Lignes à supprimer\n{CHOOSE_HELP}\n\n{text}"
+        if len(bounds) > 1:
+            body += f"\n-# Lignes {start + 1} à {end} sur {len(choice.lines)}"
+        container = discord.ui.Container(discord.ui.TextDisplay(body), accent_colour=discord.Color.orange())
+        for row in range(start, end, NUMBERS_PER_ROW):
+            container.add_item(discord.ui.ActionRow(
+                *(self.number_button(i) for i in range(row, min(row + NUMBERS_PER_ROW, end)))))
+        view = OwnerView(self.owner_id)
+        view.add_item(container)
+        count = len(choice.chosen)
+        plural = "s" if count > 1 else ""
+        buttons = page_buttons(choice.page, len(bounds), self.turn_choice_page, label=False) if len(bounds) > 1 else []
+        buttons.append(button(f"Supprimer {count} ligne{plural}" if count else "Supprimer", self.delete_chosen,
+                              discord.ButtonStyle.danger, "✂️", disabled=not count))
+        buttons.append(button("Annuler", self.refresh, emoji="↩️"))
+        view.add_item(discord.ui.ActionRow(*buttons))
+        return view
+
+    def number_button(self, index: int) -> discord.ui.Button:
+        """Bouton d'une ligne : un clic la coche (rouge, barrée dans la liste), un autre la décoche."""
+        chosen = index in self._choice.chosen
+
+        async def toggle(interaction: discord.Interaction) -> None:
+            self._choice.chosen.symmetric_difference_update({index})
+            await self.show(interaction, self.choice_view())
+        return button(str(index + 1), toggle, discord.ButtonStyle.danger if chosen else discord.ButtonStyle.secondary)
+
+    async def turn_choice_page(self, interaction: discord.Interaction, page: int) -> None:
+        self._choice.page = page
+        await self.show(interaction, self.choice_view())
+
+    async def delete_chosen(self, interaction: discord.Interaction) -> None:
+        """Supprime les lignes cochées, puis réaffiche le fichier."""
+        await interaction.response.defer()  # voir ANSWER_FIRST
+        indexes = sorted(self._choice.chosen)
+        error = await self.store.delete_lines(self.target.file, indexes, by=str(interaction.user),
+                                              expected=self._choice.original)
+        plural = "s" if len(indexes) > 1 else ""
+        await self.refresh(interaction, error or f"{len(indexes)} ligne{plural} supprimée{plural}.")
 
     async def ask_add(self, interaction: discord.Interaction) -> None:
         title = "Ajouter au fichier général" if self.target.member_id is None else "Ajouter à ta fiche"
@@ -299,13 +342,13 @@ class MemoryCard:
         await self.refresh(interaction, "Mémoire activée." if saved else NOT_SAVED.format(setting="l'activation"))
 
 
-class OwnerView(discord.ui.View):
-    """Boutons réservés à la personne qui a lancé la commande."""
+class OwnerView(discord.ui.LayoutView):
+    """Écran réservé à la personne qui a lancé la commande."""
 
     def __init__(self, owner_id: int):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.owner_id = owner_id
-        self.interaction: discord.Interaction | None = None  # celle qui a affiché ces boutons (voir show)
+        self.interaction: discord.Interaction | None = None  # celle qui a affiché cet écran (voir show)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.owner_id
@@ -315,11 +358,12 @@ class OwnerView(discord.ui.View):
         l'interaction qui l'a affiché, plus que VIEW_TIMEOUT."""
         if self.interaction is None:
             return
-        for item in self.children:
-            item.disabled = True
+        for item in self.walk_children():
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+        self.add_item(discord.ui.TextDisplay(EXPIRED))
         try:
-            await self.interaction.edit_original_response(
-                content="Ces boutons ont expiré : relance la commande pour continuer.", view=self)
+            await self.interaction.edit_original_response(view=self)
         except discord.HTTPException:
             pass  # message fermé par la personne, ou trop ancien
 
@@ -328,20 +372,35 @@ class OwnerView(discord.ui.View):
         await reply_error(interaction)
 
 
-def add_button(view: discord.ui.View, label: str, emoji: str, style: discord.ButtonStyle,
-               callback: Callback, disabled: bool = False) -> None:
-    button = discord.ui.Button(label=label, emoji=emoji, style=style, disabled=disabled)
-    button.callback = callback
-    view.add_item(button)
+def button(label: str, callback: Callback, style: discord.ButtonStyle = discord.ButtonStyle.secondary,
+           emoji: str | None = None, disabled: bool = False) -> discord.ui.Button:
+    item = discord.ui.Button(label=label, emoji=emoji, style=style, disabled=disabled)
+    item.callback = callback
+    return item
+
+
+def page_buttons(page: int, pages: int, turn: Callable[[discord.Interaction, int], Awaitable[None]],
+                 label: bool = True) -> list[discord.ui.Button]:
+    """« ◀ », « Page 2/3 » (sans action, si label) et « ▶ »."""
+    async def previous(interaction: discord.Interaction) -> None:
+        await turn(interaction, page - 1)
+
+    async def following(interaction: discord.Interaction) -> None:
+        await turn(interaction, page + 1)
+    buttons = [button("◀", previous, disabled=page == 0)]
+    if label:
+        buttons.append(discord.ui.Button(label=f"Page {page + 1}/{pages}", disabled=True))
+    buttons.append(button("▶", following, disabled=page == pages - 1))
+    return buttons
 
 
 async def confirm(interaction: discord.Interaction, card: MemoryCard, question: str, action: Callback) -> None:
     """Remplace le fichier affiché par une question, avec « Confirmer » et « Annuler »."""
     view = OwnerView(card.owner_id)
-    add_button(view, "Confirmer", "⚠️", discord.ButtonStyle.danger, action)
-    add_button(view, "Annuler", "↩️", discord.ButtonStyle.secondary, card.refresh)
-    embed = discord.Embed(description=question, color=discord.Color.orange())
-    await card.show(interaction, view, [embed])
+    view.add_item(discord.ui.Container(discord.ui.TextDisplay(question), accent_colour=discord.Color.orange()))
+    view.add_item(discord.ui.ActionRow(button("Confirmer", action, discord.ButtonStyle.danger, "⚠️"),
+                                       button("Annuler", card.refresh, emoji="↩️")))
+    await card.show(interaction, view)
 
 
 class TextModal(discord.ui.Modal):
@@ -375,9 +434,29 @@ class TextModal(discord.ui.Modal):
         await reply_error(interaction)
 
 
-def shorten(text: str) -> str:
-    """Texte d'un choix de menu, coupé à la limite de Discord."""
-    return text if len(text) <= OPTION_LABEL_MAX else text[:OPTION_LABEL_MAX - 1] + "…"
+def numbered(index: int, line: str, chosen: bool) -> str:
+    """Ligne de l'écran « Supprimer des lignes » : numérotée, barrée si elle est cochée."""
+    text = f"**{index + 1}.** {clip(line)}"
+    return f"~~{text}~~" if chosen else text
+
+
+def clip(line: str) -> str:
+    """Ligne coupée si elle ne tient pas seule sur une page (seulement si MEMORY_*_LIMIT le permet)."""
+    limit = PAGE_TEXT_MAX - 20  # place pour le numéro et le barré
+    return line if len(line) <= limit else line[:limit - 1] + "…"
+
+
+def paginate(lengths: list[int], text_max: int, per_page: int | None = None) -> list[tuple[int, int]]:
+    """Découpe des lignes (leurs longueurs) en pages : (début, fin) de chaque page, des lignes consécutives
+    dont le texte, sauts de ligne compris, tient dans text_max, per_page lignes au plus."""
+    bounds, start, size = [], 0, 0
+    for i, length in enumerate(lengths):
+        if i > start and (size + length > text_max or (per_page and i - start >= per_page)):
+            bounds.append((start, i))
+            start, size = i, 0
+        size += length + 1
+    bounds.append((start, len(lengths)))
+    return bounds
 
 
 def member_target(store: MemoryStore, member: discord.User | discord.Member, owner_id: int) -> Target:

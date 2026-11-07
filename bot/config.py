@@ -263,8 +263,8 @@ def load_settings() -> Settings:
     history_file = Path(_get_str("HISTORY_FILE", default="conversation_history.json"))
     # Vide : à côté de l'historique, comme les autres fichiers du bot (donc sur le même volume avec Docker).
     memory_dir = _get_str("MEMORY_DIR")
-    # /memoire n'affiche qu'environ 5500 caractères d'un fichier (limite des embeds de Discord) : au-delà,
-    # la fin n'est pas visible. 20 000 au plus, pour ne pas casser une configuration existante.
+    # /memoire affiche un long fichier en plusieurs pages. 20 000 au plus : les fichiers sont relus à chaque
+    # message, et une configuration existante ne doit pas casser.
     memory_limits = {name: check(_get_int, name, default=default, minimum=200, maximum=20000)
                      for name, default in (("MEMORY_MEMBER_LIMIT", 3000), ("MEMORY_SERVER_LIMIT", 5000))}
 

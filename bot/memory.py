@@ -63,8 +63,8 @@ NOTE_HEADER = re.compile(r"^[ \t]*[=＝]+", re.MULTILINE)
 # Réglage de la mémoire appliqué mais pas enregistré dans le registre (voir MemberRegistry.set_memory).
 NOT_SAVED = ("C'est fait, mais {setting} n'a pas pu être enregistrée, à cause d'une erreur du bot : elle "
              "serait perdue si le bot redémarrait avant qu'il puisse l'enregistrer. Préviens un administrateur.")
-# Lignes au plus dans un fichier : en ne gardant que l'essentiel, chacun tient dans un menu de Discord
-# (25 choix au plus), avec lequel /memoire en supprime des lignes.
+# Lignes au plus dans un fichier : en ne gardant que l'essentiel, chacun tient sur une seule page de
+# « Supprimer des lignes » dans /memoire (25 boutons numérotés au plus, voir memory_views.NUMBERS_PER_PAGE).
 MAX_LINES = 25
 # Fiches jointes au plus à un message : un message qui mentionne 90 membres n'en joint pas 90.
 MAX_ATTACHED_NOTES = 5

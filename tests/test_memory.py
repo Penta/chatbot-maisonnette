@@ -12,8 +12,8 @@ import discord
 
 from bot.members import MemberRegistry, with_username
 from bot.commands import memory_command
-from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, MODAL_TIMEOUT, MemoryCard, Target, TextModal,
-                              member_target, reply_error, shorten)
+from bot.memory_views import (ADMINS_NOTE, ERROR_MESSAGE, EXPIRED, MAX_ITEMS, MODAL_TIMEOUT, TEXT_MAX,
+                              MemoryCard, OwnerView, Target, TextModal, member_target, reply_error)
 from bot import memory
 from bot.memory import (EDITS_FILE, MAX_ATTACHED_NOTES, MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES,
                         SERVER_FILE, MemoryStore)
@@ -60,6 +60,41 @@ def interaction_mock(done: bool = False) -> mock.Mock:
     interaction.response.defer.side_effect = deferred  # comme Discord : l'interaction a reçu sa réponse
     interaction.followup.send = mock.AsyncMock()
     interaction.edit_original_response = mock.AsyncMock()
+    return interaction
+
+
+def shown(method: mock.AsyncMock) -> OwnerView:
+    """Écran envoyé à Discord par ce dernier appel (send_message, edit_message…)."""
+    return method.call_args.kwargs["view"]
+
+
+def texts(view: OwnerView) -> str:
+    """Tout le texte d'un écran, dans l'ordre."""
+    return "\n".join(item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay))
+
+
+def note(method: mock.AsyncMock) -> str | None:
+    """Courte phrase affichée au-dessus du fichier après une action (« C'est ajouté. »)."""
+    first = shown(method).children[0]
+    return first.content if isinstance(first, discord.ui.TextDisplay) else None
+
+
+def buttons(view: OwnerView) -> list[discord.ui.Button]:
+    return [item for item in view.walk_children() if isinstance(item, discord.ui.Button)]
+
+
+def labels(view: OwnerView) -> list[str]:
+    return [item.label for item in buttons(view)]
+
+
+def number_buttons(view: OwnerView) -> list[discord.ui.Button]:
+    return [item for item in buttons(view) if item.label.isdigit()]
+
+
+async def click(card: MemoryCard, label: str, interaction: mock.Mock | None = None) -> mock.Mock:
+    """Clique sur un bouton de l'écran affiché ; renvoie l'interaction du clic."""
+    interaction = interaction or interaction_mock()
+    await next(item for item in buttons(card._view) if item.label == label).callback(interaction)
     return interaction
 
 
@@ -499,11 +534,10 @@ class MemberRefTest(MemoryTestCase):
         self.write(self.fiche, "joue à Zelda (d'après <@222>)")
         card = MemoryCard(self.store, Target(self.fiche, MEMBER_ID, "Bob", is_self=True), owner_id=MEMBER_ID,
                           bot_name="Rika")
-        self.assertIn("(d'après Alice)", card.embeds()[0].description)
+        self.assertIn("(d'après Alice)", texts(card.view()))
         interaction = interaction_mock()
         await card.choose_lines(interaction)
-        menu = interaction.response.edit_message.call_args.kwargs["view"].children[0]
-        self.assertEqual(menu.options[0].label, "1. joue à Zelda (d'après Alice)")
+        self.assertIn("**1.** joue à Zelda (d'après Alice)", texts(shown(interaction.response.edit_message)))
 
     async def test_added_line_can_cite_a_member(self):
         # L'administrateur est libre de citer un membre, et le voit par son nom dans /memoire-serveur.
@@ -531,7 +565,7 @@ class ConfirmationTextsTest(MemoryTestCase):
         interaction.response.edit_message = mock.AsyncMock()
         card = MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika")
         await getattr(card, ask)(interaction)
-        return interaction.response.edit_message.call_args.kwargs["embeds"][0].description
+        return texts(shown(interaction.response.edit_message))
 
     async def test_erase_own_file(self):
         text = await self.question(Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True), "ask_erase")
@@ -558,7 +592,7 @@ class ConfirmationTextsTest(MemoryTestCase):
         interaction = interaction_mock()
         target = Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True)
         await MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika").disable(interaction)
-        content = interaction.edit_original_response.call_args.kwargs["content"]
+        content = note(interaction.edit_original_response)
         self.assertNotIn("fichier général ont été effacés", content)
         self.assertIn("rapproche-toi d'un administrateur", content)
 
@@ -567,8 +601,8 @@ class ConfirmationTextsTest(MemoryTestCase):
         await self.members.see(222, "alice", "Alice")
         target = Target("membres/222.md", 222, "Alice", is_self=True)
         card = MemoryCard(self.store, target, owner_id=222, bot_name="Rika")
-        self.assertIn("La mémoire n'est pas activée pour toi", card.embeds()[0].description)
-        self.assertIn("Activer la mémoire", [item.label for item in card.view().children])
+        self.assertIn("La mémoire n'est pas activée pour toi", texts(card.view()))
+        self.assertIn("Activer la mémoire", labels(card.view()))
         text = await self.question(target, "ask_enable")
         self.assertIn("ce que d'autres membres lui racontent", text)
         self.assertIn("noté dans sa fiche avec ton nom", text)  # ses propres propos, montrés aux autres
@@ -576,11 +610,11 @@ class ConfirmationTextsTest(MemoryTestCase):
         interaction = interaction_mock()
         await card.enable(interaction)
         self.assertTrue(self.members.memory_enabled(222))
-        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "Mémoire activée.")
+        self.assertEqual(note(interaction.edit_original_response), "Mémoire activée.")
 
 
 class DeleteLinesTest(MemoryTestCase):
-    """Une fiche ne se modifie à la main qu'en supprimant des lignes, choisies dans un menu."""
+    """Une fiche ne se modifie à la main qu'en supprimant des lignes, cochées par leur numéro."""
 
     FICHE = f"membres/{MEMBER_ID}.md"
 
@@ -588,77 +622,155 @@ class DeleteLinesTest(MemoryTestCase):
         target = target or Target(self.FICHE, MEMBER_ID, "Bob", is_self=True)
         return MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika")
 
-    async def open_menu(self, card: MemoryCard) -> list:
+    @staticmethod
+    async def open(card: MemoryCard) -> OwnerView:
         interaction = interaction_mock()
         await card.choose_lines(interaction)
-        return [item for item in interaction.response.edit_message.call_args.kwargs["view"].children
-                if isinstance(item, discord.ui.Select)]
+        return shown(interaction.response.edit_message)
 
-    @staticmethod
-    async def choose(menu, *values: str) -> mock.Mock:
-        menu._values = list(values)  # ce que discord.py remplit quand la personne valide son choix
-        interaction = interaction_mock()
-        await menu.callback(interaction)
-        return interaction
+    def assertWithinDiscordLimits(self, view: OwnerView) -> None:
+        # Avec la place pour l'avis d'expiration, ajouté à l'écran quand les boutons expirent.
+        self.assertLessEqual(view.content_length() + len(EXPIRED), TEXT_MAX)
+        self.assertLess(view.total_children_count, MAX_ITEMS)
 
     async def test_chosen_lines_deleted(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda\naime les lasagnes")
-        menu, = await self.open_menu(self.card())
-        self.assertEqual([option.label for option in menu.options],
-                         ["1. habite à Lyon", "2. joue à Zelda", "3. aime les lasagnes"])
-        interaction = await self.choose(menu, "0", "2")
+        card = self.card()
+        view = await self.open(card)
+        self.assertIn("**1.** habite à Lyon\n**2.** joue à Zelda\n**3.** aime les lasagnes", texts(view))
+        self.assertEqual([item.label for item in number_buttons(view)], ["1", "2", "3"])
+        self.assertIn("Supprimer", labels(view))
+        self.assertTrue(buttons(view)[labels(view).index("Supprimer")].disabled)  # rien de coché
+        await click(card, "1")
+        view = shown((await click(card, "3")).response.edit_message)
+        self.assertIn("~~**1.** habite à Lyon~~\n**2.** joue à Zelda\n~~**3.** aime les lasagnes~~", texts(view))
+        self.assertEqual([item.style for item in number_buttons(view)],
+                         [discord.ButtonStyle.danger, discord.ButtonStyle.secondary, discord.ButtonStyle.danger])
+        self.assertEqual(self.store.read(self.FICHE), "habite à Lyon\njoue à Zelda\naime les lasagnes")  # pas encore
+        interaction = await click(card, "Supprimer 2 lignes")
         self.assertEqual(self.store.read(self.FICHE), "joue à Zelda")
-        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "2 lignes supprimées.")
+        self.assertEqual(note(interaction.edit_original_response), "2 lignes supprimées.")
+
+    async def test_second_click_unchecks(self):
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
+        card = self.card()
+        await self.open(card)
+        await click(card, "2")
+        view = shown((await click(card, "2")).response.edit_message)
+        self.assertNotIn("~~", texts(view))
+        self.assertIn("Supprimer", labels(view))
 
     async def test_last_line_deleted_erases_file(self):
         self.write(self.FICHE, "habite à Lyon")
-        menu, = await self.open_menu(self.card())
-        await self.choose(menu, "0")
+        card = self.card()
+        await self.open(card)
+        await click(card, "1")
+        await click(card, "Supprimer 1 ligne")
         self.assertFalse((self.root / "memories" / self.FICHE).exists())
 
     async def test_change_meanwhile_deletes_nothing(self):
-        # Claude ajoute une ligne en tête pendant que le menu est ouvert : la ligne 1 n'est plus la même.
+        # Claude ajoute une ligne en tête pendant que l'écran est ouvert : la ligne 1 n'est plus la même.
         self.write(self.FICHE, "habite à Lyon")
-        menu, = await self.open_menu(self.card())
+        card = self.card()
+        await self.open(card)
+        await click(card, "1")
         await self.tool(commande="reecrire", fichier=self.FICHE, texte="joue à Zelda\nhabite à Lyon")
-        interaction = await self.choose(menu, "0")
+        interaction = await click(card, "Supprimer 1 ligne")
         self.assertEqual(self.store.read(self.FICHE), "joue à Zelda\nhabite à Lyon")
-        self.assertIn("a changé", interaction.edit_original_response.call_args.kwargs["content"])
+        self.assertIn("a changé", note(interaction.edit_original_response))
 
-    async def test_long_lines_shortened(self):
-        self.write(self.FICHE, "a" * 300)
-        menu, = await self.open_menu(self.card())
-        self.assertEqual(len(menu.options[0].label), 100)
-        self.assertEqual(shorten("abc"), "abc")
+    async def test_long_line_shown_whole(self):
+        # Un menu déroulant coupait chaque ligne à 100 caractères : elle se lit maintenant en entier.
+        line = " ".join(f"mot{i}" for i in range(60))  # 349 caractères
+        self.write(self.FICHE, line)
+        card = self.card()
+        self.assertIn(line, texts(card.view()))
+        self.assertIn(f"**1.** {line}", texts(await self.open(card)))
 
-    async def test_old_long_file_split_in_menus(self):
-        # Fiche écrite avant la limite de lignes : plusieurs menus de 25.
+    async def test_full_file_on_one_screen(self):
+        # Fiche pleine (MAX_LINES lignes, 3000 caractères), tout coché : un seul écran, dans les limites de Discord.
+        lines = [f"{i:02d} " + "x" * (3000 // MAX_LINES - 4) for i in range(MAX_LINES)]
+        self.write(self.FICHE, "\n".join(lines))
+        card = self.card()
+        self.assertWithinDiscordLimits(card.view(note="x" * 300))
+        view = await self.open(card)
+        self.assertEqual(len(number_buttons(view)), MAX_LINES)
+        self.assertNotIn("▶", labels(view))
+        for number in range(1, MAX_LINES + 1):
+            await click(card, str(number))
+        self.assertIn(f"Supprimer {MAX_LINES} lignes", labels(card._view))
+        self.assertWithinDiscordLimits(card._view)
+
+    async def test_long_server_file_in_pages(self):
+        # Fichier général plus long qu'un écran (MEMORY_SERVER_LIMIT élevé) : il se lit page par page.
+        lines = [f"info {i} " + "y" * 190 for i in range(40)]
+        self.write(SERVER_FILE, "\n".join(lines))
+        card = MemoryCard(self.store, Target(SERVER_FILE, None), owner_id=999, bot_name="Rika")
+        await card.send(interaction_mock())
+        seen = ""
+        while True:
+            self.assertWithinDiscordLimits(card._view)
+            seen += texts(card._view)
+            if not [item for item in buttons(card._view) if item.label == "▶" and not item.disabled]:
+                break
+            await click(card, "▶")
+        self.assertTrue(all(line in seen for line in lines))
+        self.assertIn("Page 3/3", labels(card._view))
+        # Supprimer des lignes : les numéros se cochent d'une page à l'autre.
+        await self.open(card)
+        first_page = [int(item.label) for item in number_buttons(card._view)]
+        self.assertEqual(first_page[0], 1)
+        self.assertWithinDiscordLimits(card._view)
+        await click(card, "▶")
+        second = number_buttons(card._view)[0].label
+        await click(card, second)
+        await click(card, "◀")
+        await click(card, "1")
+        await click(card, "Supprimer 2 lignes")
+        self.assertNotIn(lines[0], self.server_file())
+        self.assertNotIn(lines[int(second) - 1], self.server_file())
+        self.assertEqual(len(self.store.lines(SERVER_FILE)), 38)
+
+    async def test_old_long_file_in_pages(self):
+        # Fiche écrite avant la limite de lignes : 25 boutons par page.
         self.write(self.FICHE, "\n".join(f"ligne {i}" for i in range(1, 31)))
-        first, second = await self.open_menu(self.card())
-        self.assertEqual(len(first.options), 25)
-        self.assertEqual([option.value for option in second.options], [str(i) for i in range(25, 30)])
-        await self.choose(second, "29")
+        card = self.card()
+        view = await self.open(card)
+        self.assertEqual(len(number_buttons(view)), 25)
+        self.assertWithinDiscordLimits(view)
+        await click(card, "▶")
+        self.assertEqual([item.label for item in number_buttons(card._view)], [str(i) for i in range(26, 31)])
+        await click(card, "30")
+        await click(card, "Supprimer 1 ligne")
         self.assertNotIn("ligne 30", self.store.read(self.FICHE))
 
+    async def test_cancel_back_to_file(self):
+        self.write(self.FICHE, "habite à Lyon")
+        card = self.card()
+        await self.open(card)
+        await click(card, "1")
+        view = shown((await click(card, "Annuler")).response.edit_message)
+        self.assertIn("Ta fiche mémoire", texts(view))
+        self.assertEqual(self.store.read(self.FICHE), "habite à Lyon")
+
     async def test_admin_only_deletes_member_lines(self):
-        buttons = [item.label for item in self.card(Target(self.FICHE, MEMBER_ID, "Bob")).view().children]
-        self.assertEqual(buttons, ["Supprimer des lignes", "Effacer la fiche"])
+        self.assertEqual(labels(self.card(Target(self.FICHE, MEMBER_ID, "Bob")).view()),
+                         ["Supprimer des lignes", "Effacer la fiche"])
 
     async def test_own_file_buttons(self):
         self.write(self.FICHE, "habite à Lyon")
-        buttons = [item.label for item in self.card().view().children]
-        self.assertEqual(buttons, ["Ajouter des lignes", "Surnoms", "Supprimer des lignes", "Effacer la fiche",
-                                   "Désactiver la mémoire"])
+        self.assertEqual(labels(self.card().view()), ["Ajouter des lignes", "Surnoms", "Supprimer des lignes",
+                                                      "Effacer la fiche", "Désactiver la mémoire"])
 
     async def test_file_emptied_meanwhile(self):
         # Fiche effacée depuis un autre message /memoire après l'affichage du bouton : pas de plantage.
         interaction = interaction_mock()
         await self.card().choose_lines(interaction)
-        self.assertIn("vide", interaction.response.edit_message.call_args.kwargs["content"])
+        self.assertIn("vide", note(interaction.response.edit_message))
 
     async def test_footer_counts_lines(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
-        self.assertIn(f"2/{MAX_LINES} lignes", self.card().embeds()[-1].footer.text)
+        self.assertIn(f"2/{MAX_LINES} lignes", texts(self.card().view()))
 
 
 class AddLinesTest(MemoryTestCase):
@@ -674,8 +786,7 @@ class AddLinesTest(MemoryTestCase):
 
     async def test_buttons(self):
         self.write(SERVER_FILE, "soirée jeux le vendredi")
-        buttons = [item.label for item in self.card().view().children]
-        self.assertEqual(buttons, ["Ajouter des lignes", "Supprimer des lignes", "Tout effacer"])
+        self.assertEqual(labels(self.card().view()), ["Ajouter des lignes", "Supprimer des lignes", "Tout effacer"])
 
     async def test_lines_added(self):
         self.write(SERVER_FILE, "soirée jeux le vendredi")
@@ -686,7 +797,7 @@ class AddLinesTest(MemoryTestCase):
         with self.assertLogs("chatbot.memory", "INFO") as logs:
             await window.on_submit(interaction)
         self.assertEqual(self.server_file(), "soirée jeux le vendredi\ntournoi en mai\nbarbecue en juin")
-        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "C'est ajouté.")
+        self.assertEqual(note(interaction.edit_original_response), "C'est ajouté.")
         self.assertTrue(any("barbecue en juin" in line for line in logs.output))
 
     async def test_line_limit(self):
@@ -734,7 +845,7 @@ class MemberAddLinesTest(MemoryTestCase):
         return interaction.response.send_modal.call_args.args[0]
 
     def button(self, card: MemoryCard) -> discord.ui.Button | None:
-        return next((item for item in card.view().children if item.label == "Ajouter des lignes"), None)
+        return next((item for item in buttons(card.view()) if item.label == "Ajouter des lignes"), None)
 
     async def test_lines_added(self):
         self.write(self.FICHE, "Surnoms : Bobby\nhabite à Lyon")
@@ -746,7 +857,7 @@ class MemberAddLinesTest(MemoryTestCase):
         with self.assertLogs("chatbot.memory", "INFO") as logs:
             await window.on_submit(interaction)
         self.assertEqual(self.store.read(self.FICHE), "Surnoms : Bobby\nhabite à Lyon\njoue à Zelda\nami de <@222>")
-        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "C'est ajouté.")
+        self.assertEqual(note(interaction.edit_original_response), "C'est ajouté.")
         # Comme ce que Claude note dans une fiche : le texte n'est pas gardé au log.
         self.assertFalse(any("Zelda" in line for line in logs.output))
         self.assertIsNotNone(self.store.edited(self.FICHE))
@@ -958,8 +1069,8 @@ class ExpiryAndErrorsTest(MemoryTestCase):
         view = interaction.response.send_message.call_args.kwargs["view"]
         await view.on_timeout()
         edit = interaction.edit_original_response.call_args.kwargs
-        self.assertIn("expiré", edit["content"])
-        self.assertTrue(all(item.disabled for item in edit["view"].children))
+        self.assertIn("expiré", texts(edit["view"]))
+        self.assertTrue(all(item.disabled for item in buttons(edit["view"])))
 
     async def test_replaced_buttons_stopped(self):
         # Sans cela, l'expiration des anciens boutons griserait ceux qui les ont remplacés.
@@ -1008,7 +1119,7 @@ class DepartedMemberTest(MemoryTestCase):
 
     @staticmethod
     def labels(card: MemoryCard) -> list[str]:
-        return [item.label for item in card.view().children]
+        return labels(card.view())
 
     def test_departed_detected(self):
         self.assertTrue(member_target(self.store, self.user(MEMBER_ID, False), owner_id=999).departed)
@@ -1030,14 +1141,14 @@ class DepartedMemberTest(MemoryTestCase):
         card = self.card(in_guild=False)
         interaction = interaction_mock()
         await card.ask_disable(interaction)
-        self.assertIn("a quitté le serveur", interaction.response.edit_message.call_args.kwargs["embeds"][0].description)
+        self.assertIn("a quitté le serveur", texts(shown(interaction.response.edit_message)))
         interaction.user.__str__ = lambda self: "admin"
         await card.disable(interaction)
         self.assertFalse(self.members.memory_enabled(MEMBER_ID))
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
         self.assertEqual(self.server_file(), "soirée jeux le vendredi\nBob adore le chocolat")
         self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
-        content = interaction.edit_original_response.call_args.kwargs["content"]
+        content = note(interaction.edit_original_response)
         self.assertIn("Mémoire désactivée pour Bob", content)
         self.assertIn("Vérifie avec /memoire-serveur", content)
 
@@ -1066,7 +1177,7 @@ class AnswerBeforeWritingTest(MemoryTestCase):
         await self.card().erase(interaction)
         writing.assert_awaited_once()
         interaction.response.edit_message.assert_not_awaited()
-        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "C'est effacé.")
+        self.assertEqual(note(interaction.edit_original_response), "C'est effacé.")
 
     async def test_disable(self):
         interaction = interaction_mock()
@@ -1088,13 +1199,11 @@ class AnswerBeforeWritingTest(MemoryTestCase):
     async def test_delete_lines(self):
         self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
         card = self.card()
-        opening = interaction_mock()
-        await card.choose_lines(opening)
-        menu = opening.response.edit_message.call_args.kwargs["view"].children[0]
-        menu._values = ["0"]
+        await card.choose_lines(interaction_mock())
+        await click(card, "1")
         interaction = interaction_mock()
         writing = self.answered_first(self.store, "delete_lines", interaction)
-        await menu.callback(interaction)
+        await click(card, "Supprimer 1 ligne", interaction)
         writing.assert_awaited_once()
         interaction.response.edit_message.assert_not_awaited()
 
@@ -1102,8 +1211,7 @@ class AnswerBeforeWritingTest(MemoryTestCase):
         interaction = interaction_mock()
         self.store.erase = mock.AsyncMock(return_value="Le fichier n'a pas pu être effacé.")
         await self.card().erase(interaction)
-        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"],
-                         "Le fichier n'a pas pu être effacé.")
+        self.assertEqual(note(interaction.edit_original_response), "Le fichier n'a pas pu être effacé.")
 
     async def test_memory_command_answers_before_registering_member(self):
         bot = mock.Mock(memory=self.store, members=self.members)
@@ -1135,22 +1243,24 @@ class AnswerBeforeWritingTest(MemoryTestCase):
 class AdminAccessTest(MemoryTestCase):
     """Les membres savent que les administrateurs voient leur fiche, et chaque consultation est tracée."""
 
-    def footer(self, target: Target) -> str | None:
-        return MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika").embeds()[-1].footer.text
+    def footer(self, target: Target) -> list[str]:
+        """Lignes en petit sous le fichier."""
+        view = MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika").view()
+        return [line[3:] for line in texts(view).split("\n") if line.startswith("-# ")]
 
     def test_own_file_mentions_admins(self):
         own = Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True)
-        self.assertIn("administrateurs", self.footer(own))  # fiche vide
+        self.assertEqual(self.footer(own), [ADMINS_NOTE])  # fiche vide
         self.assertIn("en supprimer des lignes ou l'effacer", ADMINS_NOTE)  # tout ce qu'ils peuvent faire
         self.write(f"membres/{MEMBER_ID}.md", "habite à Lyon")
-        self.assertEqual(self.footer(own), f"13/3000 caractères, 1/{MAX_LINES} lignes · {ADMINS_NOTE}")
+        self.assertEqual(self.footer(own), [f"13/3000 caractères, 1/{MAX_LINES} lignes", ADMINS_NOTE])
 
     async def test_other_files_without_note(self):
         await self.members.see(222, "alice", "Alice")
         await self.members.set_memory(222, True)
         self.write("membres/222.md", "habite à Rome")
-        self.assertEqual(self.footer(Target("membres/222.md", 222, "Alice")), f"13/3000 caractères, 1/{MAX_LINES} lignes")
-        self.assertIsNone(self.footer(Target(SERVER_FILE, None)))
+        self.assertEqual(self.footer(Target("membres/222.md", 222, "Alice")), [f"13/3000 caractères, 1/{MAX_LINES} lignes"])
+        self.assertEqual(self.footer(Target(SERVER_FILE, None)), [])
 
     async def open_file(self, user_id: int, target_id: int) -> list[str]:
         bot = mock.Mock(memory=self.store, members=self.members)

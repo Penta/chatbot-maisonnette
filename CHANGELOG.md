@@ -12,6 +12,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika ne répond plus à un message supprimé avant sa réponse**, et ne le garde pas en mémoire.
 
+- **Dans `/memoire`, les lignes à supprimer se lisent en entier et se cochent par leur numéro**, et un long fichier général s'affiche en plusieurs pages au lieu d'être coupé.
+
 ---
 
 ## Version 5.14
