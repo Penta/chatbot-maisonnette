@@ -39,6 +39,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les messages envoyés à la suite reçoivent une seule réponse.** Dans le salon dédié, Rika attend environ 2 secondes avant de répondre, et attend les images en préparation : une capture d'écran et « tu en penses quoi ? » partent ensemble, au lieu de deux réponses dans le désordre. Rien à régler ; `REPLY_PAUSE` change ce délai si besoin.
 
+- **Les boutons de `/memoire` n'affichent plus « Échec de l'interaction » alors que c'est fait.** Effacer, désactiver ou activer la mémoire pouvait dépasser le délai de Discord sur un disque lent. Le bot répond maintenant à Discord avant d'écrire. Rien à régler.
+
 ---
 
 ## Version 5.13

@@ -33,6 +33,9 @@ VIEW_TIMEOUT = 600
 # Durée pendant laquelle une fenêtre (« Ajouter des lignes », « Surnoms ») peut être validée : Discord la
 # laisse ouverte sans limite, mais discord.py l'oublie ensuite et ignore sa validation.
 MODAL_TIMEOUT = 3600
+# ANSWER_FIRST : Discord laisse 3 secondes pour répondre à un clic, et une écriture peut prendre plus longtemps
+# (verrou de la mémoire, fsync sur un volume réseau). Toute action qui écrit commence donc par interaction.response
+# .defer() : sinon « Échec de l'interaction » s'affiche alors que c'est fait, et la personne croit que rien n'a changé.
 # Sous la fiche d'un membre, quand il la consulte lui-même.
 ADMINS_NOTE = "Les administrateurs du serveur peuvent aussi voir ta fiche, en supprimer des lignes ou l'effacer."
 ERROR_MESSAGE = "Une erreur est survenue. Si ça se reproduit, préviens l'administrateur du bot."
@@ -174,9 +177,11 @@ class MemoryCard:
         if self._view is not None:
             self._view.stop()  # sans quoi son expiration griserait les nouveaux boutons
         self._view, view.interaction = view, interaction
-        if new:
+        if new and interaction.response.is_done():  # réponse différée (voir memory_command)
+            await interaction.followup.send(embeds=embeds, view=view, ephemeral=True)
+        elif new:
             await interaction.response.send_message(embeds=embeds, view=view, ephemeral=True)
-        elif interaction.response.is_done():  # réponse différée (voir TextModal.on_submit)
+        elif interaction.response.is_done():  # réponse différée, avant une écriture (voir ANSWER_FIRST)
             await interaction.edit_original_response(content=note, embeds=embeds, view=view)
         else:
             await interaction.response.edit_message(content=note, embeds=embeds, view=view)
@@ -221,6 +226,7 @@ class MemoryCard:
     def _deleter(self, menu: discord.ui.Select, original: str) -> Callback:
         """Action du menu : supprime les lignes cochées, puis réaffiche le fichier."""
         async def delete(interaction: discord.Interaction) -> None:
+            await interaction.response.defer()  # voir ANSWER_FIRST
             indexes = [int(value) for value in menu.values]
             error = await self.store.delete_lines(self.target.file, indexes, by=str(interaction.user),
                                                   expected=original)
@@ -255,6 +261,7 @@ class MemoryCard:
         await confirm(interaction, self, question, self.erase)
 
     async def erase(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()  # voir ANSWER_FIRST
         error = await self.store.erase(self.target.file, by=str(interaction.user))
         await self.refresh(interaction, error or "C'est effacé.")
 
@@ -276,6 +283,7 @@ class MemoryCard:
         await confirm(interaction, self, question, self.disable)
 
     async def disable(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()  # voir ANSWER_FIRST
         error = await self.store.forget(self.target.member_id, by=str(interaction.user))
         if self.target.departed:
             done = (f"Mémoire désactivée pour {self.target.name} : sa fiche a été effacée, et son nom retiré des "
@@ -298,6 +306,7 @@ class MemoryCard:
         await confirm(interaction, self, question, self.enable)
 
     async def enable(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()  # voir ANSWER_FIRST
         saved = await self.store.members.set_memory(self.target.member_id, True)
         await self.refresh(interaction, "Mémoire activée." if saved else NOT_SAVED.format(setting="l'activation"))
 
@@ -363,9 +372,7 @@ class TextModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         text = self.input.value.strip()
-        # Discord laisse 3 secondes pour répondre, et l'écriture sur le disque peut prendre plus longtemps
-        # (fsync sur un volume réseau) : sans réponse, la fenêtre resterait ouverte.
-        await interaction.response.defer()
+        await interaction.response.defer()  # voir ANSWER_FIRST ; sans réponse, la fenêtre resterait ouverte
         error = await self.save(self.card.target.file, text, str(interaction.user))
         if error:
             # Le texte saisi est renvoyé en fichier joint (trop long pour un message) : rien n'est perdu.

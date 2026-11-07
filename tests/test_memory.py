@@ -54,6 +54,10 @@ def interaction_mock(done: bool = False) -> mock.Mock:
     interaction.response.is_done.return_value = done
     for name in ("send_message", "edit_message", "send_modal", "defer"):
         setattr(interaction.response, name, mock.AsyncMock())
+
+    def deferred(**_kwargs) -> None:
+        interaction.response.is_done.return_value = True
+    interaction.response.defer.side_effect = deferred  # comme Discord : l'interaction a reçu sa réponse
     interaction.followup.send = mock.AsyncMock()
     interaction.edit_original_response = mock.AsyncMock()
     return interaction
@@ -551,12 +555,10 @@ class ConfirmationTextsTest(MemoryTestCase):
         self.assertIn("rapproche-toi d'un administrateur", text)
 
     async def test_disable_done(self):
-        interaction = mock.Mock()
-        interaction.response.is_done.return_value = False
-        interaction.response.edit_message = mock.AsyncMock()
+        interaction = interaction_mock()
         target = Target(f"membres/{MEMBER_ID}.md", MEMBER_ID, "Bob", is_self=True)
         await MemoryCard(self.store, target, owner_id=MEMBER_ID, bot_name="Rika").disable(interaction)
-        content = interaction.response.edit_message.call_args.kwargs["content"]
+        content = interaction.edit_original_response.call_args.kwargs["content"]
         self.assertNotIn("fichier général ont été effacés", content)
         self.assertIn("rapproche-toi d'un administrateur", content)
 
@@ -571,12 +573,10 @@ class ConfirmationTextsTest(MemoryTestCase):
         self.assertIn("ce que d'autres membres lui racontent", text)
         self.assertIn("noté dans sa fiche avec ton nom", text)  # ses propres propos, montrés aux autres
         self.assertIn("administrateurs du serveur peuvent la voir, en supprimer des lignes ou l'effacer", text)
-        interaction = mock.Mock()
-        interaction.response.is_done.return_value = False
-        interaction.response.edit_message = mock.AsyncMock()
+        interaction = interaction_mock()
         await card.enable(interaction)
         self.assertTrue(self.members.memory_enabled(222))
-        self.assertEqual(interaction.response.edit_message.call_args.kwargs["content"], "Mémoire activée.")
+        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "Mémoire activée.")
 
 
 class DeleteLinesTest(MemoryTestCase):
@@ -608,7 +608,7 @@ class DeleteLinesTest(MemoryTestCase):
                          ["1. habite à Lyon", "2. joue à Zelda", "3. aime les lasagnes"])
         interaction = await self.choose(menu, "0", "2")
         self.assertEqual(self.store.read(self.FICHE), "joue à Zelda")
-        self.assertEqual(interaction.response.edit_message.call_args.kwargs["content"], "2 lignes supprimées.")
+        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "2 lignes supprimées.")
 
     async def test_last_line_deleted_erases_file(self):
         self.write(self.FICHE, "habite à Lyon")
@@ -623,7 +623,7 @@ class DeleteLinesTest(MemoryTestCase):
         await self.tool(commande="reecrire", fichier=self.FICHE, texte="joue à Zelda\nhabite à Lyon")
         interaction = await self.choose(menu, "0")
         self.assertEqual(self.store.read(self.FICHE), "joue à Zelda\nhabite à Lyon")
-        self.assertIn("a changé", interaction.response.edit_message.call_args.kwargs["content"])
+        self.assertIn("a changé", interaction.edit_original_response.call_args.kwargs["content"])
 
     async def test_long_lines_shortened(self):
         self.write(self.FICHE, "a" * 300)
@@ -1006,9 +1006,7 @@ class DepartedMemberTest(MemoryTestCase):
         self.write("membres/222.md", "part à Rome (d'après Bob)")
         self.write(SERVER_FILE, "soirée jeux le vendredi\nBob adore le chocolat")
         card = self.card(in_guild=False)
-        interaction = mock.Mock()
-        interaction.response.is_done.return_value = False
-        interaction.response.edit_message = mock.AsyncMock()
+        interaction = interaction_mock()
         await card.ask_disable(interaction)
         self.assertIn("a quitté le serveur", interaction.response.edit_message.call_args.kwargs["embeds"][0].description)
         interaction.user.__str__ = lambda self: "admin"
@@ -1017,9 +1015,99 @@ class DepartedMemberTest(MemoryTestCase):
         self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
         self.assertEqual(self.server_file(), "soirée jeux le vendredi\nBob adore le chocolat")
         self.assertEqual(self.store.read("membres/222.md"), "part à Rome (d'après un membre)")
-        content = interaction.response.edit_message.call_args.kwargs["content"]
+        content = interaction.edit_original_response.call_args.kwargs["content"]
         self.assertIn("Mémoire désactivée pour Bob", content)
         self.assertIn("Vérifie avec /memoire-serveur", content)
+
+
+class AnswerBeforeWritingTest(MemoryTestCase):
+    """Discord laisse 3 secondes pour répondre à un clic : l'écriture sur le disque, parfois plus longue, vient après."""
+
+    FICHE = f"membres/{MEMBER_ID}.md"
+
+    def card(self) -> MemoryCard:
+        return MemoryCard(self.store, Target(self.FICHE, MEMBER_ID, "Bob", is_self=True), owner_id=MEMBER_ID,
+                          bot_name="Rika")
+
+    def answered_first(self, owner, method: str, interaction: mock.Mock) -> mock.Mock:
+        """Remplace une écriture par un faux qui note si Discord a déjà reçu sa réponse."""
+        def check(*_args, **_kwargs) -> None:
+            self.assertTrue(interaction.response.is_done(), f"{method} avant la réponse à Discord")
+        writing = mock.AsyncMock(side_effect=check, return_value=None)
+        setattr(owner, method, writing)
+        return writing
+
+    async def test_erase(self):
+        self.write(self.FICHE, "habite à Lyon")
+        interaction = interaction_mock()
+        writing = self.answered_first(self.store, "erase", interaction)
+        await self.card().erase(interaction)
+        writing.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
+        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "C'est effacé.")
+
+    async def test_disable(self):
+        interaction = interaction_mock()
+        writing = self.answered_first(self.store, "forget", interaction)
+        await self.card().disable(interaction)
+        writing.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
+
+    async def test_enable(self):
+        await self.members.see(222, "alice", "Alice")
+        card = MemoryCard(self.store, Target("membres/222.md", 222, "Alice", is_self=True), owner_id=222, bot_name="Rika")
+        interaction = interaction_mock()
+        writing = self.answered_first(self.members, "set_memory", interaction)
+        writing.return_value = True
+        await card.enable(interaction)
+        writing.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
+
+    async def test_delete_lines(self):
+        self.write(self.FICHE, "habite à Lyon\njoue à Zelda")
+        card = self.card()
+        opening = interaction_mock()
+        await card.choose_lines(opening)
+        menu = opening.response.edit_message.call_args.kwargs["view"].children[0]
+        menu._values = ["0"]
+        interaction = interaction_mock()
+        writing = self.answered_first(self.store, "delete_lines", interaction)
+        await menu.callback(interaction)
+        writing.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
+
+    async def test_failed_write_reported_after_answer(self):
+        interaction = interaction_mock()
+        self.store.erase = mock.AsyncMock(return_value="Le fichier n'a pas pu être effacé.")
+        await self.card().erase(interaction)
+        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"],
+                         "Le fichier n'a pas pu être effacé.")
+
+    async def test_memory_command_answers_before_registering_member(self):
+        bot = mock.Mock(memory=self.store, members=self.members)
+        interaction = interaction_mock()
+        interaction.client = bot
+        interaction.user = mock.Mock(id=MEMBER_ID, bot=False, display_name="Bob", global_name="Bob")
+        interaction.user.name = "bob"
+        interaction.guild.me.display_name = "Rika"
+        writing = self.answered_first(self.members, "see", interaction)
+        await memory_command.callback(interaction)
+        writing.assert_awaited_once()
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+        interaction.response.send_message.assert_not_awaited()
+        sent = interaction.followup.send.call_args.kwargs
+        self.assertTrue(sent["ephemeral"])
+        self.assertIn("view", sent)
+
+    async def test_memory_command_refusals_stay_immediate(self):
+        bot = mock.Mock(memory=self.store, members=self.members)
+        interaction = interaction_mock()
+        interaction.client = bot
+        interaction.user = mock.Mock(id=MEMBER_ID, bot=False)
+        interaction.permissions.administrator = False
+        await memory_command.callback(interaction, mock.Mock(id=222, bot=False))
+        interaction.response.defer.assert_not_awaited()
+        interaction.response.send_message.assert_awaited_once()
 
 
 class AdminAccessTest(MemoryTestCase):
@@ -1049,14 +1137,15 @@ class AdminAccessTest(MemoryTestCase):
         interaction.user.name = "admin"
         interaction.permissions.administrator = True
         interaction.guild.me.display_name = "Rika"
-        interaction.response.send_message = mock.AsyncMock()
+        interaction.response.defer = mock.AsyncMock()
+        interaction.followup.send = mock.AsyncMock()
         target = mock.Mock(id=target_id, bot=False, display_name="Bob", global_name="Bob")
         target.name = "bob"
         target.__str__ = lambda self: "bob"
         with self.assertLogs("chatbot", "INFO") as logs:
             logging.getLogger("chatbot").info("début")
             await memory_command.callback(interaction, target)
-        interaction.response.send_message.assert_awaited_once()
+        interaction.followup.send.assert_awaited_once()
         return logs.output
 
     async def test_other_file_opening_logged(self):

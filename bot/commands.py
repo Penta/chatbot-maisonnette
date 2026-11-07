@@ -102,6 +102,7 @@ async def memory_command(interaction: discord.Interaction, membre: discord.User 
         await interaction.response.send_message(
             "Seuls les administrateurs peuvent voir la fiche d'un autre membre.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)  # l'écriture qui suit peut dépasser les 3 secondes de Discord
     await see_user(bot.members, target)  # un membre qui n'a encore jamais écrit peut déjà activer la mémoire
     if target.id != interaction.user.id:
         # Lecture tracée, sans le contenu : un administrateur ne peut pas lire les fiches sans laisser de trace.
