@@ -22,6 +22,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Rika voit les GIF choisis dans le sélecteur de Discord**, et suit l'animation du début à la fin pour ceux de Klipy. Pour les autres (Giphy, anciens favoris Tenor), elle n'en voit que la première image.
 
+- **Le statut personnalisé de Rika dit son humeur du moment**, plus ce qu'elle est en train de faire.
+
 ### Corrections
 
 - **Rika ne répond plus à un message supprimé avant sa réponse**, et ne le garde pas en mémoire.

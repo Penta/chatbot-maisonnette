@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from bot.claude_client import ClaudeClient
-from bot.prompts import DEFAULT_PERSONALITY, MEMBER_MEMORY_NOTE
+from bot.prompts import CUSTOM_STATUS_REQUESTS, DEFAULT_PERSONALITY, MEMBER_MEMORY_NOTE
 
 
 class PromptsTest(unittest.TestCase):
@@ -17,6 +17,12 @@ class PromptsTest(unittest.TestCase):
                                          max_lines=25)
         self.assertNotIn("{", note)
         self.assertIn("ne récite jamais la fiche", note)
+
+    def test_thought_status_asks_for_mood_not_activity(self):
+        # Le statut « pensée » décrivait parfois une activité (« Lis un manga ») au lieu d'une humeur.
+        request = CUSTOM_STATUS_REQUESTS["pensee"]
+        self.assertIn("humeur", request)
+        self.assertIn("Pas ce que tu fais", request)
 
 
 class PersonalityTest(unittest.TestCase):

@@ -101,11 +101,13 @@ EMOJI_NOTE = (
     "image ; les messages les montrent sous cette forme. Seuls disponibles : {names}."
 )
 
-# Demandes de statut personnalisé (pensée du moment, raison d'une absence), écrit avec la
+# Demandes de statut personnalisé (humeur du moment, raison d'une absence), écrit avec la
 # personnalité du bot. Les clés sont les noms des statuts de presence.py.
 CUSTOM_STATUS_REQUESTS = {
+    # Une humeur, pas une activité : les activités du bot (anime, musique, jeu) ont leurs propres statuts.
     "pensee": "Écris le statut personnalisé que tu affiches en ce moment sous ton pseudo Discord : "
-              "une courte pensée du moment, dans ton style",
+              "ton humeur ou ton ressenti général du moment, dans ton style. Pas ce que tu fais "
+              "(« Lis un manga », « En train de cuisiner »…) : ce que tu ressens",
     "absent": "Tu t'absentes de ton PC pendant {duration}. Écris le statut personnalisé que tu affiches "
               "sous ton pseudo Discord pendant ce temps : une raison plausible, dans ton style",
     "ne_pas_deranger": "Tu passes en « Ne pas déranger » sur Discord pendant {duration}. Écris le statut "
