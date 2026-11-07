@@ -365,7 +365,24 @@ class SendFailureTest(unittest.IsolatedAsyncioTestCase):
     async def test_warning_falls_back_on_channel(self):
         for error in NETWORK_ERRORS:
             with self.subTest(type(error).__name__):
-                channel = mock.Mock(send=mock.AsyncMock())
+                channel = mock.Mock(send=mock.AsyncMock(), fetch_message=mock.AsyncMock())  # message toujours là
+                message = mock.Mock(channel=channel, reply=mock.AsyncMock(side_effect=error))
+                await ChatBot.safe_reply(mock.Mock(), message, "Erreur.")
+                channel.send.assert_awaited_once_with("Erreur.")
+
+    async def test_no_warning_for_deleted_message(self):
+        # Paul supprime son message pendant que Claude est en panne : l'avertissement ne se rapporterait à rien.
+        channel = mock.Mock(send=mock.AsyncMock(),
+                            fetch_message=mock.AsyncMock(side_effect=discord.NotFound(mock.Mock(status=404), "inconnu")))
+        message = mock.Mock(channel=channel, reply=mock.AsyncMock(
+            side_effect=discord.HTTPException(mock.Mock(status=400), "Unknown message")))
+        await ChatBot.safe_reply(mock.Mock(), message, "Erreur.")
+        channel.send.assert_not_awaited()
+
+    async def test_warning_sent_when_existence_unknown(self):
+        for error in NETWORK_ERRORS:
+            with self.subTest(type(error).__name__):
+                channel = mock.Mock(send=mock.AsyncMock(), fetch_message=mock.AsyncMock(side_effect=error))
                 message = mock.Mock(channel=channel, reply=mock.AsyncMock(side_effect=error))
                 await ChatBot.safe_reply(mock.Mock(), message, "Erreur.")
                 channel.send.assert_awaited_once_with("Erreur.")
@@ -373,7 +390,7 @@ class SendFailureTest(unittest.IsolatedAsyncioTestCase):
     async def test_warning_impossible_is_logged(self):
         for error in NETWORK_ERRORS:
             with self.subTest(type(error).__name__):
-                channel = mock.Mock(send=mock.AsyncMock(side_effect=error))
+                channel = mock.Mock(send=mock.AsyncMock(side_effect=error), fetch_message=mock.AsyncMock())
                 message = mock.Mock(channel=channel, reply=mock.AsyncMock(side_effect=error))
                 with self.assertLogs("chatbot.discord", "ERROR"):
                     await ChatBot.safe_reply(mock.Mock(), message, "Erreur.")
@@ -413,6 +430,7 @@ class SendFailureTest(unittest.IsolatedAsyncioTestCase):
         bot.safe_reply = ChatBot.safe_reply.__get__(bot)
         channel = fake_channel([])
         channel.send = mock.AsyncMock(side_effect=aiohttp.ClientConnectionError("réseau coupé"))
+        channel.fetch_message = mock.AsyncMock(side_effect=aiohttp.ClientConnectionError("réseau coupé"))
         first, second = fake_mention(1, "salut", channel), fake_mention(2, "coucou", channel)
         first.reply = mock.AsyncMock(side_effect=aiohttp.ClientConnectionError("réseau coupé"))
         bot.mention_part = mock.AsyncMock(side_effect=[RuntimeError("illisible"), ("coucou", [])])

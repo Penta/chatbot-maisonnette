@@ -1083,10 +1083,21 @@ class ChatBot(commands.Bot):
                 return
 
     async def safe_reply(self, message: discord.Message, text: str) -> None:
+        """Prévient l'auteur d'un message en y répondant ; si Discord refuse, à la suite dans le salon. Sauf si le
+        message a été supprimé : seul dans le salon, l'avertissement ne se rapporterait à rien."""
         try:
             await message.reply(text, mention_author=False)
+            return
         except DISCORD_FAILURES:
-            try:
-                await message.channel.send(text)
-            except DISCORD_FAILURES as exc:
-                logger.error("Impossible d'envoyer un message : %s", exc)
+            pass
+        try:
+            await message.channel.fetch_message(message.id)
+        except discord.NotFound:
+            logger.info("Message %s supprimé : avertissement non envoyé.", message.id)
+            return
+        except DISCORD_FAILURES:
+            pass  # existence inconnue (Discord injoignable…) : l'avertissement part quand même
+        try:
+            await message.channel.send(text)
+        except DISCORD_FAILURES as exc:
+            logger.error("Impossible d'envoyer un message : %s", exc)
