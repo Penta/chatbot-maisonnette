@@ -647,7 +647,8 @@ class DeleteLinesTest(MemoryTestCase):
     async def test_own_file_buttons(self):
         self.write(self.FICHE, "habite à Lyon")
         buttons = [item.label for item in self.card().view().children]
-        self.assertEqual(buttons, ["Surnoms", "Supprimer des lignes", "Effacer la fiche", "Désactiver la mémoire"])
+        self.assertEqual(buttons, ["Ajouter des lignes", "Surnoms", "Supprimer des lignes", "Effacer la fiche",
+                                   "Désactiver la mémoire"])
 
     async def test_file_emptied_meanwhile(self):
         # Fiche effacée depuis un autre message /memoire après l'affichage du bouton : pas de plantage.
@@ -713,9 +714,59 @@ class AddLinesTest(MemoryTestCase):
         self.assertEqual(len(self.store.lines(SERVER_FILE)), 2)
         self.assertIsNone(await self.store.add_lines(SERVER_FILE, "contact : jeux@exemple.fr", by="admin"))
 
-    async def test_member_file_cannot_be_completed(self):
-        self.assertIsNotNone(await self.store.add_lines(f"membres/{MEMBER_ID}.md", "habite à Lyon", by="admin"))
-        self.assertFalse((self.root / "memories" / "membres" / f"{MEMBER_ID}.md").exists())
+    async def test_other_file_cannot_be_completed(self):
+        self.assertIsNotNone(await self.store.add_lines("registre.json", "habite à Lyon", by="admin"))
+        self.assertFalse((self.root / "memories" / "registre.json").exists())
+
+
+class MemberAddLinesTest(MemoryTestCase):
+    """Le membre ajoute des lignes à sa propre fiche, comme l'administrateur au fichier général."""
+
+    FICHE = f"membres/{MEMBER_ID}.md"
+
+    def card(self, owner_id: int = MEMBER_ID) -> MemoryCard:
+        target = Target(self.FICHE, MEMBER_ID, "Bob", is_self=owner_id == MEMBER_ID)
+        return MemoryCard(self.store, target, owner_id=owner_id, bot_name="Rika")
+
+    async def window(self) -> TextModal:
+        interaction = interaction_mock()
+        await self.card().ask_add(interaction)
+        return interaction.response.send_modal.call_args.args[0]
+
+    def button(self, card: MemoryCard) -> discord.ui.Button | None:
+        return next((item for item in card.view().children if item.label == "Ajouter des lignes"), None)
+
+    async def test_lines_added(self):
+        self.write(self.FICHE, "Surnoms : Bobby\nhabite à Lyon")
+        window = await self.window()
+        self.assertEqual(window.title, "Ajouter à ta fiche")
+        window.input._value = "joue à Zelda\nhabite à Lyon\nami de @alice"
+        await self.members.see(222, "alice", "Alice")
+        interaction = interaction_mock(done=True)
+        with self.assertLogs("chatbot.memory", "INFO") as logs:
+            await window.on_submit(interaction)
+        self.assertEqual(self.store.read(self.FICHE), "Surnoms : Bobby\nhabite à Lyon\njoue à Zelda\nami de <@222>")
+        self.assertEqual(interaction.edit_original_response.call_args.kwargs["content"], "C'est ajouté.")
+        # Comme ce que Claude note dans une fiche : le texte n'est pas gardé au log.
+        self.assertFalse(any("Zelda" in line for line in logs.output))
+        self.assertIsNotNone(self.store.edited(self.FICHE))
+
+    async def test_button_only_on_own_file(self):
+        self.assertIsNotNone(self.button(self.card()))
+        self.assertIsNone(self.button(self.card(owner_id=999)))  # administrateur sur la fiche d'un autre
+
+    async def test_refused_when_disabled(self):
+        await self.members.set_memory(MEMBER_ID, False)
+        self.assertTrue(self.button(self.card()).disabled)
+        self.assertIn("pas activée", await self.store.add_lines(self.FICHE, "joue à Zelda", by="bob"))
+        self.assertEqual(self.store.read(self.FICHE), "")
+
+    async def test_full_file_message_for_member(self):
+        self.write(self.FICHE, "\n".join(f"ligne {i}" for i in range(MAX_LINES)))
+        error = await self.store.add_lines(self.FICHE, "une de trop", by="bob")
+        self.assertIn("Ta fiche serait trop longue", error)
+        self.assertNotIn("membres/", error)
+        self.assertNotIn("une de trop", self.store.read(self.FICHE))
 
 
 class NicknamesWindowTest(MemoryTestCase):

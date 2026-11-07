@@ -144,11 +144,14 @@ class MemoryCard:
         view = OwnerView(self.owner_id)
         content = self.store.read(self.target.file)
         # Un fichier ne se modifie à la main que ligne par ligne (voir MemoryStore.delete_lines) : on en
-        # supprime des lignes, seul l'administrateur ajoute des lignes au fichier général, et le membre
-        # écrit ses surnoms. Mémoire pas activée : la fiche ne peut que perdre des lignes.
+        # supprime des lignes, l'administrateur ajoute des lignes au fichier général, et le membre à sa
+        # propre fiche, dont il écrit aussi les surnoms. Mémoire pas activée : la fiche ne peut que
+        # perdre des lignes.
         if self.target.member_id is None:
             add_button(view, "Ajouter des lignes", "➕", discord.ButtonStyle.primary, self.ask_add)
         elif self.target.is_self:
+            add_button(view, "Ajouter des lignes", "➕", discord.ButtonStyle.primary, self.ask_add,
+                       disabled=not self.memory_enabled)
             add_button(view, "Surnoms", "🏷️", discord.ButtonStyle.primary, self.ask_nicknames,
                        disabled=not self.memory_enabled)
         add_button(view, "Supprimer des lignes", "✂️", discord.ButtonStyle.secondary, self.choose_lines,
@@ -235,8 +238,9 @@ class MemoryCard:
         return delete
 
     async def ask_add(self, interaction: discord.Interaction) -> None:
+        title = "Ajouter au fichier général" if self.target.member_id is None else "Ajouter à ta fiche"
         await interaction.response.send_modal(TextModal(
-            self, "Ajouter au fichier général", "Lignes à ajouter", self.store.add_lines,
+            self, title, "Lignes à ajouter", self.store.add_lines,
             placeholder=f"Une information par ligne ({MAX_LINES} lignes au plus dans le fichier).",
             max_length=min(INPUT_MAX, self.store.limit(self.target.file)), done="C'est ajouté."))
 
@@ -302,7 +306,7 @@ class MemoryCard:
                     f"un autre membre qui a activé la mémoire peut être noté dans sa fiche avec ton nom, et il "
                     f"la voit. Ce qui est retenu sert dans la conversation, mais ta fiche n'est jamais récitée "
                     f"aux autres ; à part toi, seuls les administrateurs du serveur peuvent la voir, en "
-                    f"supprimer des lignes ou l'effacer. Avec /memoire, tu pourras la voir, en supprimer des lignes ou désactiver la mémoire.")
+                    f"supprimer des lignes ou l'effacer. Avec /memoire, tu pourras la voir, y ajouter ou en supprimer des lignes, ou désactiver la mémoire.")
         await confirm(interaction, self, question, self.enable)
 
     async def enable(self, interaction: discord.Interaction) -> None:

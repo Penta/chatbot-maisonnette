@@ -401,29 +401,36 @@ class MemoryStore:
         return error
 
     async def add_lines(self, name: str, text: str, by: str) -> str | None:
-        """Ajoute des lignes au fichier général : un administrateur avec /memoire-serveur (by : son nom,
-        pour les logs). Les lignes déjà là ne se modifient pas, et les fiches des membres ne se
-        complètent pas à la main (voir delete_lines). Renvoie un message d'erreur, ou None."""
-        if name != SERVER_FILE:
-            return "Seul le fichier général peut être complété à la main."
-        # Seuls les administrateurs ajoutent des lignes : ils peuvent citer un membre. « @alice » est
-        # enregistré comme quand Claude l'écrit (voir _with_ids) : sinon Claude, qui lit et recopie
-        # « @alice », ne retrouverait pas la ligne pour la remplacer.
+        """Ajoute des lignes : au fichier général, par un administrateur avec /memoire-serveur, ou à sa
+        propre fiche, par le membre avec /memoire (by : son nom, pour les logs). Les lignes déjà là ne
+        se modifient pas (voir delete_lines). Renvoie un message d'erreur, ou None."""
+        member = MEMBER_FILE.match(name)
+        if name != SERVER_FILE and not member:
+            return "Ce fichier ne peut pas être complété à la main."
+        # « @alice » est enregistré comme quand Claude l'écrit (voir _with_ids) : sinon Claude, qui lit et
+        # recopie « @alice », ne retrouverait pas la ligne pour la remplacer.
         new_lines = [self._with_ids(line.strip()) for line in text.splitlines() if line.strip()]
         if not new_lines:
             return "Rien à ajouter."
         async with self._lock:
-            current = self.read(SERVER_FILE)
+            if member and not self.members.memory_enabled(member.group(1)):
+                return "La mémoire n'est pas activée : rien n'a été ajouté."
+            current = self.read(name)
             lines = [line for line in current.splitlines() if line.strip()]
             existing = {line.strip() for line in lines}
             lines += [line for line in dict.fromkeys(new_lines) if line not in existing]
             after = "\n".join(lines)
-            if error := self._too_big(SERVER_FILE, after, current):
+            if error := self._too_big(name, after, current):
+                if member:  # message pour le membre, pas pour Claude (le nom du fichier ne lui dit rien)
+                    return ("Ta fiche serait trop longue : supprimes-en des lignes (« Supprimer des lignes ») "
+                            "ou ajoute moins de texte. Rien n'a été ajouté.")
                 return error + " Rien n'a été ajouté."
-            error = await self._save_manual(SERVER_FILE, after, current)
-        if error is None:
+            error = await self._save_manual(name, after, current)
+        if error is None and member:
+            logger.info("Mémoire : lignes ajoutées à %s par %s", name, by)
+        elif error is None:
             # Comme pour l'outil : le fichier général va dans le prompt système, son texte est gardé au log.
-            logger.info("Mémoire : lignes ajoutées à %s par %s : %r", SERVER_FILE, by, "\n".join(new_lines))
+            logger.info("Mémoire : lignes ajoutées à %s par %s : %r", name, by, "\n".join(new_lines))
         return error
 
     async def set_nicknames(self, member_id: int | str, text: str, by: str) -> str | None:

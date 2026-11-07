@@ -16,7 +16,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une source est gardée par l'identifiant Discord du membre.** « d'après Alice » désigne toujours la bonne Alice, même si un autre membre prend son pseudo, et affiche son nom actuel. Désactiver la mémoire retire exactement ses mentions. Les notes plus anciennes restent écrites avec le nom.
 
-- **Les fiches ne se modifient plus à la main, ligne par ligne seulement.** Dans `/memoire`, on coche les lignes à supprimer dans un menu, et le membre écrit ses surnoms avec le bouton « Surnoms ». Dans `/memoire-serveur`, l'administrateur peut aussi ajouter des lignes. Rika garde au plus 25 lignes par fichier ; une fiche plus longue n'est pas tronquée.
+- **Les fiches se modifient ligne par ligne, et chacun complète la sienne.** Dans `/memoire`, le membre ajoute des lignes à sa fiche, coche celles à supprimer dans un menu et écrit ses surnoms avec le bouton « Surnoms ». Dans `/memoire-serveur`, l'administrateur ajoute ou supprime des lignes. Rika garde au plus 25 lignes par fichier ; une fiche plus longue n'est pas tronquée.
 
 - **Les versions des dépendances sont figées, et Python 3.11 est le minimum.** `requirements.txt` indique les versions exactes testées : une nouvelle version d'une bibliothèque n'arrive plus sans changement du dépôt. Hors Docker, vérifie ta version de Python, puis relance `pip install -r requirements.txt`.
 
