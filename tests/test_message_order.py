@@ -72,6 +72,18 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
     def asked(self) -> list[list[str]]:
         return [[part for part, _ in call.args[1]] for call in self.bot.claude.ask.await_args_list]
 
+    async def test_sticker_or_emoji_alone_answered_by_claude(self):
+        # Paul envoie un sticker seul, puis Léa un emoji du serveur seul : Claude leur répond, comme à un message.
+        for content, stickers in (("", [mock.Mock()]), ("<:rire:1>", [])):
+            with self.subTest(content=content):
+                self.bot.claude.ask.reset_mock()
+                self.channel.send = mock.AsyncMock()
+                message = mock.Mock(id=1, channel=self.channel, attachments=[], content=content, stickers=stickers,
+                                    created_at=datetime(2026, 11, 7, tzinfo=timezone.utc))
+                await ChatBot.handle_main_channel(self.bot, message)
+                self.assertEqual(self.asked(), [[text(1)]])
+                self.channel.send.assert_not_awaited()
+
     async def test_text_waits_for_older_image(self):
         # Une capture d'écran, puis « tu en penses quoi ? » : Claude doit voir les deux ensemble.
         self.slow[1] = asyncio.Event()

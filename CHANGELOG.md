@@ -12,6 +12,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Chacun peut modifier une ligne de sa fiche dans `/memoire`**, et les administrateurs celles du fichier général dans `/memoire-serveur`.
 
+- **Rika répond avec des mots à un sticker ou un emoji envoyé seul**, au lieu de renvoyer un sticker ou un emoji du serveur au hasard.
+
 ### Corrections
 
 - **Rika ne répond plus à un message supprimé avant sa réponse**, et ne le garde pas en mémoire.

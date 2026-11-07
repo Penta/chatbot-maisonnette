@@ -412,23 +412,6 @@ class SendFailureTest(unittest.IsolatedAsyncioTestCase):
                 message.reference.resolved = None
                 self.assertIsNone(await ChatBot.fetch_cited(mock.Mock(), message))
 
-    async def test_emoji_reaction_failure_is_logged(self):
-        for error in NETWORK_ERRORS:
-            with self.subTest(type(error).__name__):
-                message = mock.Mock(channel=mock.Mock(send=mock.AsyncMock(side_effect=error)), content="<:rire:1>")
-                with self.assertLogs("chatbot.discord", "WARNING"), \
-                        mock.patch("bot.discord_bot.usable_emojis", lambda guild: ["😀"]):
-                    await ChatBot.reply_to_emoji(mock.Mock(), message)
-
-    async def test_sticker_reaction_failure_is_logged(self):
-        for error in NETWORK_ERRORS:
-            with self.subTest(type(error).__name__):
-                message = mock.Mock(channel=mock.Mock(send=mock.AsyncMock(side_effect=error)))
-                message.stickers = [mock.Mock()]
-                message.guild.stickers = [mock.Mock(available=True)]
-                with self.assertLogs("chatbot.discord", "WARNING"):
-                    self.assertFalse(await ChatBot.reply_to_sticker(mock.Mock(), message))
-
     @mock.patch("bot.discord_bot.typing", lambda channel: contextlib.nullcontext())
     @mock.patch("bot.discord_bot.emoji_names", lambda guild: [])
     async def test_other_mention_answered_when_warning_fails(self):

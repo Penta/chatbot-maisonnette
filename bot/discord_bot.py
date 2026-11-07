@@ -7,7 +7,6 @@ import contextlib
 import hashlib
 import json
 import logging
-import random
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -41,7 +40,6 @@ from .text_utils import split_message
 
 logger = logging.getLogger("chatbot.discord")
 
-CUSTOM_EMOJI_ONLY = re.compile(r"^<a?:\w+:\d+>$")
 USER_MENTION = re.compile(r"<@!?(\d+)>")
 # Couleur du message de démarrage : le vert du statut « en ligne » de Discord.
 ONLINE_COLOR = discord.Color(0x23A55A)
@@ -486,14 +484,6 @@ class ChatBot(commands.Bot):
         if self._last_main_message is None or message.created_at > self._last_main_message:
             self._last_main_message = message.created_at
         content = message.content.strip()
-        # Un sticker ou un emoji seul reçoit un sticker ou un emoji du serveur. S'il n'y en a aucun
-        # d'utilisable, Claude répond avec des mots ; accompagné de texte, le sticker lui est décrit.
-        if (message.stickers and not content and not message.attachments) or CUSTOM_EMOJI_ONLY.match(content):
-            if not self.available():
-                return  # absent : pas de réaction aux stickers ni aux emojis
-            if await self.reply_to_sticker(message) or await self.reply_to_emoji(message):
-                return
-
         # Place réservée avant tout téléchargement, et jusqu'à la réponse (voir answer_main_channel).
         if not self.held_files.reserve(message.id, readable_size(message.attachments)):
             logger.warning("Trop de fichiers en attente : message %s de %s refusé.", message.id, message.author)
@@ -919,40 +909,6 @@ class ChatBot(commands.Bot):
             for message, result in zip(ordered, results):
                 if isinstance(result, Exception):
                     logger.error("Reprise du message %d impossible", message.id, exc_info=result)
-
-    # ------------------------------------------------------------- réactions
-
-    async def reply_to_sticker(self, message: discord.Message) -> bool:
-        """Répond à un sticker par un sticker aléatoire du serveur (False si aucun n'est utilisable)."""
-        if not message.stickers or message.guild is None:
-            return False
-        stickers = [s for s in message.guild.stickers if s.available]
-        random.shuffle(stickers)
-        for sticker in stickers:
-            try:
-                await message.channel.send(stickers=[sticker])
-                logger.info("Sticker envoyé : %s", sticker.name)
-                return True
-            except discord.Forbidden as exc:  # pas le droit d'envoyer de sticker : inutile d'insister
-                logger.warning("Envoi de sticker interdit : %s", exc)
-                break
-            except DISCORD_FAILURES as exc:
-                logger.warning("Sticker %s inutilisable : %s", sticker.name, exc)
-        return False
-
-    async def reply_to_emoji(self, message: discord.Message) -> bool:
-        """Répond à un message composé d'un seul emoji personnalisé par un emoji aléatoire du serveur
-        (False si le serveur n'en a aucun)."""
-        if not CUSTOM_EMOJI_ONLY.match(message.content.strip()):
-            return False
-        emojis = usable_emojis(message.guild)
-        if not emojis:
-            return False
-        try:
-            await message.channel.send(str(random.choice(emojis)))
-        except DISCORD_FAILURES as exc:
-            logger.warning("Impossible d'envoyer l'emoji : %s", exc)
-        return True
 
     # ------------------------------------------------------- pièces jointes
 
