@@ -56,6 +56,8 @@ MAX_BOT_REPLIES = 5
 # Passé ce délai sans message d'un bot dans le salon, le compte repart de zéro.
 BOT_STREAK_RESET = timedelta(minutes=10)
 UNEXPECTED_ERROR = "Désolé, une erreur inattendue est survenue."
+# Discord n'a pas pu être joint : son erreur, ou une coupure réseau (OSError comprend les délais dépassés).
+DISCORD_FAILURES = (discord.HTTPException, aiohttp.ClientError, OSError)
 
 
 async def warn_authors(reply: Callable[[discord.Message, str], Awaitable[None]],
@@ -106,7 +108,7 @@ async def typing(channel: discord.abc.Messageable):
     indicator = channel.typing()
     try:
         await indicator.__aenter__()  # seul ce premier envoi peut échouer : les suivants sont protégés
-    except (discord.HTTPException, aiohttp.ClientError, OSError) as exc:
+    except DISCORD_FAILURES as exc:
         logger.warning("Indicateur « en train d'écrire » impossible dans #%s : %s", channel, exc)
         indicator = None
     try:
@@ -727,7 +729,7 @@ class ChatBot(commands.Bot):
                         lines.append(f"{author_name(msg.author)} : {content}")
             except discord.Forbidden:
                 logger.warning("Pas la permission de lire l'historique de #%s.", channel)
-            except (discord.HTTPException, aiohttp.ClientError, OSError) as exc:
+            except DISCORD_FAILURES as exc:
                 # Le contexte n'est qu'un complément : la panne ne prive pas la personne de sa réponse.
                 logger.warning("Derniers messages de #%s illisibles, réponse sans ce contexte : %s", channel, exc)
         lines.reverse()
@@ -876,7 +878,7 @@ class ChatBot(commands.Bot):
                 messages.append(await channel.fetch_message(message_id))
             except (discord.NotFound, discord.Forbidden) as exc:  # message supprimé, salon inaccessible
                 logger.info("Message %s du salon %s non repris : %s", message_id, channel_id, exc)
-            except (discord.HTTPException, aiohttp.ClientError, OSError) as exc:
+            except DISCORD_FAILURES as exc:
                 logger.warning("Message %s du salon %s pas relu, gardé pour le prochain démarrage : %s",
                                message_id, channel_id, exc)
                 unread.add((channel_id, message_id))
@@ -1047,15 +1049,15 @@ class ChatBot(commands.Bot):
             reference = message.to_reference(fail_if_not_exists=False) if reply and i == 0 else None
             try:
                 await message.channel.send(chunk, reference=reference, mention_author=False)
-            except discord.HTTPException as exc:
+            except DISCORD_FAILURES as exc:
                 logger.error("Envoi de la réponse impossible : %s", exc)
                 return
 
     async def safe_reply(self, message: discord.Message, text: str) -> None:
         try:
             await message.reply(text, mention_author=False)
-        except discord.HTTPException:
+        except DISCORD_FAILURES:
             try:
                 await message.channel.send(text)
-            except discord.HTTPException as exc:
+            except DISCORD_FAILURES as exc:
                 logger.error("Impossible d'envoyer un message : %s", exc)

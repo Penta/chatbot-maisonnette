@@ -317,5 +317,55 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         bot.send_answer.assert_not_awaited()
 
 
+NETWORK_ERRORS = (aiohttp.ClientConnectionError("réseau coupé"), TimeoutError("délai dépassé"), OSError("réseau coupé"))
+
+
+@mock.patch("bot.discord_bot.discord_emojis", lambda text, guild: text)
+class SendFailureTest(unittest.IsolatedAsyncioTestCase):
+    """Réseau coupé au moment d'écrire sur Discord : noté dans le journal, comme une erreur de Discord."""
+
+    async def test_answer_stops_at_first_failure(self):
+        for error in NETWORK_ERRORS:
+            with self.subTest(type(error).__name__):
+                channel = mock.Mock(send=mock.AsyncMock(side_effect=error))
+                message = mock.Mock(channel=channel)
+                with self.assertLogs("chatbot.discord", "ERROR"), mock.patch("bot.discord_bot.split_message",
+                                                                            lambda text: ["un", "deux"]):
+                    await ChatBot.send_answer(mock.Mock(), message, "réponse")
+                channel.send.assert_awaited_once()
+
+    async def test_warning_falls_back_on_channel(self):
+        for error in NETWORK_ERRORS:
+            with self.subTest(type(error).__name__):
+                channel = mock.Mock(send=mock.AsyncMock())
+                message = mock.Mock(channel=channel, reply=mock.AsyncMock(side_effect=error))
+                await ChatBot.safe_reply(mock.Mock(), message, "Erreur.")
+                channel.send.assert_awaited_once_with("Erreur.")
+
+    async def test_warning_impossible_is_logged(self):
+        for error in NETWORK_ERRORS:
+            with self.subTest(type(error).__name__):
+                channel = mock.Mock(send=mock.AsyncMock(side_effect=error))
+                message = mock.Mock(channel=channel, reply=mock.AsyncMock(side_effect=error))
+                with self.assertLogs("chatbot.discord", "ERROR"):
+                    await ChatBot.safe_reply(mock.Mock(), message, "Erreur.")
+
+    @mock.patch("bot.discord_bot.typing", lambda channel: contextlib.nullcontext())
+    @mock.patch("bot.discord_bot.emoji_names", lambda guild: [])
+    async def test_other_mention_answered_when_warning_fails(self):
+        # Le scénario signalé : la première mention est illisible, et le réseau coupe en prévenant son auteur.
+        bot = fake_bot()
+        bot.safe_reply = ChatBot.safe_reply.__get__(bot)
+        channel = fake_channel([])
+        channel.send = mock.AsyncMock(side_effect=aiohttp.ClientConnectionError("réseau coupé"))
+        first, second = fake_mention(1, "salut", channel), fake_mention(2, "coucou", channel)
+        first.reply = mock.AsyncMock(side_effect=aiohttp.ClientConnectionError("réseau coupé"))
+        bot.mention_part = mock.AsyncMock(side_effect=[RuntimeError("illisible"), ("coucou", [])])
+        with self.assertLogs("chatbot.discord", "ERROR"):
+            await ChatBot.answer_mention(bot, [first, second])
+        bot.send_answer.assert_awaited_once()
+        self.assertEqual(bot.send_answer.await_args.args[0], second)
+
+
 if __name__ == "__main__":
     unittest.main()

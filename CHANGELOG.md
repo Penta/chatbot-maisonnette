@@ -45,7 +45,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Une panne de Discord au redémarrage ne fait plus perdre de messages en attente.** Un message que le bot n'a pas pu relire reste dans `waiting_messages.json` et sera repris au démarrage suivant, avec une trace dans le log. Rien à régler.
 
-- **Une panne de Discord pendant une mention ne laisse plus son auteur sans nouvelles.** Si Rika ne peut pas lire les derniers messages du salon, elle répond sans eux, et toute autre erreur inattendue prévient l'auteur. Rien à régler.
+- **Une panne de Discord pendant une mention ne laisse plus son auteur sans nouvelles.** Si Rika ne peut pas lire les derniers messages du salon, elle répond sans eux, et toute autre erreur inattendue prévient l'auteur. Une coupure réseau à l'envoi ne bloque plus les autres messages. Rien à régler.
 
 ---
 
