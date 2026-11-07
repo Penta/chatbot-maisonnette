@@ -16,6 +16,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.14
 
+*Publiée le 7 novembre 2026*
+
 > **En bref :** une mémoire plus sûre, des messages qui ne se perdent plus aux redémarrages, et une seule réponse aux messages envoyés à la suite.
 
 ### Changements
@@ -60,6 +62,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.13
 
+*Publiée le 4 novembre 2026*
+
 > **En bref :** des pièces jointes plus solides : grandes images, PDF protégés, fichiers texte et coupures réseau.
 
 ### Changements
@@ -85,6 +89,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ---
 
 ## Version 5.12
+
+*Publiée le 3 novembre 2026*
 
 > **En bref :** plusieurs images par message, des réponses groupées aux mentions, et un bot qui vérifie ses réglages au démarrage au lieu de tomber en panne plus tard.
 
@@ -121,6 +127,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ---
 
 ## Version 5.11
+
+*Publiée le 1er novembre 2026*
 
 > **En bref :** la mémoire des membres devient un choix de chacun (`/memoire`), elle est beaucoup mieux protégée contre les abus, et elle respecte davantage la vie privée.
 
@@ -184,6 +192,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.10
 
+*Publiée le 31 octobre 2026*
+
 > **En bref :** Rika se souvient des membres et du serveur d'une conversation à l'autre.
 
 ### Nouveautés
@@ -210,6 +220,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.9
 
+*Publiée le 31 octobre 2026*
+
 > **En bref :** tous les emojis du serveur, un statut Discord qui survit aux redémarrages, et la commande `/skip`.
 
 ### Nouveautés
@@ -232,6 +244,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.8
 
+*Publiée le 31 octobre 2026*
+
 > **En bref :** Rika tient compte des messages modifiés ou supprimés.
 
 ### Nouveautés
@@ -251,6 +265,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ---
 
 ## Version 5.7
+
+*Publiée le 31 octobre 2026*
 
 > **En bref :** lecture des PDF, historique 2 à 3 fois moins cher, et de nombreuses corrections.
 
@@ -286,6 +302,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.6
 
+*Publiée le 30 octobre 2026*
+
 > **En bref :** Rika a une vie sous son pseudo Discord — elle regarde des animes, écoute de la musique, joue, et n'est pas toujours disponible.
 
 ### Nouveautés
@@ -312,6 +330,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.5
 
+*Publiée le 30 octobre 2026*
+
 > **En bref :** moins de réflexion qui fuit dans les réponses, et des logs plus propres.
 
 ### Corrections
@@ -327,6 +347,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ---
 
 ## Version 5.4.0
+
+*Publiée le 29 octobre 2026*
 
 > **En bref :** choix du modèle Claude, lecture des messages transférés, et réponses groupées.
 
@@ -357,6 +379,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.3.0
 
+*Publiée le 29 octobre 2026*
+
 > **En bref :** accès à Internet en option, et un cache qui divise le coût des messages.
 
 ### Nouveautés
@@ -378,6 +402,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.2.0
 
+*Publiée le 28 octobre 2026*
+
 > **En bref :** lecture des fichiers texte, et des réponses plus naturelles.
 
 ### Nouveautés
@@ -398,6 +424,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ---
 
 ## Version 5.1.0
+
+*Publiée le 28 octobre 2026*
 
 > **En bref :** le bot comprend les réponses à un message, même ancien.
 
@@ -427,6 +455,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ---
 
 ## Version 5.0.0
+
+*Publiée le 28 octobre 2026, en même temps que la 5.1*
 
 > **En bref :** le bot passe de Mistral à Claude.
 
