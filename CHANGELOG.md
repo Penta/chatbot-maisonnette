@@ -52,21 +52,27 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.13
 
+> **En bref :** des pièces jointes plus solides : grandes images, PDF protégés, fichiers texte et coupures réseau.
+
+### Changements
+
+- **Nouvelles dépendances : `cryptography` et Pillow 11 minimum.** Hors Docker, relance `pip install -r requirements.txt`.
+
+- **Le journal dit pourquoi un bot qui mentionne Rika est ignoré.**
+
 ### Corrections
 
-- **Une image aux dimensions énormes ne fait plus tomber le bot.** Un fichier léger mais de dizaines de milliers de pixels de côté pouvait occuper plus d'1 Go de mémoire une fois décodé, et faire redémarrer le bot. Il est maintenant refusé d'emblée au-delà de 40 millions de pixels (120 millions pour la plupart des photos JPEG), et les images sont préparées une à la fois.
+- **Une image aux dimensions énormes ne fait plus tomber le bot.** Au-delà de 40 millions de pixels, elle est refusée.
 
-- **Une coupure réseau pendant un téléchargement ne fait plus ignorer le message.** Si une pièce jointe ne se télécharge pas (connexion coupée, ou plus de 30 secondes), Rika demande de réessayer ; une image illisible dans un message cité ou transféré est simplement ignorée. Avant, le message restait sans réponse.
+- **Une coupure réseau pendant un téléchargement ne fait plus ignorer le message.** Rika demande de réessayer.
 
-- **Plusieurs gros fichiers envoyés pendant que Rika écrit ne font plus échouer sa réponse.** Ils partaient tous dans un seul appel à Claude, qui pouvait dépasser ses limites. Quand leurs PDF et images sont trop lourds ensemble (plus de 18 Mo, ou plus de 100 pages et images), Rika répond maintenant en plusieurs fois, dans l'ordre, chaque réponse citant le message auquel elle répond.
+- **Plusieurs gros fichiers envoyés pendant que Rika écrit ne font plus échouer sa réponse.** Elle répond en plusieurs fois.
 
-- **Les PDF protégés seulement contre la modification sont lus.** Un PDF chiffré en AES sans mot de passe d'ouverture (courant avec Acrobat ou LibreOffice) était refusé comme « illisible ». Il est maintenant lu, grâce à la nouvelle dépendance `cryptography` installée avec les autres.
+- **Les PDF protégés seulement contre la modification sont lus.**
 
-- **Les grandes images en gris 16 bits ne deviennent plus toutes blanches.** Un scan, une radio ou une photo d'astronomie en PNG ou TIFF 16 bits (ou 32 bits), une fois réduit, arrivait tout blanc ou tout noir chez Claude. Ses gris sont maintenant ramenés sur 8 bits sans être écrêtés (Pillow 11 ou plus, installé avec les autres dépendances).
+- **Les grandes images en gris 16 bits ne deviennent plus toutes blanches.**
 
-- **Un octet abîmé ne déforme plus tous les accents d'un fichier texte.** Dans un `.txt`, `.log` ou `.csv` en UTF-8, un seul octet invalide faisait lire tout le fichier en Windows-1252 (« CafÃ© »). Seul cet octet est maintenant relu ainsi, si le fichier est surtout en UTF-8 ; les fichiers « ANSI » restent bien lus.
-
-- **Le journal dit pourquoi un bot qui mentionne Rika est ignoré.** Quand un autre bot écrit @Rika, une ligne indique si Discord a bien transmis la mention et si le message est pris en compte ou ignoré (mention absente, ou limite de réponses aux bots d'affilée).
+- **Un octet abîmé ne déforme plus tous les accents d'un fichier texte.**
 
 ---
 
