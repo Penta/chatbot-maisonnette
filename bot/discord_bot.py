@@ -37,7 +37,7 @@ from .memory_views import reply_error, see_user
 from .models import display_name, is_known, thinking_off
 from .pdf_files import PdfError
 from .presence import PresenceManager, Status
-from .spontaneous import CHANCE, RECENT_AUTHORS, SpontaneousLog, finished_activity, is_silence, occasion_note
+from .spontaneous import CHANCE, RECENT_MESSAGES, SpontaneousLog, finished_activity, is_silence, occasion_note
 from .text_files import TextFileError
 from .text_utils import split_message
 
@@ -873,13 +873,23 @@ class ChatBot(commands.Bot):
         async with self.history.lock(channel.id):
             # Vérifié sous le verrou : une réponse vient peut-être de partir, ou un message attend la sienne.
             if (self.presence.status is not after or self._pending.get(channel.id) or self._preparing.get(channel.id)
-                    or channel.id in self._waiters
-                    or not self.spontaneous.allowed(discord.utils.utcnow(), channel.last_message_id)):
+                    or channel.id in self._waiters):
+                return
+            # Seuls les messages des membres comptent : ni le message « En ligne » du démarrage, ni les autres bots
+            # ne répondent au bot ou ne troublent le calme du salon.
+            try:
+                # Du plus récent au plus ancien.
+                members = [m async for m in channel.history(limit=RECENT_MESSAGES) if not m.author.bot]
+            except DISCORD_FAILURES as exc:
+                logger.warning("Derniers messages de #%s illisibles, pas de message spontané : %s", channel, exc)
+                return
+            if not self.spontaneous.allowed(discord.utils.utcnow(), members[0].id if members else None):
                 return
             note = occasion_note(before, datetime.now(self.settings.timezone))
             parts = [(text, []) for text in (self.presence_note(), note) if text]
+            # Fiches des derniers membres à avoir écrit : il peut s'adresser à l'un d'eux que le sujet intéresse.
+            notes = self.memory.notes_for(list(dict.fromkeys(m.author.id for m in members))) if self.memory else ""
             try:
-                notes = await self.recent_members_notes(channel)
                 answer = await self.claude.ask(self.history.get(channel.id), parts, emojis=emoji_names(channel.guild),
                                                member_notes=notes)
             except ClaudeError as exc:
@@ -901,20 +911,6 @@ class ChatBot(commands.Bot):
             lines = [{"content": text} for text, _ in parts]
             await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
         logger.info("Fin de « %s » : message spontané dans #%s.", before.title, channel)
-
-    async def recent_members_notes(self, channel: discord.abc.Messageable) -> str:
-        """Fiches des derniers membres à avoir écrit dans le salon (vide sans mémoire, ou si Discord ne répond pas)."""
-        if not self.memory:
-            return ""
-        ids: list[int] = []
-        try:
-            async for message in channel.history(limit=RECENT_AUTHORS):
-                if not message.author.bot and message.author.id not in ids:
-                    ids.append(message.author.id)
-        except DISCORD_FAILURES as exc:
-            logger.warning("Derniers messages de #%s illisibles, pas de fiches jointes : %s", channel, exc)
-            return ""
-        return self.memory.notes_for(ids)
 
     def remember_waiting(self, message: discord.Message) -> None:
         key = (message.channel.id, message.id)

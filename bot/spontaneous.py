@@ -1,9 +1,10 @@
 """Messages spontanés : le bot lance de lui-même la conversation dans son salon.
 
 L'occasion vient de son statut : il vient de finir son anime ou sa partie de jeu (voir finished_activity),
-et a donc quelque chose à raconter. Il ne parle que si le salon est calme depuis CALM, une fois sur
-CHANCE environ, au plus SPONTANEOUS_PER_DAY fois par 24 h, et jamais deux fois de suite sans que
-quelqu'un ait écrit entre-temps (voir SpontaneousLog.allowed). Claude peut aussi choisir de se taire
+et a donc quelque chose à raconter. Il ne parle que si aucun membre n'a écrit dans le salon depuis
+CALM, une fois sur CHANCE environ, au plus SPONTANEOUS_PER_DAY fois par 24 h, et jamais deux fois de
+suite sans qu'un membre ait écrit entre-temps (voir SpontaneousLog.allowed). Les messages des bots,
+le sien compris (message « En ligne » au démarrage), ne comptent pas. Claude peut aussi choisir de se taire
 (voir is_silence) : un message forcé sonne faux.
 
 Les messages envoyés sont gardés dans spontaneous_messages.json : la limite et la règle « pas deux
@@ -26,10 +27,12 @@ from .presence import Kind, Status
 logger = logging.getLogger("chatbot.spontaneous")
 
 UTC = timezone.utc
-CALM = timedelta(hours=3)  # sans aucun message dans le salon (divisé par PRESENCE_SPEED)
+CALM = timedelta(hours=3)  # sans message d'un membre dans le salon (divisé par PRESENCE_SPEED)
 CHANCE = 1 / 3  # chances de parler à chaque occasion : imprévisible, et pas à chaque fin d'épisode
 DAY = timedelta(hours=24)
-RECENT_AUTHORS = 30  # derniers messages du salon dont les auteurs voient leur fiche jointe
+# Derniers messages du salon lus : on y cherche le dernier message d'un membre, et leurs auteurs voient leur
+# fiche jointe. Au-delà, le salon est considéré comme calme.
+RECENT_MESSAGES = 50
 SILENCE = "RIEN"  # réponse de Claude quand rien de naturel ne lui vient
 _SILENCE = re.compile(rf"\W*{SILENCE}\W*", re.IGNORECASE)
 TOPICS = (Kind.ANIME, Kind.GAME)  # activités dont la fin donne envie d'en parler
@@ -74,16 +77,16 @@ class SpontaneousLog:
         self.calm = CALM / speed
         self.sent: list[tuple[int, datetime]] = self._load()
 
-    def allowed(self, now: datetime, last_message_id: int | None) -> bool:
-        """Le bot peut-il parler de lui-même maintenant ? last_message_id : dernier message du salon, de
-        n'importe qui (None : salon vide)."""
+    def allowed(self, now: datetime, last_member_message: int | None) -> bool:
+        """Le bot peut-il parler de lui-même maintenant ? last_member_message : identifiant du dernier message
+        d'un membre dans le salon (None : aucun parmi les derniers messages)."""
         if len([1 for _, date in self.sent if now - date < DAY]) >= self.per_day:
             return False
-        if last_message_id is None:
+        if self.sent and (last_member_message is None or last_member_message < self.sent[-1][0]):
+            return False  # aucun membre n'a écrit depuis son dernier message spontané : il ne parle pas seul
+        if last_member_message is None:
             return True
-        if self.sent and self.sent[-1][0] == last_message_id:
-            return False  # personne n'a écrit depuis son dernier message spontané : il ne parle pas seul
-        return now - discord.utils.snowflake_time(last_message_id) >= self.calm
+        return now - discord.utils.snowflake_time(last_member_message) >= self.calm
 
     def record(self, message_id: int, now: datetime) -> None:
         # Ceux des dernières 24 h comptent pour la limite ; le dernier, pour la règle « pas deux fois de suite ».
