@@ -885,11 +885,13 @@ class ChatBot(commands.Bot):
             # Vérifié sous le verrou : une réponse vient peut-être de partir, ou un message attend la sienne.
             if self.presence.status is not after or member_waiting():
                 return
-            # Seuls les messages des membres comptent : ni le message « En ligne » du démarrage, ni les autres bots
-            # ne répondent au bot ou ne troublent le calme du salon.
+            # Seuls les messages écrits par des membres comptent : ni le message « En ligne » du démarrage, ni les
+            # autres bots, ni les annonces de Discord (message épinglé, arrivée d'un membre…) ne répondent au bot ou ne
+            # troublent le calme du salon.
             try:
                 # Du plus récent au plus ancien.
-                members = [m async for m in channel.history(limit=RECENT_MESSAGES) if not m.author.bot]
+                members = [m async for m in channel.history(limit=RECENT_MESSAGES)
+                           if not m.author.bot and m.type in USER_MESSAGE_TYPES]
             except DISCORD_FAILURES as exc:
                 logger.warning("Derniers messages de #%s illisibles, pas de message spontané : %s", channel, exc)
                 return

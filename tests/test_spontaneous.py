@@ -149,11 +149,12 @@ class SpeakUpTest(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def channel_messages(self, *messages: tuple[int, bool], author: int | None = None) -> None:
-        """Derniers messages du salon, du plus récent au plus ancien : (identifiant, écrit par un bot). Chacun a
-        son auteur, sauf author : le même pour tous."""
-        found = [mock.Mock(id=i, author=mock.Mock(id=author or 1000 + n, bot=is_bot))
-                 for n, (i, is_bot) in enumerate(messages)]
+    def channel_messages(self, *messages: tuple, author: int | None = None) -> None:
+        """Derniers messages du salon, du plus récent au plus ancien : (identifiant, écrit par un bot), ou (identifiant,
+        écrit par un bot, type de message Discord) pour un message automatique. Chacun a son auteur, sauf author : le
+        même pour tous."""
+        found = [mock.Mock(id=i, author=mock.Mock(id=author or 1000 + n, bot=is_bot), type=kind[0] if kind else
+                           discord.MessageType.default) for n, (i, is_bot, *kind) in enumerate(messages)]
 
         async def history(limit):
             for message in found[:limit]:
@@ -191,6 +192,30 @@ class SpeakUpTest(unittest.IsolatedAsyncioTestCase):
         )
         await self.speak_up()
         self.bot.claude.ask.assert_not_awaited()
+
+    async def test_discord_notices_are_not_an_answer(self):
+        # Rika parle seule il y a 5 h, puis un membre épingle un message et un autre rejoint le serveur : Discord
+        # l'annonce dans le salon, mais personne ne lui a répondu. Elle ne reparle pas seule.
+        own = message_id(NOW - timedelta(hours=5))
+        self.bot.spontaneous.per_day = 5
+        self.bot.spontaneous.record(own, NOW - timedelta(hours=5))
+        self.channel_messages(
+            (message_id(NOW - timedelta(hours=3)), False, discord.MessageType.new_member),
+            (message_id(NOW - timedelta(hours=4)), False, discord.MessageType.pins_add),
+            (own, True),
+            (message_id(NOW - timedelta(hours=8)), False),
+        )
+        await self.speak_up()
+        self.bot.claude.ask.assert_not_awaited()
+
+    async def test_replies_count(self):
+        # Une réponse (« Répondre » de Discord) est bien un message de membre.
+        own = message_id(NOW - timedelta(hours=5))
+        self.bot.spontaneous.per_day = 5
+        self.bot.spontaneous.record(own, NOW - timedelta(hours=5))
+        self.channel_messages((message_id(NOW - timedelta(hours=4)), False, discord.MessageType.reply), (own, True))
+        await self.speak_up()
+        self.channel.send.assert_awaited_once()
 
     async def test_messages_of_bots_do_not_break_the_calm(self):
         # Un membre a écrit il y a 5 h ; un autre bot écrit depuis toutes les heures : le salon reste calme.
