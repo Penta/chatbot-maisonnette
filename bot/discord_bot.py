@@ -210,6 +210,7 @@ class ChatBot(commands.Bot):
         # Messages en attente, gardés sur le disque pour y répondre même après un redémarrage.
         self._waiting_file = settings.history_file.with_name("waiting_messages.json")
         self._waiting: set[tuple[int, int]] = set()  # (salon, message)
+        self._to_replay: set[tuple[int, int]] = set()  # messages à reprendre une fois connecté (voir load_waiting)
         self._replayed: set[tuple[int, int]] = set()  # messages repris au démarrage (voir remember_queued)
         self._stopping = False  # arrêt du bot en cours (voir forget_waiting)
         self._last_main_message: datetime | None = None  # date du dernier message reçu dans le salon dédié
@@ -220,6 +221,7 @@ class ChatBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         # Exécuté une seule fois au démarrage (contrairement à on_ready).
+        self.load_waiting()
         if problem := await self.claude.check_access():
             # Sinon le bot s'annoncerait « En ligne » puis échouerait sur chaque message.
             logger.critical("Erreur de configuration : %s", problem)
@@ -832,21 +834,28 @@ class ChatBot(commands.Bot):
         except OSError as exc:
             logger.warning("Impossible d'écrire %s : %s", self._waiting_file, exc)
 
-    async def replay_waiting(self) -> None:
-        """Au démarrage : reprend les messages restés sans réponse avant le redémarrage."""
+    def load_waiting(self) -> None:
+        """Avant la connexion à Discord : lit les messages restés sans réponse avant le redémarrage. Gardés en
+        mémoire jusqu'à leur reprise : un message reçu entre-temps réécrit le fichier, qui doit encore les contenir."""
         try:
             saved = json.loads(self._waiting_file.read_text(encoding="utf-8"))
+            keys = {(channel_id, message_id) for channel_id, message_id in saved}
         except FileNotFoundError:
             return
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, TypeError) as exc:
             logger.warning("%s illisible, ignoré : %s", self._waiting_file, exc)
             return
-        # Gardés en mémoire pendant les téléchargements : un message arrivé entre-temps réécrit le fichier,
-        # qui doit encore les contenir si le bot s'arrête avant leur reprise.
-        keys = {(channel_id, message_id) for channel_id, message_id in saved}
+        self._to_replay = keys
         self._waiting |= keys
+
+    async def replay_waiting(self) -> None:
+        """Une fois connecté : reprend les messages lus par load_waiting. Ceux reçus depuis le démarrage ne sont
+        pas concernés : ils sont déjà en cours de traitement."""
+        keys, self._to_replay = self._to_replay, set()
+        if not keys:
+            return
         messages = []
-        for channel_id, message_id in saved:
+        for channel_id, message_id in sorted(keys):
             try:
                 channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
                 messages.append(await channel.fetch_message(message_id))

@@ -27,7 +27,7 @@ class WaitingTestCase(unittest.IsolatedAsyncioTestCase):
         bot.settings.context_message_limit = 0
         bot.held_files = HeldFiles()
         bot._waiting_file = self.file
-        bot._waiting, bot._replayed = set(), set()
+        bot._waiting, bot._replayed, bot._to_replay = set(), set(), set()
         bot._stopping = False
         bot._pending, bot._preparing, bot._mentions, bot._waiters = {}, {}, {}, {}
         bot._last_main_message = None
@@ -192,6 +192,7 @@ class ReplayOnlyOnceTest(WaitingTestCase):
     def setUp(self):
         super().setUp()
         self.file.write_text(json.dumps([[CHANNEL_ID, 1]]), encoding="utf-8")
+        ChatBot.load_waiting(self.bot)
         self.channel.fetch_message = mock.AsyncMock(side_effect=lambda message_id: self.message(message_id))
         self.bot.get_channel.return_value = self.channel
 
