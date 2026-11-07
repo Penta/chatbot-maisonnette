@@ -38,7 +38,7 @@ def fake_bot() -> mock.Mock:
     bot.held_files = HeldFiles()
     bot.settings.reply_pause = 0
     bot._pending, bot._preparing, bot._mentions, bot._waiters, bot._waiting = {}, {}, {}, {}, set()
-    bot._answering = set()
+    bot._deleted = set()
     bot._last_main_message = None
     bot.available.return_value = True
     bot.safe_reply = mock.AsyncMock()

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from bot.attachments import HeldFiles
-from bot.discord_bot import UNEXPECTED_ERROR, ChatBot, PendingMessage
+from bot.discord_bot import DELETED_KEPT, UNEXPECTED_ERROR, ChatBot, PendingMessage
 
 CHANNEL_ID = 10
 
@@ -25,7 +25,7 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         bot.settings.reply_pause = 0
         bot.held_files = HeldFiles()
         bot._pending, bot._preparing, bot._waiters, bot._mentions = {}, {}, {}, {}
-        bot._answering, bot._waiting = set(), set()
+        bot._deleted, bot._waiting = set(), set()
         bot.history.delete = mock.AsyncMock(return_value=False)
         bot._last_main_message = None
         bot.available.return_value = True
@@ -233,6 +233,17 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         self.slow[1].set()
         await task
         self.assertEqual(self.asked(), [[text(2)]])
+
+    async def test_deleted_before_preparation_not_answered(self):
+        # Supprimé pendant que Rika met à jour le registre des membres, avant de commencer à le lire.
+        await self.delete(1)
+        await self.arrive(1)
+        self.bot.claude.ask.assert_not_awaited()
+        self.bot.history.add_exchange.assert_not_awaited()
+
+    async def test_deleted_list_keeps_most_recent(self):
+        await self.delete(*range(1, DELETED_KEPT + 2))
+        self.assertEqual(self.bot._deleted, set(range(2, DELETED_KEPT + 2)))
 
     async def test_deleted_during_answer_not_sent(self):
         self.deleted_while_asking(1)

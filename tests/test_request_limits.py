@@ -22,7 +22,7 @@ def fake_bot() -> mock.Mock:
     bot = mock.Mock()
     bot._pending = {}
     bot._preparing = {}
-    bot._answering = set()
+    bot._deleted = set()
     bot.history.lock.return_value = asyncio.Lock()
     bot.history.get.return_value = []
     bot.history.add_exchange = mock.AsyncMock()

@@ -21,7 +21,7 @@ CHANNEL_ID = 20
 def fake_bot() -> mock.Mock:
     bot = mock.Mock()
     bot._mentions, bot._waiters, bot._pending, bot._preparing = {}, {}, {}, {}
-    bot._answering, bot._waiting = set(), set()
+    bot._deleted, bot._waiting = set(), set()
     bot.held_files = HeldFiles()
     bot.history.delete = mock.AsyncMock(return_value=False)
     bot.available.return_value = True
@@ -332,6 +332,13 @@ class MentionTest(unittest.IsolatedAsyncioTestCase):
         await ChatBot.answer_mention(bot, [first, second])
         self.assertEqual(bot.claude.ask.await_args.args[1], [("texte 2", [])])
         bot.send_answer.assert_awaited_once_with(second, "Coucou", reply=False)
+
+    async def test_deleted_before_answer_not_answered(self):
+        # Supprimée pendant que Rika met à jour le registre des membres, avant d'entrer dans la file.
+        bot = fake_bot()
+        await ChatBot.forget_deleted(bot, CHANNEL_ID, {1})
+        await ChatBot.answer_mention(bot, [fake_mention(1, "salut", fake_channel([]))])
+        bot.claude.ask.assert_not_awaited()
 
     async def test_deleted_during_answer_not_sent(self):
         bot = fake_bot()

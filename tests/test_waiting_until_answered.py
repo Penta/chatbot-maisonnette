@@ -31,7 +31,7 @@ class WaitingTestCase(unittest.IsolatedAsyncioTestCase):
         bot._waiting, bot._replayed, bot._to_replay = set(), set(), set()
         bot._stopping = False
         bot._pending, bot._preparing, bot._mentions, bot._waiters = {}, {}, {}, {}
-        bot._answering = set()
+        bot._deleted = set()
         bot._last_main_message = None
         bot.available.return_value = True
         for name in ("_save_waiting", "remember_waiting", "remember_queued", "forget_waiting", "answer_main_channel",
