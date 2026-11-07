@@ -36,6 +36,7 @@ def fake_bot() -> mock.Mock:
     bot.presence_note.return_value = None
     bot.timestamp = lambda message: "03/11/2026 18:00"
     bot.read_reply = mock.AsyncMock(return_value=(None, []))
+    bot.read_gif = mock.AsyncMock(return_value=None)  # pas de GIF du sélecteur de Discord
     bot.member_notes = mock.AsyncMock(return_value="")
     bot.claude.ask = mock.AsyncMock(return_value=mock.Mock(text="Coucou"))
     bot.send_answer = mock.AsyncMock()

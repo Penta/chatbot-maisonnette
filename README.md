@@ -22,6 +22,7 @@ Dans son salon comme dans les mentions, le bot lit jusqu'à 4 images ou un PDF, 
 - **Images** (JPEG, PNG, GIF, WebP, BMP, TIFF) : réduites et converties automatiquement si besoin, 40 millions de pixels au plus (120 millions pour la plupart des photos JPEG). Avec plusieurs images, il peut les comparer ou parler de « la deuxième ».
 - **PDF** : texte, tableaux, schémas et pages scannées, 20 pages (`PDF_MAX_PAGES`) et 20 Mo au plus. Les PDF protégés par un mot de passe d'ouverture sont refusés ; ceux protégés seulement contre la modification ou l'impression sont lus.
 - **Fichiers texte** (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, configuration, HTML, code…), 100 Ko au plus.
+- **GIF du sélecteur de Discord** : pour un GIF Klipy, le bot voit 6 moments de l'animation, du début à la fin, réunis en une seule image ; pour les autres (Giphy, anciens favoris Tenor), seulement la première image.
 
 Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a lu, sans en repayer le contenu à chaque message.
 
@@ -193,6 +194,7 @@ bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés 
 bot/presence.py          statut Discord : tirage au sort et changements
 bot/presence_sources.py  animes, musiques et jeux (AniList, Deezer, Steam)
 bot/images.py            préparation des images (taille, format)
+bot/gifs.py              GIF du sélecteur de Discord : téléchargement et grille de l'animation
 bot/pdf_files.py         vérification des PDF joints (pages, mot de passe)
 bot/text_files.py        lecture des fichiers texte joints
 bot/media.py             pièce jointe prête pour Claude (image ou PDF)

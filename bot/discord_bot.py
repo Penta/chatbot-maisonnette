@@ -26,6 +26,7 @@ from .commands import memory_command, reset_command, server_memory_command, skip
 from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
 from .files import write_atomic
+from .gifs import EMBED_WAIT, gif_embed, looks_like_gif_link
 from .history import ConversationHistory, render_line
 from .images import ImageError
 from .media import ImageData, fit_in_request
@@ -124,8 +125,8 @@ class PendingMessage:
     """Message du salon dédié, prêt à être envoyé à Claude."""
     message: discord.Message
     line: dict   # ligne conservée en mémoire (voir history.render_line)
-    extra: str   # ajouté pour Claude seulement : contenu du fichier texte joint
-    images: list[ImageData]  # images, ou un seul PDF
+    extra: str   # ajouté pour Claude seulement : explication du GIF, contenu du fichier texte joint
+    images: list[ImageData]  # images (ou la grille d'un GIF), ou un seul PDF
 
     @property
     def held_size(self) -> int:
@@ -540,6 +541,9 @@ class ChatBot(commands.Bot):
         if attachments is False:
             return None  # pièce jointe refusée, l'utilisateur a été prévenu
         images, text_file = attachments
+        gif = None if images else await self.read_gif(message)
+        if gif:
+            images = [gif[0]]
 
         # Les images du message cité ne sont utilisées que si le message n'en contient pas lui-même.
         reply, reply_images = await self.read_reply(message, want_images=not (images or forward_images))
@@ -553,10 +557,10 @@ class ChatBot(commands.Bot):
                 line["reply_to"] = message.reference.message_id  # citation retirée si ce message est supprimé
                 line["reply"] = reply
             line["content"] = self.message_body(message)
-        markers = [attachments_marker(images)] if images else []
-        extra = ""
+        markers = [gif[2] if gif else attachments_marker(images)] if images else []
+        extra = gif[1] if gif else ""
         if text_file:
-            extra = text_file_prompt(*text_file)
+            extra += text_file_prompt(*text_file)
             markers.append(text_file_marker(text_file[0]))
         if markers:
             line["attachments"] = markers
@@ -765,6 +769,9 @@ class ChatBot(commands.Bot):
         except (ImageError, PdfError) as exc:
             await self.safe_reply(message, exc.user_message)
             return None
+        gif = None if images else await self.read_gif(message)
+        if gif:
+            images = [gif[0]]
         reply, reply_images = await self.read_reply(message, want_images=not images)
         images = images or reply_images
 
@@ -772,6 +779,8 @@ class ChatBot(commands.Bot):
         text = short_emojis(message.clean_content.replace(bot_name, "").strip()) or "(simple mention, sans texte)"
         reply_part = f" ({reply})" if reply else ""
         prompt = f"{self.timestamp(message)}, {author_name(message.author)} te mentionne{reply_part} et écrit : {text}"
+        if gif:
+            prompt += gif[1]
 
         text_files = [a for a in message.attachments if looks_like_text(a)]
         if text_files:
@@ -922,6 +931,16 @@ class ChatBot(commands.Bot):
         except (AttachmentRefused, ImageError, PdfError, TextFileError) as exc:
             await self.safe_reply(message, exc.user_message)
             return False
+
+    async def read_gif(self, message: discord.Message) -> tuple[ImageData, str, str] | None:
+        """GIF choisi dans le sélecteur de Discord (voir AttachmentReader.read_gif), ou None."""
+        # L'aperçu d'un lien peut arriver juste après le message : Discord l'ajoute par une modification,
+        # que discord.py reporte sur ce même message. Attendu un court moment, pour un lien de GIF seulement.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + EMBED_WAIT
+        while not gif_embed(message.embeds) and looks_like_gif_link(message.content) and loop.time() < deadline:
+            await asyncio.sleep(0.25)
+        return await self.attachments.read_gif(message.embeds)
 
     # ------------------------------------------- message cité ou transféré
 

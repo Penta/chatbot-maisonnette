@@ -10,6 +10,7 @@ import discord
 
 from .config import Settings
 from .errors import UserFacingError
+from .gifs import download_gif, gif_embed, gif_marker, gif_prompt, gif_source, gif_title, prepare_gif
 from .history import images_marker
 from .images import ImageError, prepare_image
 from .media import ImageData
@@ -176,10 +177,13 @@ class AttachmentReader:
             raise ImageError(f"Cette image est trop lourde (maximum {max_mb:.2f} Mo).")
 
         data = await fetch(attachment, "image", ImageError)
-        # Réduit / convertit l'image si besoin (dans un thread : ne bloque pas le bot),
-        # une à la fois pour borner la mémoire. Les téléchargements, eux, restent en parallèle.
+        return await self._prepare(prepare_image, data)
+
+    async def _prepare(self, prepare, data: bytes):
+        """Réduit / convertit une image si besoin (dans un thread : ne bloque pas le bot), une à la fois
+        pour borner la mémoire. Les téléchargements, eux, restent en parallèle."""
         await self._image_slots.acquire()
-        preparing = asyncio.ensure_future(asyncio.to_thread(prepare_image, data))
+        preparing = asyncio.ensure_future(asyncio.to_thread(prepare, data))
         # Place rendue à la fin du thread, pas de l'attente : si l'attente est annulée,
         # le thread, lui, continue de décoder.
         preparing.add_done_callback(self._release_image_slot)
@@ -214,3 +218,21 @@ class AttachmentReader:
             elif isinstance(result, BaseException):
                 raise result
         return [r for r in results if isinstance(r, ImageData)]
+
+    async def read_gif(self, embeds: list[discord.Embed]) -> tuple[ImageData, str, str] | None:
+        """GIF choisi dans le sélecteur de Discord (voir gifs.py) : (image, explication pour Claude, repère pour
+        la mémoire), ou None s'il n'y en a pas ou s'il est illisible (le message est alors lu sans lui)."""
+        embed = gif_embed(embeds)
+        url = gif_source(embed) if embed else None
+        if url is None:
+            return None
+        data = await download_gif(url)
+        if data is None:
+            return None
+        try:
+            image, frames = await self._prepare(prepare_gif, data)
+        except ImageError as exc:
+            logger.warning("GIF ignoré (%s) : %s", url, exc.user_message)
+            return None
+        title = gif_title(embed)
+        return image, gif_prompt(title, frames), gif_marker(title)

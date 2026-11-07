@@ -80,6 +80,7 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
         bot.read_attachments = mock.AsyncMock(return_value=([], None))
         bot.read_reply = mock.AsyncMock(return_value=(None, []))
+        bot.read_gif = mock.AsyncMock(return_value=None)
         bot.message_body = ChatBot.message_body
         bot.timestamp.return_value = "07/11/2026 18:00"
         sticker = mock.Mock(available=True)
