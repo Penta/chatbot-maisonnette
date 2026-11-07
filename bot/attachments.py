@@ -28,7 +28,8 @@ MAX_IMAGES_AT_ONCE = 1
 DOWNLOAD_TIMEOUT = 30
 # Fichiers gardés en mémoire pour les messages en attente, tous salons confondus. Sans limite, des dizaines
 # de PDF reçus pendant une absence feraient tomber le bot, et de nouveau à chaque reprise au redémarrage.
-HELD_FILES_MAX_BYTES = 200_000_000
+# Le conteneur de production a 512 Mo pour tout le bot, préparation des images comprise.
+HELD_FILES_MAX_BYTES = 100_000_000
 FILES_QUEUE_FULL = "J'ai déjà trop de fichiers en attente : renvoie ton message un peu plus tard, s'il te plaît."
 
 
