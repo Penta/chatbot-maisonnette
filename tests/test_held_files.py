@@ -36,6 +36,7 @@ def queued(message: mock.Mock, data_size: int = PDF_SIZE) -> PendingMessage:
 def fake_bot() -> mock.Mock:
     bot = mock.Mock()
     bot.held_files = HeldFiles()
+    bot.settings.reply_pause = 0
     bot._pending, bot._preparing, bot._mentions, bot._waiters, bot._waiting = {}, {}, {}, {}, set()
     bot._last_main_message = None
     bot.available.return_value = True
@@ -97,7 +98,6 @@ class HeldFilesTest(unittest.TestCase):
         self.assertEqual(readable_size(files), 3300)
 
 
-@mock.patch("bot.discord_bot.REPLY_PAUSE", 0)
 class MainChannelTest(unittest.IsolatedAsyncioTestCase):
     async def test_arrivals_in_parallel_stay_within_budget(self):
         # La reprise au démarrage lit tout en parallèle : la place est réservée avant chaque téléchargement.

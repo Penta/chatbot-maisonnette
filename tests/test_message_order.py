@@ -17,12 +17,12 @@ def text(message_id: int) -> str:
     return f"07/11/2026 18:00, membre a écrit : message {message_id}"
 
 
-@mock.patch("bot.discord_bot.REPLY_PAUSE", 0)
 @mock.patch("bot.discord_bot.typing", lambda channel: contextlib.nullcontext())
 @mock.patch("bot.discord_bot.emoji_names", lambda guild: [])
 class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.bot = bot = mock.Mock()
+        bot.settings.reply_pause = 0
         bot.held_files = HeldFiles()
         bot._pending, bot._preparing, bot._waiters = {}, {}, {}
         bot._last_main_message = None
@@ -108,27 +108,26 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         await second
         self.assertEqual(self.asked(), [[text(1), text(2), text(3)]])
 
-    # La pause se règle dans le test : un décorateur serait écrasé par celui de la classe.
     async def test_messages_during_pause_get_one_answer(self):
-        with mock.patch("bot.discord_bot.REPLY_PAUSE", 0.2):
-            first = self.arrive(1)
-            await asyncio.sleep(0.05)
-            self.bot.claude.ask.assert_not_awaited()  # le bot n'a pas encore répondu
-            second = self.arrive(2)
-            await asyncio.gather(first, second)
+        self.bot.settings.reply_pause = 0.2
+        first = self.arrive(1)
+        await asyncio.sleep(0.05)
+        self.bot.claude.ask.assert_not_awaited()  # le bot n'a pas encore répondu
+        second = self.arrive(2)
+        await asyncio.gather(first, second)
         self.assertEqual(self.asked(), [[text(1), text(2)]])
 
     async def test_message_after_pause_gets_its_own_answer(self):
-        with mock.patch("bot.discord_bot.REPLY_PAUSE", 0.05):
-            await self.arrive(1)
-            await self.arrive(2)
+        self.bot.settings.reply_pause = 0.05
+        await self.arrive(1)
+        await self.arrive(2)
         self.assertEqual(self.asked(), [[text(1)], [text(2)]])
 
     async def test_preparation_time_counts_in_pause(self):
         # Une image déjà longue à préparer ne fait pas attendre 2 secondes de plus.
+        self.bot.settings.reply_pause = 0.05
         self.slow[1] = asyncio.Event()
-        with (mock.patch("bot.discord_bot.REPLY_PAUSE", 0.05),
-              mock.patch("bot.discord_bot.asyncio.sleep", wraps=asyncio.sleep) as sleep):
+        with mock.patch("bot.discord_bot.asyncio.sleep", wraps=asyncio.sleep) as sleep:
             image = self.arrive(1)
             await asyncio.wait([image], timeout=0.1)
             self.slow[1].set()
@@ -137,11 +136,11 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.asked(), [[text(1)]])
 
     async def test_absent_during_pause_defers_answer(self):
-        with mock.patch("bot.discord_bot.REPLY_PAUSE", 0.05):
-            task = self.arrive(1)
-            await asyncio.sleep(0)
-            self.bot.available.return_value = False
-            await task
+        self.bot.settings.reply_pause = 0.05
+        task = self.arrive(1)
+        await asyncio.sleep(0)
+        self.bot.available.return_value = False
+        await task
         self.bot.answer_later.assert_called_once()
         self.bot.claude.ask.assert_not_awaited()
 

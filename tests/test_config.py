@@ -92,6 +92,22 @@ class MaximumTest(unittest.TestCase):
         self.assertEqual((s.max_tokens, s.pdf_max_pages, s.presence_speed), (64000, 100, 100))
 
 
+class ReplyPauseTest(unittest.TestCase):
+    def test_default(self):
+        self.assertEqual(settings(MEMORY="off").reply_pause, 2)
+
+    def test_limits_accepted(self):
+        self.assertEqual(settings(MEMORY="off", REPLY_PAUSE="0").reply_pause, 0)
+        self.assertEqual(settings(MEMORY="off", REPLY_PAUSE="1.5").reply_pause, 1.5)
+        self.assertEqual(settings(MEMORY="off", REPLY_PAUSE="10").reply_pause, 10)
+
+    def test_values_out_of_limits_refused(self):
+        for value in ("-1", "10.5", "deux"):
+            with self.subTest(value), self.assertRaises(ConfigError) as ctx:
+                settings(MEMORY="off", REPLY_PAUSE=value)
+            self.assertIn("REPLY_PAUSE", str(ctx.exception))
+
+
 class AllErrorsTest(unittest.TestCase):
     def test_every_error_reported_at_once(self):
         # Le scénario de l'audit : trois variables fausses, un seul redémarrage pour les voir toutes.

@@ -54,8 +54,6 @@ DEPARTURE_WINDOW = timedelta(minutes=3)
 MAX_BOT_REPLIES = 5
 # Passé ce délai sans message d'un bot dans le salon, le compte repart de zéro.
 BOT_STREAK_RESET = timedelta(minutes=10)
-# Secondes d'attente avant de répondre dans le salon dédié, pour regrouper les messages envoyés à la suite.
-REPLY_PAUSE = 2
 UNEXPECTED_ERROR = "Désolé, une erreur inattendue est survenue."
 
 
@@ -510,7 +508,7 @@ class ChatBot(commands.Bot):
         # Courte pause, comptée depuis l'arrivée du message : tout ce qui arrive entre-temps part dans la même
         # réponse. Une image, plus longue à envoyer, arrive souvent après le texte qui l'accompagne.
         if self.available() and channel_id not in self._waiters:
-            await asyncio.sleep(max(0, REPLY_PAUSE - (asyncio.get_running_loop().time() - arrival)))
+            await asyncio.sleep(max(0, self.settings.reply_pause - (asyncio.get_running_loop().time() - arrival)))
         if not self.available() or channel_id in self._waiters:
             if pending is not None:
                 self.answer_later(message, self.answer_main_channel)

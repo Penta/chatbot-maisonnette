@@ -175,6 +175,7 @@ class Settings:
     # Mémoire et contexte
     max_history_length: int
     context_message_limit: int
+    reply_pause: float  # secondes d'attente avant de répondre dans le salon dédié
     history_file: Path
     personality_file: Path
 
@@ -301,6 +302,7 @@ def load_settings() -> Settings:
         max_history_length=check(_get_int, "MAX_HISTORY_LENGTH", default=10, minimum=2),
         # Lus à chaque mention puis envoyés à Claude : au-delà, chaque mention coûte cher (ou dépasse la limite).
         context_message_limit=check(_get_int, "CONTEXT_MESSAGE_LIMIT", default=20, minimum=0, maximum=100),
+        reply_pause=check(_get_float, "REPLY_PAUSE", default=2.0, minimum=0, maximum=10),
         history_file=history_file,
         personality_file=Path(_get_str("PERSONALITY_FILE", default="personality_prompt.txt")),
         memory=memory_raw == "on",

@@ -8,7 +8,7 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 
 ### Conversation
 
-- **Salon dédié** : le bot répond à tous les messages du salon choisi (`CHANNEL_ID`). Il se souvient des derniers échanges, même après un redémarrage. Il attend environ 2 secondes avant de répondre : les messages envoyés à la suite, ou pendant qu'il écrit, reçoivent une seule réponse groupée, comme le ferait quelqu'un qui lit plusieurs messages d'un coup ; s'ils sont trop lourds ensemble (images, PDF ou fichiers texte), il y répond en plusieurs fois, chaque réponse citant son message. Si un appel échoue, chaque auteur concerné en est prévenu.
+- **Salon dédié** : le bot répond à tous les messages du salon choisi (`CHANNEL_ID`). Il se souvient des derniers échanges, même après un redémarrage. Il attend environ 2 secondes avant de répondre (`REPLY_PAUSE`) : les messages envoyés à la suite, ou pendant qu'il écrit, reçoivent une seule réponse groupée, comme le ferait quelqu'un qui lit plusieurs messages d'un coup ; s'ils sont trop lourds ensemble (images, PDF ou fichiers texte), il y répond en plusieurs fois, chaque réponse citant son message. Si un appel échoue, chaque auteur concerné en est prévenu.
 - **Mentions ailleurs** : dans les autres salons, il répond quand on le mentionne, en lisant les derniers messages pour comprendre la discussion (sans mémoire d'un appel à l'autre). Comme dans son salon, les mentions reçues dans un salon pendant qu'il écrit reçoivent une seule réponse groupée.
 - **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et ses images. Il lit aussi les messages transférés dans son salon.
 - **Messages modifiés ou supprimés** : sa mémoire suit. Un message supprimé est oublié, un message modifié prend son nouveau texte.
@@ -107,6 +107,7 @@ Tous les réglages se trouvent dans le `.env`, et chacun est expliqué dans `.en
 | `MAX_TOKENS` | Longueur maximale d'une réponse (réflexion et notes de mémoire comprises), en tokens ; ne coûte que si elle est atteinte. Avec la mémoire, de quoi réécrire un fichier plein après la réflexion (voir `.env.exemple`) : le bot refuse de démarrer sous le minimum, et prévient dans le message « En ligne » si la réflexion risque de ne pas tenir | `6000` |
 | `MAX_HISTORY_LENGTH` | Messages gardés en mémoire dans le salon dédié (jusqu'à la moitié de plus avant d'y revenir d'un coup, ce qui garde la mémoire en cache) | `10` |
 | `CONTEXT_MESSAGE_LIMIT` | Messages lus autour d'une mention (100 au plus) | `20` |
+| `REPLY_PAUSE` | Secondes d'attente avant de répondre dans le salon dédié, de 0 à 10, pour regrouper les messages envoyés à la suite | `2` |
 | `API_TIMEOUT` | Attente maximale d'une réponse, en secondes, relances comprises (une requête trop lente n'est pas relancée) ; le bot prévient au démarrage s'il est trop court pour `MAX_TOKENS` | `90` |
 | `WEB_SEARCH` | Recherche web et lecture de liens (`on` ou `off`) ; prévois alors 40 secondes de plus pour `API_TIMEOUT` (`120` avec `MAX_TOKENS=6000`) | `off` |
 | `PRESENCE` | Statut Discord et absences (`on` ou `off`) ; les `PRESENCE_*` règlent les chances de chaque statut et la nuit | `on` |
