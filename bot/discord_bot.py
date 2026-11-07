@@ -210,6 +210,8 @@ class ChatBot(commands.Bot):
         # Messages en attente, gardés sur le disque pour y répondre même après un redémarrage.
         self._waiting_file = settings.history_file.with_name("waiting_messages.json")
         self._waiting: set[tuple[int, int]] = set()  # (salon, message)
+        self._replayed: set[tuple[int, int]] = set()  # messages repris au démarrage (voir remember_queued)
+        self._stopping = False  # arrêt du bot en cours (voir forget_waiting)
         self._last_main_message: datetime | None = None  # date du dernier message reçu dans le salon dédié
         # Empreinte des commandes slash envoyées à Discord (voir sync_commands).
         self._commands_file = settings.history_file.with_name("slash_commands.sha256")
@@ -343,6 +345,7 @@ class ChatBot(commands.Bot):
             logger.error("Impossible d'envoyer le message de démarrage : %s", exc)
 
     async def close(self) -> None:
+        self._stopping = True  # voir forget_waiting
         if self.presence:
             self.presence.stop()
         for task in self._waiters.values():
@@ -486,6 +489,7 @@ class ChatBot(commands.Bot):
         # ou refusé, c'est lui qui lance leur réponse, quoi qu'il arrive.
         channel_id = message.channel.id
         arrival = asyncio.get_running_loop().time()
+        self.remember_queued(message)
         self._preparing.setdefault(channel_id, set()).add(message.id)
         pending = None
         try:
@@ -497,6 +501,7 @@ class ChatBot(commands.Bot):
             self._preparing[channel_id].discard(message.id)
         if pending is None:
             self.held_files.release(message.id)
+            self.forget_waiting(message)
             if not self._pending.get(channel_id):
                 return
         else:
@@ -555,49 +560,54 @@ class ChatBot(commands.Bot):
         split = False  # réponse découpée : chaque morceau cite son dernier message
         # Jusqu'au dernier message : une réponse différée est la seule tâche pour tous ceux de son attente.
         while True:
-            async with self.history.lock(channel.id):
-                # Tous les messages attendent ceux encore en préparation : sinon le bot répondrait à « tu en
-                # penses quoi ? » sans avoir vu l'image envoyée avec. Le message en préparation relancera la réponse.
-                if not pending or self._preparing.get(channel.id):
-                    return
-                pending.sort(key=lambda p: p.message.id)
-                count = fit_in_request([p.images for p in pending], [p.user_text for p in pending])
-                if count < len(pending):
-                    split = True
-                    logger.info("Messages trop lourds pour une seule réponse dans #%s : %s message(s) sur %s "
-                                "d'abord, les autres ensuite.", channel, count, len(pending))
-                batch = pending[:count]
-                del pending[:count]
-                try:  # ces messages ont quitté la file : le finally les retire de l'attente, quoi qu'il arrive
-                    last = batch[-1].message
-                    if len(batch) > 1:
-                        logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
-                    # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
-                    parts = [(p.user_text, p.images) for p in batch]
-                    lines = [p.line for p in batch]
-                    notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
-                    if note := self.presence_note():
-                        notes.append(note)
-                    for note in reversed(notes):
-                        parts.insert(0, (note, []))
-                        lines.insert(0, {"content": note})
-                    async with typing(channel):
-                        try:
-                            notes = await self.member_notes([p.message for p in batch])
-                            answer = await self.claude.ask(self.history.get(channel.id), parts,
-                                                           emojis=emoji_names(last.guild), member_notes=notes)
-                        except ClaudeError as exc:
-                            await warn_authors(self.safe_reply, [p.message for p in batch], exc.user_message)
-                            continue
-                        except Exception:
-                            logger.exception("Erreur inattendue pendant le traitement d'un message")
-                            await warn_authors(self.safe_reply, [p.message for p in batch], UNEXPECTED_ERROR)
-                            continue
-                finally:
+            batch: list[PendingMessage] = []
+            try:
+                async with self.history.lock(channel.id):
+                    # Tous les messages attendent ceux encore en préparation : sinon le bot répondrait à « tu en
+                    # penses quoi ? » sans avoir vu l'image envoyée avec. Le message en préparation relancera la
+                    # réponse.
+                    if not pending or self._preparing.get(channel.id):
+                        return
+                    pending.sort(key=lambda p: p.message.id)
+                    count = fit_in_request([p.images for p in pending], [p.user_text for p in pending])
+                    if count < len(pending):
+                        split = True
+                        logger.info("Messages trop lourds pour une seule réponse dans #%s : %s message(s) sur %s "
+                                    "d'abord, les autres ensuite.", channel, count, len(pending))
+                    batch = pending[:count]
+                    del pending[:count]
+                    try:  # ces messages ont quitté la file : le finally libère leur place, quoi qu'il arrive
+                        last = batch[-1].message
+                        if len(batch) > 1:
+                            logger.info("%s messages regroupés en une seule réponse dans #%s", len(batch), channel)
+                        # Le statut en cours est aussi gardé en mémoire, comme le reste du message.
+                        parts = [(p.user_text, p.images) for p in batch]
+                        lines = [p.line for p in batch]
+                        notes = [self.presence.late_note(late, several=len(batch) > 1)] if late else []
+                        if note := self.presence_note():
+                            notes.append(note)
+                        for note in reversed(notes):
+                            parts.insert(0, (note, []))
+                            lines.insert(0, {"content": note})
+                        async with typing(channel):
+                            try:
+                                notes = await self.member_notes([p.message for p in batch])
+                                answer = await self.claude.ask(self.history.get(channel.id), parts,
+                                                               emojis=emoji_names(last.guild), member_notes=notes)
+                            except ClaudeError as exc:
+                                await warn_authors(self.safe_reply, [p.message for p in batch], exc.user_message)
+                                continue
+                            except Exception:
+                                logger.exception("Erreur inattendue pendant le traitement d'un message")
+                                await warn_authors(self.safe_reply, [p.message for p in batch], UNEXPECTED_ERROR)
+                                continue
+                    finally:
+                        self.held_files.release(*(p.message.id for p in batch))
+                    await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
+                await self.send_answer(last, answer.text, reply=split)
+            finally:
+                if batch:
                     self.forget_waiting(*(p.message for p in batch))
-                    self.held_files.release(*(p.message.id for p in batch))
-                await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
-            await self.send_answer(last, answer.text, reply=split)
 
     async def handle_mention(self, message: discord.Message) -> None:
         # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
@@ -607,6 +617,7 @@ class ChatBot(commands.Bot):
             logger.warning("Trop de fichiers en attente : mention %s de %s refusée.", message.id, message.author)
             await self.safe_reply(message, FILES_QUEUE_FULL)
             return
+        self.remember_queued(message)
         self._mentions.setdefault(message.channel.id, []).append(message)
         if not self.available() or message.channel.id in self._waiters:
             self.answer_later(message, self.answer_mentions)
@@ -801,7 +812,15 @@ class ChatBot(commands.Bot):
         self._waiting.add((message.channel.id, message.id))
         self._save_waiting()
 
+    def remember_queued(self, message: discord.Message) -> None:
+        """Message en cours de traitement : gardé sur le disque jusqu'à sa réponse, pour un redémarrage. Sauf s'il
+        est repris au démarrage : s'il faisait tomber le bot (image énorme…), il recommencerait à chaque reprise."""
+        if (message.channel.id, message.id) not in self._replayed:
+            self.remember_waiting(message)
+
     def forget_waiting(self, *messages: discord.Message) -> None:
+        if self._stopping:
+            return  # arrêt du bot : sa réponse en cours est coupée, le message sera repris au redémarrage
         keys = {(m.channel.id, m.id) for m in messages}
         if keys & self._waiting:
             self._waiting -= keys
@@ -834,6 +853,7 @@ class ChatBot(commands.Bot):
             except discord.HTTPException:
                 pass  # message supprimé, salon inaccessible…
         self._waiting -= keys  # pas les messages arrivés pendant les téléchargements, toujours en attente
+        self._replayed |= keys  # un seul essai pour ceux-là (voir remember_queued)
         self._save_waiting()
         if messages:
             logger.info("%d message(s) resté(s) sans réponse avant le redémarrage : reprise.", len(messages))

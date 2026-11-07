@@ -28,7 +28,7 @@ Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a 
 ### Vie sur le serveur
 
 - **Statut Discord** (`PRESENCE=on`) : sous son pseudo, le bot regarde quelques épisodes d'un anime (top 500 d'AniList), écoute quelques morceaux (tops Deezer), joue à un jeu de la boutique Steam, affiche une pensée du moment, ou passe absent ou en « Ne pas déranger » avec une raison qu'il écrit lui-même. Pour varier, un type de statut ne revient pas avant au moins deux autres. Il dort la nuit (`PRESENCE_NIGHT`) et sait ce qu'il est en train de faire quand on lui en parle. Après un redémarrage, il reprend son statut là où il en serait s'il ne s'était pas arrêté.
-- **Absences** : absent, il ne répond qu'à son retour ; en « Ne pas déranger », au bout de 5 à 15 minutes. S'il s'en va en pleine conversation, il prévient d'abord son salon. Les messages en attente sont gardés même après un redémarrage. Au-delà de 200 Mo de fichiers en attente, un nouveau message avec fichier est refusé, et son auteur est invité à le renvoyer plus tard.
+- **Absences** : absent, il ne répond qu'à son retour ; en « Ne pas déranger », au bout de 5 à 15 minutes. S'il s'en va en pleine conversation, il prévient d'abord son salon. Les messages en attente ou en cours de réponse sont gardés même après un redémarrage, avec un seul nouvel essai au démarrage. Au-delà de 200 Mo de fichiers en attente, un nouveau message avec fichier est refusé, et son auteur est invité à le renvoyer plus tard.
 - **Emojis du serveur** : le bot connaît automatiquement tous les emojis du serveur, animés compris, et peut les utiliser dans ses réponses. Un emoji ajouté ou retiré est pris en compte tout de suite.
 - **Stickers et emojis seuls** : à un sticker seul, il répond par un sticker du serveur ; à un emoji seul, par un emoji du serveur.
 
@@ -164,7 +164,7 @@ Le fichier `bot.log` (`LOG_FILE`) garde l'activité du bot, avec pour chaque app
 | Fichier | Contenu |
 | --- | --- |
 | `conversation_history.json` | Mémoire de chaque salon. Si le fichier est illisible, il est mis de côté sous un nom daté, jamais écrasé |
-| `waiting_messages.json` | Messages reçus pendant une absence, qui attendent leur réponse |
+| `waiting_messages.json` | Messages qui attendent leur réponse, repris après un redémarrage |
 | `presence_sources.json` | Listes d'animes, de musiques et de jeux, mises à jour une fois par jour |
 | `presence_state.json` | Statut Discord en cours, repris après un redémarrage |
 | `slash_commands.sha256` | Empreinte des commandes slash, pour ne les envoyer à Discord que quand elles changent |

@@ -41,6 +41,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 - **Les boutons de `/memoire` n'affichent plus « Échec de l'interaction » alors que c'est fait.** Effacer, désactiver ou activer la mémoire pouvait dépasser le délai de Discord sur un disque lent. Le bot répond maintenant à Discord avant d'écrire. Rien à régler.
 
+- **Un redémarrage ne perd plus les messages en cours de réponse.** Ils sont repris au démarrage, dans le salon dédié comme pour les mentions, avec un seul nouvel essai pour qu'un message problématique ne bloque pas le bot. Rien à régler.
+
 ---
 
 ## Version 5.13
