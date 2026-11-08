@@ -161,7 +161,18 @@ class ClaudeClient:
                 content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
                 history_marker = False  # marqueur déjà placé, avant les fiches
             content.append({"type": "text", "text": member_notes})
-        messages = list(history) + [{"role": "user", "content": content}]
+        messages = list(history)
+        if cache_history and messages:
+            # Repère sur la fin de l'historique, en plus de celui du nouveau message : celui-ci n'est pas
+            # enregistré tel qu'il est envoyé quand il contient une image, un GIF ou un fichier (remplacés
+            # par un repère dans la mémoire). Sans ce second repère, le message suivant ne retrouverait
+            # en cache que le prompt système, après une coupe de la mémoire ou une pause.
+            last = messages[-1]
+            blocks = ([{"type": "text", "text": last["content"]}] if isinstance(last["content"], str)
+                      else list(last["content"]))
+            blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+            messages[-1] = {**last, "content": blocks}
+        messages.append({"role": "user", "content": content})
         attachments = {("pdf" if image.is_pdf else "image") for _, images in parts for image in images}
 
         system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
@@ -187,9 +198,10 @@ class ClaudeClient:
 
         # Cache de prompt : les outils et la personnalité, identiques d'un message à l'autre, sont
         # relus depuis le cache à 10 % du prix, 5 % sur Opus 5.5 (pendant 5 minutes, prolongées à chaque message).
-        # Le marqueur sur "system" couvre ce bloc fixe ; celui de premier niveau (ou celui placé avant
-        # les fiches) couvre en plus l'historique, qui change à chaque message mais reprend le début
-        # de la requête précédente.
+        # Le marqueur sur "system" couvre ce bloc fixe ; celui de la fin de l'historique et celui de premier
+        # niveau (ou celui placé avant les fiches) couvrent en plus l'historique, qui change à chaque message
+        # mais reprend le début de la requête précédente. Trois repères sur les quatre permis par l'API ;
+        # chaque token n'est écrit qu'une fois, quel que soit le nombre de repères.
         # Une écriture en cache coûte 25 % de plus : inutile si elle ne sera jamais relue.
         params: dict = {
             "model": self.settings.model,

@@ -8,6 +8,10 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.16
 
+### Changements
+
+- **Rika coûte moins cher dans une conversation animée.**
+
 ### Corrections
 
 - **Rika voit aussi les GIF envoyés depuis les favoris et les images partagées par un lien Discord**, au lieu de dire qu'elle n'en voit que le lien.
