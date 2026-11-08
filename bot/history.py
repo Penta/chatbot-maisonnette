@@ -77,7 +77,7 @@ class ConversationHistory:
         self.limit = 3 * max_length
         self.clock = time.monotonic
         self._data: dict[str, list[dict]] = self._load()
-        self._last_exchange: dict[str, float] = {}  # salon : heure (clock) du dernier échange
+        self._last_sent: dict[str, float] = {}  # salon : heure (clock) du dernier envoi de la mémoire à Claude
         self._locks: dict[str, asyncio.Lock] = {}
         self._save_lock = asyncio.Lock()
 
@@ -95,11 +95,14 @@ class ConversationHistory:
         envoyer à Claude.
 
         Après une pause qui a vidé le cache de prompt, la mémoire revient d'abord à max_length messages :
-        elle sera réécrite en cache en entier de toute façon, autant qu'elle soit courte."""
+        elle sera réécrite en cache en entier de toute façon, autant qu'elle soit courte. Le cache démarre
+        quand la question part chez Claude : c'est donc ici que l'heure est notée, pas à la réponse."""
         key = str(channel_id)
-        last = self._last_exchange.get(key)
-        if key in self._data and (last is None or self.clock() - last > CACHE_LIFETIME):
+        now = self.clock()
+        last = self._last_sent.get(key)
+        if key in self._data and (last is None or now - last > CACHE_LIFETIME):
             self._data[key] = self._cut(self._data[key])
+        self._last_sent[key] = now
         return [self._render(m) for m in self._data.get(key, [])]
 
     async def add_exchange(self, channel_id: int | str, lines: list[dict], assistant_text: str,
@@ -113,7 +116,6 @@ class ConversationHistory:
         messages.append(user)
         messages.append({"role": "assistant", "content": assistant_text})
         self._data[key] = self._trim(messages)
-        self._last_exchange[key] = self.clock()
         await self._save()
 
     async def reset(self, channel_id: int | str) -> None:

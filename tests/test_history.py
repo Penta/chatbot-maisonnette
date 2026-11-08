@@ -117,6 +117,12 @@ class TrimTest(HistoryTestCase):
         history.clock = lambda: self.now
         return history
 
+    async def exchanges(self, history: ConversationHistory, count: int, start: int = 0) -> None:
+        # Comme le bot : la mémoire est lue pour l'envoyer à Claude, puis l'échange est enregistré.
+        for i in range(start, start + count):
+            history.get(CHANNEL)
+            await history.add_exchange(CHANNEL, [line(i, f"question {i}")], f"réponse {i}")
+
     async def test_grows_then_cut_back(self):
         history = self.load(max_length=10)
         await self.exchanges(history, 15)
@@ -137,13 +143,23 @@ class TrimTest(HistoryTestCase):
         await self.exchanges(history, 7)
         self.now += 4 * 60
         self.assertEqual(len(history.get(CHANNEL)), 14)  # cache encore valable : rien ne bouge
-        self.now += 2 * 60
+        self.now += 5 * 60 + 1
         messages = history.get(CHANNEL)
         self.assertEqual(len(messages), 10)
         self.assertEqual(messages[0], {"role": "user", "content": said("question 2")})
         # La coupe est gardée : la réponse suivante l'enregistre.
         await self.exchanges(history, 1, start=7)
         self.assertEqual(len(self.load(max_length=10)._data[str(CHANNEL)]), 12)
+
+    async def test_pause_counted_from_the_question(self):
+        # Le cache démarre quand la question part chez Claude, pas quand la réponse arrive.
+        history = self.load(max_length=10)
+        await self.exchanges(history, 6)
+        history.get(CHANNEL)  # question envoyée…
+        self.now += 40
+        await history.add_exchange(CHANNEL, [line(6, "question 6")], "réponse 6")  # … réponse 40 s plus tard
+        self.now += 4 * 60 + 30  # 5 min 10 après la question : le cache a expiré
+        self.assertEqual(len(history.get(CHANNEL)), 10)
 
     async def test_short_history_kept_after_a_pause(self):
         history = self.load(max_length=10)
