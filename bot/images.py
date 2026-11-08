@@ -29,7 +29,7 @@ Image.MAX_IMAGE_PIXELS = MAX_JPEG_PIXELS
 # Extensions reconnues comme images (pièces jointes, liens vers un fichier gardé par Discord).
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
 
-_DIRECT_FORMATS = {"JPEG":"image/jpeg", "PNG": "image/png", "GIF": "image/gif", "WEBP": "image/webp"}
+_DIRECT_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "GIF": "image/gif", "WEBP": "image/webp"}
 # Formats sans perte (captures d'écran, dessins…) : PNG essayé avant le JPEG.
 _LOSSLESS_FORMATS = {"PNG", "GIF", "BMP", "TIFF"}
 _PNG_MODES = ("L", "RGB")  # modes sans transparence enregistrables tels quels en PNG

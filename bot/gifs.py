@@ -1,8 +1,9 @@
 """GIF choisis dans le sélecteur de Discord (Klipy, Giphy…, ou les favoris du membre).
 
 Ils ne sont pas joints au message : Discord envoie un simple lien, puis l'affiche avec un aperçu (« embed »
-de type gifv, ou image pour un favori, dont le lien mène à une copie gardée par Discord). Claude ne lit pas les vidéos : d'un GIF animé, il reçoit quelques images prises du début à la
-fin de l'animation, assemblées en une grille, ce qui lui permet d'en suivre le déroulé.
+de type gifv, ou image pour un favori, dont le lien mène à une copie gardée par Discord). Claude ne lit pas
+les vidéos : d'un GIF animé, il reçoit quelques images prises du début à la fin de l'animation, assemblées en
+une grille, ce qui lui permet d'en suivre le déroulé.
 """
 
 from __future__ import annotations
@@ -37,8 +38,9 @@ DISCORD_PROXY_SUFFIX = ".discordapp.net"
 # favoris est un lien vers l'un d'eux, téléchargé tel quel (il garde l'animation, contrairement à proxy_url).
 # Rien ne le distingue d'une photo partagée par son lien : elle est lue aussi, présentée comme une image.
 DISCORD_SITES = ("discordapp.net", "discordapp.com")
-# Liens du sélecteur de GIF de Discord, et liens vers une image gardée par Discord. Leur aperçu peut arriver
-# juste après le message (voir ChatBot.read_gif) : il est attendu jusqu'à EMBED_WAIT secondes.
+# Liens du sélecteur de GIF de Discord. Leur aperçu peut arriver juste après le message (voir
+# ChatBot.read_gif) : il est attendu jusqu'à EMBED_WAIT secondes, comme celui d'un lien vers une image gardée
+# par Discord (DISCORD_SITES, voir looks_like_gif_link).
 GIF_SITES = ("klipy.com", "giphy.com", "tenor.com")
 EMBED_WAIT = 3.0
 
