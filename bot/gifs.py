@@ -1,7 +1,7 @@
-"""GIF choisis dans le sélecteur de Discord (Klipy, Giphy…).
+"""GIF choisis dans le sélecteur de Discord (Klipy, Giphy…, ou les favoris du membre).
 
 Ils ne sont pas joints au message : Discord envoie un simple lien, puis l'affiche avec un aperçu (« embed »
-de type gifv). Claude ne lit pas les vidéos : d'un GIF animé, il reçoit quelques images prises du début à la
+de type gifv, ou image pour un favori, dont le lien mène à une copie gardée par Discord). Claude ne lit pas les vidéos : d'un GIF animé, il reçoit quelques images prises du début à la
 fin de l'animation, assemblées en une grille, ce qui lui permet d'en suivre le déroulé.
 """
 
@@ -33,15 +33,13 @@ DOWNLOAD_TIMEOUT = 30
 # la première image, mais elle seule est prise ailleurs : le bot ne télécharge rien depuis un site inconnu.
 ANIMATED_HOSTS = {"static.klipy.com"}
 DISCORD_PROXY_SUFFIX = ".discordapp.net"
+# Serveurs de Discord (media.discordapp.net, images-ext-1.discordapp.net, cdn.discordapp.com) : un GIF des
+# favoris est un lien vers l'un d'eux, téléchargé tel quel (il garde l'animation, contrairement à proxy_url).
+DISCORD_SITES = ("discordapp.net", "discordapp.com")
 # Liens du sélecteur de GIF de Discord. Leur aperçu peut arriver juste après le message (voir
 # ChatBot.read_gif) : il est attendu jusqu'à EMBED_WAIT secondes.
-GIF_SITES = ("klipy.com", "giphy.com", "tenor.com")
+GIF_SITES = ("klipy.com", "giphy.com", "tenor.com") + DISCORD_SITES
 EMBED_WAIT = 3.0
-
-
-def gif_embed(embeds: list[discord.Embed]) -> discord.Embed | None:
-    """Aperçu d'un GIF du sélecteur de Discord parmi ceux du message, ou None."""
-    return next((embed for embed in embeds if embed.type == "gifv"), None)
 
 
 def _host(url: str | None) -> str | None:
@@ -51,16 +49,29 @@ def _host(url: str | None) -> str | None:
     return parts.hostname if parts.scheme == "https" else None
 
 
+def _on(url: str | None, sites: tuple[str, ...]) -> bool:
+    """L'adresse est en https sur l'un de ces sites (ou l'un de leurs sous-domaines)."""
+    host = _host(url)
+    return bool(host) and any(host == site or host.endswith("." + site) for site in sites)
+
+
+def gif_embed(embeds: list[discord.Embed]) -> discord.Embed | None:
+    """Aperçu d'un GIF du sélecteur de Discord parmi ceux du message, ou None. Une image n'en est un que si
+    elle est gardée par Discord (GIF des favoris) : celle d'un autre site n'est pas lue."""
+    return next((embed for embed in embeds
+                 if embed.type == "gifv" or (embed.type == "image" and _on(embed.url, DISCORD_SITES))), None)
+
+
 def looks_like_gif_link(content: str) -> bool:
     """Message fait d'un seul lien vers un site de GIF (celui qu'envoie le sélecteur de Discord)."""
     words = content.split()
-    host = _host(words[0]) if len(words) == 1 else None
-    return bool(host) and any(host == site or host.endswith("." + site) for site in GIF_SITES)
+    return len(words) == 1 and _on(words[0], GIF_SITES)
 
 
 def gif_source(embed: discord.Embed) -> str | None:
-    """Adresse de l'image du GIF à télécharger : animée chez Klipy, sinon la copie fixe gardée par Discord."""
-    if _host(embed.thumbnail.url) in ANIMATED_HOSTS:
+    """Adresse de l'image du GIF à télécharger : animée chez Klipy ou chez Discord (favoris), sinon la copie
+    fixe gardée par Discord."""
+    if _host(embed.thumbnail.url) in ANIMATED_HOSTS or _on(embed.thumbnail.url, DISCORD_SITES):
         return embed.thumbnail.url
     proxy = embed.thumbnail.proxy_url
     host = _host(proxy)

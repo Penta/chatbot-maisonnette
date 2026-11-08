@@ -15,7 +15,7 @@ from PIL import Image
 from bot import gifs
 from bot.attachments import AttachmentReader
 from bot.discord_bot import ChatBot
-from bot.gifs import GIF_FRAMES, download_gif, gif_source, prepare_gif
+from bot.gifs import GIF_FRAMES, download_gif, gif_embed, gif_source, looks_like_gif_link, prepare_gif
 from bot.images import ImageError
 
 KLIPY_LINK = "https://klipy.com/gifs/no-no-no-dont-do-that-1"
@@ -43,6 +43,22 @@ GIPHY_EMBED = {
                      "giphy_s.gif",
     },
     "video": {"url": "https://i.giphy.com/media/vNTIkYpoAUb22FhsVr/giphy.mp4"},
+}
+# GIF des favoris de Discord : un lien vers un fichier gardé par Discord, avec un aperçu de type image.
+FAVORITE_LINK = ("https://media.discordapp.net/attachments/411225883865513985/841065460211777576/pentadoigt.gif"
+                 "?ex=6af1937f&is=6af041ff&hm=4f45c400d017a553ce3c9680260bd2b53863895185e6b4726c9d2a0470317962&")
+FAVORITE_EMBED = {
+    "type": "image",
+    "url": FAVORITE_LINK,
+    "thumbnail": {"url": FAVORITE_LINK, "proxy_url": FAVORITE_LINK, "width": 220, "height": 220},
+}
+TWEET_LINK = ("https://images-ext-1.discordapp.net/external/p2s2drywF0YN0p8Xum_7g2WeBHc0kp2UObSJ5zGJiag/https/"
+              "gif.fxtwitter.com/tweet_video/HSM1wNAXYAAzOPT.webp?animated=true&width=495&height=541")
+TWEET_EMBED = {
+    "type": "image",
+    "url": TWEET_LINK,
+    "thumbnail": {"url": TWEET_LINK, "proxy_url": TWEET_LINK.replace("animated=true&", ""), "width": 495,
+                  "height": 541},
 }
 
 
@@ -76,6 +92,27 @@ class GifSourceTest(unittest.TestCase):
         self.assertIsNone(gif_source(embed(data)))
         data["thumbnail"]["url"] = "http://static.klipy.com/a.webp"  # sans https
         self.assertIsNone(gif_source(embed(data)))
+
+    def test_favorite_downloaded_from_its_own_link(self):
+        # Le lien lui-même, gardé par Discord : il garde l'animation (animated=true).
+        self.assertEqual(gif_source(embed(FAVORITE_EMBED)), FAVORITE_LINK)
+        self.assertEqual(gif_source(embed(TWEET_EMBED)), TWEET_LINK)
+
+
+class GifEmbedTest(unittest.TestCase):
+    def test_favorites_recognized(self):
+        for data in (FAVORITE_EMBED, TWEET_EMBED):
+            with self.subTest(url=data["url"]):
+                self.assertIsNotNone(gif_embed([embed(data)]))
+                self.assertTrue(looks_like_gif_link(data["url"]))
+
+    def test_image_from_other_site_ignored(self):
+        # Une image d'un autre site n'est pas un GIF du sélecteur : elle n'est pas lue.
+        data = {"type": "image", "url": "https://exemple.org/chat.gif",
+                "thumbnail": {"url": "https://exemple.org/chat.gif",
+                              "proxy_url": "https://images-ext-1.discordapp.net/external/x/https/exemple.org/chat.gif"}}
+        self.assertIsNone(gif_embed([embed(data)]))
+        self.assertFalse(looks_like_gif_link("https://exemple.org/chat.gif"))
 
 
 class PrepareGifTest(unittest.TestCase):
@@ -204,6 +241,22 @@ class ReadGifTest(unittest.IsolatedAsyncioTestCase):
                          ["[GIF « No No No Don'T Do That » : tu l'as vu à ce moment-là, mais il n'est plus "
                           "conservé en mémoire]"])
         self.bot.read_reply.assert_awaited_once_with(message, want_images=False)
+
+    async def test_claude_sees_favorite_gif(self):
+        # GIF des favoris : son aperçu arrive aussi après le message, et il est attendu.
+        message = self.message([])
+        message.content = message.clean_content = FAVORITE_LINK
+
+        async def preview_arrives():
+            await asyncio.sleep(0.3)
+            message.embeds = [embed(FAVORITE_EMBED)]
+        arrival = asyncio.create_task(preview_arrives())
+        with mock.patch("bot.attachments.download_gif", self.download):
+            pending = await ChatBot.read_main_message(self.bot, message, FAVORITE_LINK)
+        await arrival
+        self.assertEqual(self.downloaded, [FAVORITE_LINK])
+        self.assertEqual(len(pending.images), 1)
+        self.assertIn("6 moments de l'animation", pending.user_text)
 
     async def test_unreadable_gif_message_still_read(self):
         message = self.message([embed(KLIPY_EMBED)])
