@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from .files import write_atomic
 logger = logging.getLogger("chatbot.history")
 
 FILE_VERSION = 3
+
+# Durée de vie du cache de prompt sans nouveau message (en secondes).
+CACHE_LIFETIME = 5 * 60
 
 # Remplace une image dans la mémoire (les images elles-mêmes ne sont pas conservées).
 IMAGE_MARKER = "[image jointe : tu l'as vue et analysée à ce moment-là, mais elle n'est plus conservée en mémoire]"
@@ -69,9 +73,11 @@ class ConversationHistory:
     def __init__(self, file_path: Path, max_length: int):
         self.file_path = file_path
         self.max_length = max_length
-        # Marge au-delà de max_length avant de couper (voir _trim) : la moitié, en échanges entiers.
-        self.margin = max(2, max_length // 4 * 2)
+        # Taille au-delà de laquelle la mémoire revient à max_length, quand les messages s'enchaînent (voir _trim).
+        self.limit = 3 * max_length
+        self.clock = time.monotonic
         self._data: dict[str, list[dict]] = self._load()
+        self._last_exchange: dict[str, float] = {}  # salon : heure (clock) du dernier échange
         self._locks: dict[str, asyncio.Lock] = {}
         self._save_lock = asyncio.Lock()
 
@@ -85,8 +91,16 @@ class ConversationHistory:
         return self._locks[key]
 
     def get(self, channel_id: int | str) -> list[dict]:
-        """Renvoie les messages mémorisés pour ce salon, au format de l'API d'Anthropic."""
-        return [self._render(m) for m in self._data.get(str(channel_id), [])]
+        """Renvoie les messages mémorisés pour ce salon, au format de l'API d'Anthropic, juste avant de les
+        envoyer à Claude.
+
+        Après une pause qui a vidé le cache de prompt, la mémoire revient d'abord à max_length messages :
+        elle sera réécrite en cache en entier de toute façon, autant qu'elle soit courte."""
+        key = str(channel_id)
+        last = self._last_exchange.get(key)
+        if key in self._data and (last is None or self.clock() - last > CACHE_LIFETIME):
+            self._data[key] = self._cut(self._data[key])
+        return [self._render(m) for m in self._data.get(key, [])]
 
     async def add_exchange(self, channel_id: int | str, lines: list[dict], assistant_text: str,
                            web_used: bool = False) -> None:
@@ -99,6 +113,7 @@ class ConversationHistory:
         messages.append(user)
         messages.append({"role": "assistant", "content": assistant_text})
         self._data[key] = self._trim(messages)
+        self._last_exchange[key] = self.clock()
         await self._save()
 
     async def reset(self, channel_id: int | str) -> None:
@@ -169,13 +184,19 @@ class ConversationHistory:
     def _trim(self, messages: list[dict]) -> list[dict]:
         """Garde au moins les N derniers messages, en commençant toujours par un message utilisateur.
 
-        La mémoire est coupée par blocs : elle grandit jusqu'à N + marge messages, puis revient à N
-        d'un coup. Entre deux coupes, son début ne change pas et reste dans le cache de prompt ;
-        couper un échange à chaque message obligerait à réécrire tout l'historique en cache."""
-        if len(messages) <= self.max_length + self.margin:
-            trimmed = messages
-        else:
-            trimmed = messages[-self.max_length:]
+        La mémoire est coupée par blocs : elle grandit jusqu'à 3 × N messages, puis revient à N d'un coup.
+        Chaque coupe change le début de la conversation et oblige à réécrire tout l'historique en cache,
+        ce qui coûte bien plus cher que d'en relire une partie plus longue (25 fois plus sur Opus 5.5).
+        Après une pause, get() la ramène à N sans attendre."""
+        return self._cut(messages) if len(messages) > self.limit else self._from_user(messages)
+
+    def _cut(self, messages: list[dict]) -> list[dict]:
+        """Les N derniers messages, en commençant par un message utilisateur."""
+        return self._from_user(messages[-self.max_length:])
+
+    @staticmethod
+    def _from_user(messages: list[dict]) -> list[dict]:
+        trimmed = messages
         while trimmed and trimmed[0]["role"] != "user":
             trimmed = trimmed[1:]
         return trimmed

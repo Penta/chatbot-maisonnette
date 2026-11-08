@@ -105,33 +105,63 @@ class ExchangeTest(HistoryTestCase):
 
 
 class TrimTest(HistoryTestCase):
-    """MAX_HISTORY_LENGTH : au moins N messages gardés, jusqu'à la moitié de plus avant d'y revenir d'un coup."""
+    """MAX_HISTORY_LENGTH : au moins N messages gardés. Sans pause, la mémoire grandit jusqu'à 3 × N avant
+    de revenir à N d'un coup ; après une pause qui a vidé le cache de prompt, elle revient à N tout de suite."""
+
+    def setUp(self):
+        super().setUp()
+        self.now = 1000.0
+
+    def load(self, max_length: int = 10) -> ConversationHistory:
+        history = super().load(max_length)
+        history.clock = lambda: self.now
+        return history
 
     async def test_grows_then_cut_back(self):
-        history = self.load(max_length=10)  # marge de 4 messages (la moitié, en échanges entiers)
-        await self.exchanges(history, 7)
+        history = self.load(max_length=10)
+        await self.exchanges(history, 15)
         messages = history.get(CHANNEL)
-        self.assertEqual(len(messages), 14)
+        self.assertEqual(len(messages), 30)
         self.assertEqual(messages[0]["content"], said("question 0"))  # le début n'a pas bougé
 
-        await self.exchanges(history, 1, start=7)
+        await self.exchanges(history, 1, start=15)
         messages = history.get(CHANNEL)
         self.assertEqual(len(messages), 10)
-        self.assertEqual(messages[0], {"role": "user", "content": said("question 3")})
-        self.assertEqual(messages[-1], {"role": "assistant", "content": "réponse 7"})
+        self.assertEqual(messages[0], {"role": "user", "content": said("question 11")})
+        self.assertEqual(messages[-1], {"role": "assistant", "content": "réponse 15"})
 
-    async def test_margin_for_each_length(self):
-        # La marge est la moitié de N, arrondie à un nombre pair de messages, et au moins un échange.
-        for max_length, margin in ((2, 2), (4, 2), (6, 2), (8, 4), (10, 4), (20, 10)):
+    async def test_cut_back_after_a_pause(self):
+        # Après 5 minutes sans message, le cache a expiré : tout l'historique sera réécrit de toute façon,
+        # autant le raccourcir à ce moment-là, sans rien coûter de plus.
+        history = self.load(max_length=10)
+        await self.exchanges(history, 7)
+        self.now += 4 * 60
+        self.assertEqual(len(history.get(CHANNEL)), 14)  # cache encore valable : rien ne bouge
+        self.now += 2 * 60
+        messages = history.get(CHANNEL)
+        self.assertEqual(len(messages), 10)
+        self.assertEqual(messages[0], {"role": "user", "content": said("question 2")})
+        # La coupe est gardée : la réponse suivante l'enregistre.
+        await self.exchanges(history, 1, start=7)
+        self.assertEqual(len(self.load(max_length=10)._data[str(CHANNEL)]), 12)
+
+    async def test_short_history_kept_after_a_pause(self):
+        history = self.load(max_length=10)
+        await self.exchanges(history, 3)
+        self.now += 60 * 60
+        self.assertEqual(len(history.get(CHANNEL)), 6)
+
+    async def test_limit_for_each_length(self):
+        for max_length in (2, 4, 10, 20):
             with self.subTest(max_length=max_length):
                 self.path.unlink(missing_ok=True)
                 history = self.load(max_length)
                 sizes = []
-                for i in range(3 * (max_length + margin)):
+                for i in range(4 * max_length):
                     await self.exchanges(history, 1, start=i)
                     sizes.append(len(history.get(CHANNEL)))
-                self.assertEqual(max(sizes), max_length + margin)
-                first_cut = sizes.index(max_length + margin) + 1
+                self.assertEqual(max(sizes), 3 * max_length)
+                first_cut = sizes.index(3 * max_length) + 1
                 self.assertEqual(sizes[first_cut], max_length)
                 self.assertGreaterEqual(min(sizes[first_cut:]), max_length)
 

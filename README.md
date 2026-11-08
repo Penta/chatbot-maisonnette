@@ -106,7 +106,7 @@ Tous les réglages se trouvent dans le `.env`, et chacun est expliqué dans `.en
 | `THINKING` | Réflexion avant de répondre : `on` (plus réfléchi, plus lent et plus cher) ou `off` (vide = `off`) | `on` |
 | `EFFORT` | Niveau d'effort : `low`, `medium`, `high`, `xhigh` ou `max` (`xhigh` et `max` nécessitent `THINKING=on`, sauf sur `claude-opus-5-5`) ; vide = valeur du modèle | `medium` |
 | `MAX_TOKENS` | Longueur maximale d'une réponse (réflexion et notes de mémoire comprises), en tokens ; ne coûte que si elle est atteinte. Avec la mémoire, de quoi réécrire un fichier plein après la réflexion (voir `.env.exemple`) : le bot refuse de démarrer sous le minimum, et prévient dans le message « En ligne » si la réflexion risque de ne pas tenir | `6000` |
-| `MAX_HISTORY_LENGTH` | Messages gardés en mémoire dans le salon dédié (jusqu'à la moitié de plus avant d'y revenir d'un coup, ce qui garde la mémoire en cache) | `10` |
+| `MAX_HISTORY_LENGTH` | Messages gardés en mémoire dans le salon dédié (jusqu'à 3 fois plus pendant une conversation suivie, avant d'y revenir d'un coup ou après 5 minutes de silence, ce qui garde la mémoire en cache) | `10` |
 | `CONTEXT_MESSAGE_LIMIT` | Messages lus autour d'une mention (100 au plus) | `20` |
 | `REPLY_PAUSE` | Secondes d'attente avant de répondre dans le salon dédié, de 0 à 10, pour regrouper les messages envoyés à la suite | `2` |
 | `API_TIMEOUT` | Attente maximale d'une réponse, en secondes, relances comprises (une requête trop lente n'est pas relancée) ; le bot prévient au démarrage s'il est trop court pour `MAX_TOKENS` | `90` |

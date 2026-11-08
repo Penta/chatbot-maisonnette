@@ -10,7 +10,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
-- **Rika coûte moins cher dans une conversation animée.**
+- **Rika coûte moins cher dans une conversation animée, et se souvient de plus de messages tant qu'elle ne s'arrête pas.** Sa mémoire monte jusqu'à 3 fois `MAX_HISTORY_LENGTH`, et revient à cette taille après 5 minutes de silence.
 
 ### Corrections
 
