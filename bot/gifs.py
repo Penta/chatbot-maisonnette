@@ -16,7 +16,7 @@ import aiohttp
 import discord
 from PIL import Image
 
-from .images import MAX_PIXELS, ImageError, prepare_image
+from .images import IMAGE_EXTENSIONS, MAX_PIXELS, ImageError, prepare_image
 from .media import ImageData
 
 logger = logging.getLogger("chatbot.discord")
@@ -35,10 +35,11 @@ ANIMATED_HOSTS = {"static.klipy.com"}
 DISCORD_PROXY_SUFFIX = ".discordapp.net"
 # Serveurs de Discord (media.discordapp.net, images-ext-1.discordapp.net, cdn.discordapp.com) : un GIF des
 # favoris est un lien vers l'un d'eux, téléchargé tel quel (il garde l'animation, contrairement à proxy_url).
+# Rien ne le distingue d'une photo partagée par son lien : elle est lue aussi, présentée comme une image.
 DISCORD_SITES = ("discordapp.net", "discordapp.com")
-# Liens du sélecteur de GIF de Discord. Leur aperçu peut arriver juste après le message (voir
-# ChatBot.read_gif) : il est attendu jusqu'à EMBED_WAIT secondes.
-GIF_SITES = ("klipy.com", "giphy.com", "tenor.com") + DISCORD_SITES
+# Liens du sélecteur de GIF de Discord, et liens vers une image gardée par Discord. Leur aperçu peut arriver
+# juste après le message (voir ChatBot.read_gif) : il est attendu jusqu'à EMBED_WAIT secondes.
+GIF_SITES = ("klipy.com", "giphy.com", "tenor.com")
 EMBED_WAIT = 3.0
 
 
@@ -63,9 +64,18 @@ def gif_embed(embeds: list[discord.Embed]) -> discord.Embed | None:
 
 
 def looks_like_gif_link(content: str) -> bool:
-    """Message fait d'un seul lien vers un site de GIF (celui qu'envoie le sélecteur de Discord)."""
+    """Message fait d'un seul lien vers un site de GIF ou vers une image gardée par Discord (celui qu'envoie le
+    sélecteur de Discord). Un autre fichier gardé par Discord (.zip…) n'aura pas d'aperçu : il n'est pas attendu."""
     words = content.split()
-    return len(words) == 1 and _on(words[0], GIF_SITES)
+    if len(words) != 1:
+        return False
+    url = words[0]
+    return _on(url, GIF_SITES) or (_on(url, DISCORD_SITES) and urlsplit(url).path.lower().endswith(IMAGE_EXTENSIONS))
+
+
+def from_picker(embed: discord.Embed) -> bool:
+    """GIF d'un site du sélecteur (Klipy, Giphy…), et non lien vers une image gardée par Discord."""
+    return embed.type == "gifv"
 
 
 def gif_source(embed: discord.Embed) -> str | None:
@@ -82,13 +92,17 @@ def gif_title(embed: discord.Embed) -> str | None:
     return (embed.title or "").strip() or None
 
 
-def gif_prompt(title: str | None, frames: int) -> str:
-    """Explication du GIF pour Claude, jointe au message (pas conservée en mémoire)."""
+def gif_prompt(title: str | None, frames: int, picker: bool) -> str:
+    """Explication du GIF pour Claude, jointe au message (pas conservée en mémoire). Une image fixe envoyée par
+    lien (photo partagée depuis Discord) est présentée comme une image, pas comme un GIF."""
     name = f"GIF « {title} »" if title else "GIF"
+    origin = "envoyé avec le sélecteur de Discord" if picker else "envoyé par lien"
     if frames > 1:
-        return (f"\n[{name} envoyé avec le sélecteur de Discord : l'image jointe montre {frames} moments de "
-                "l'animation, du début à la fin, à lire de gauche à droite puis de haut en bas]")
-    return f"\n[{name} envoyé avec le sélecteur de Discord : seule sa première image est jointe]"
+        return (f"\n[{name} {origin} : l'image jointe montre {frames} moments de l'animation, du début à la fin, "
+                "à lire de gauche à droite puis de haut en bas]")
+    if picker:
+        return f"\n[{name} {origin} : seule sa première image est jointe]"
+    return "\n[Image envoyée par lien : elle est jointe à ce message]"
 
 
 def gif_marker(title: str | None) -> str:

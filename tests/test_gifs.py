@@ -16,6 +16,7 @@ from bot import gifs
 from bot.attachments import AttachmentReader
 from bot.discord_bot import ChatBot
 from bot.gifs import GIF_FRAMES, download_gif, gif_embed, gif_source, looks_like_gif_link, prepare_gif
+from bot.history import IMAGE_MARKER
 from bot.images import ImageError
 
 KLIPY_LINK = "https://klipy.com/gifs/no-no-no-dont-do-that-1"
@@ -256,7 +257,25 @@ class ReadGifTest(unittest.IsolatedAsyncioTestCase):
         await arrival
         self.assertEqual(self.downloaded, [FAVORITE_LINK])
         self.assertEqual(len(pending.images), 1)
-        self.assertIn("6 moments de l'animation", pending.user_text)
+        self.assertIn("[GIF envoyé par lien : l'image jointe montre 6 moments de l'animation", pending.user_text)
+        self.assertEqual(pending.line["attachments"],
+                         ["[GIF : tu l'as vu à ce moment-là, mais il n'est plus conservé en mémoire]"])
+
+    async def test_photo_shared_by_link_not_called_gif(self):
+        # Une photo déjà postée sur Discord, partagée par son lien : Rika la voit, comme une image.
+        link = "https://cdn.discordapp.com/attachments/1/2/vacances.jpg"
+        content = f"regarde mes vacances {link}"
+        message = self.message([embed({"type": "image", "url": link,
+                                       "thumbnail": {"url": link, "proxy_url": link}})])
+        message.content = message.clean_content = content
+        buffer = io.BytesIO()
+        Image.new("RGB", (100, 100), "red").save(buffer, format="JPEG")
+        with mock.patch("bot.attachments.download_gif", mock.AsyncMock(return_value=buffer.getvalue())):
+            pending = await ChatBot.read_main_message(self.bot, message, content)
+        self.assertEqual(len(pending.images), 1)
+        self.assertIn("[Image envoyée par lien : elle est jointe à ce message]", pending.user_text)
+        self.assertNotIn("GIF", pending.user_text)
+        self.assertEqual(pending.line["attachments"], [IMAGE_MARKER])
 
     async def test_unreadable_gif_message_still_read(self):
         message = self.message([embed(KLIPY_EMBED)])
@@ -288,7 +307,9 @@ class ReadGifTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_ordinary_message_not_delayed(self):
         # Seul un lien de GIF attend son aperçu : un message ordinaire part sans attendre.
-        for content in ("coucou", "regarde https://klipy.com/gifs/chat", "https://exemple.org/chat.gif"):
+        # Un fichier gardé par Discord qui n'est pas une image n'aura pas d'aperçu : il n'est pas attendu non plus.
+        for content in ("coucou", "regarde https://klipy.com/gifs/chat", "https://exemple.org/chat.gif",
+                        "https://cdn.discordapp.com/attachments/1/2/archive.zip"):
             with self.subTest(content=content):
                 message = self.message([])
                 message.content = message.clean_content = content

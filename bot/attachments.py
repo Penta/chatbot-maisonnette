@@ -10,16 +10,15 @@ import discord
 
 from .config import Settings
 from .errors import UserFacingError
-from .gifs import download_gif, gif_embed, gif_marker, gif_prompt, gif_source, gif_title, prepare_gif
+from .gifs import download_gif, from_picker, gif_embed, gif_marker, gif_prompt, gif_source, gif_title, prepare_gif
 from .history import images_marker
-from .images import ImageError, prepare_image
+from .images import IMAGE_EXTENSIONS, ImageError, prepare_image
 from .media import ImageData
 from .pdf_files import PDF_EXTENSIONS, PDF_MAX_BYTES, PdfError, prepare_pdf
 from .text_files import TEXT_EXTENSIONS, TEXT_FILE_MAX_BYTES, TextFileError, decode_text_file
 
 logger = logging.getLogger("chatbot.discord")  # même nom qu'avant : le journal ne change pas
 
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff")
 # Images lues par message : chacune coûte jusqu'à ~1 600 tokens.
 MAX_IMAGES = 4
 # Images décodées à la fois, tous messages confondus : chacune peut occuper jusqu'à 400 Mo
@@ -235,4 +234,6 @@ class AttachmentReader:
             logger.warning("GIF ignoré (%s) : %s", url, exc.user_message)
             return None
         title = gif_title(embed)
-        return image, gif_prompt(title, frames), gif_marker(title)
+        picker = from_picker(embed)
+        marker = gif_marker(title) if picker or frames > 1 else images_marker(1)  # photo partagée par lien
+        return image, gif_prompt(title, frames, picker), marker
