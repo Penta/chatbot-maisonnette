@@ -199,6 +199,28 @@ class ClaudeToolTest(unittest.IsolatedAsyncioTestCase):
         # Mêmes outils à chaque appel : le cache de prompt est préservé.
         self.assertTrue(all(call.kwargs["tools"] == tools for call in self.create.await_args_list))
 
+    async def test_answers_once_memory_limit_reached(self):
+        # Comme avant l'outil « mes_messages » : la mémoire pleine, Rika répond tout de suite, sans appels
+        # payés pour rien à recevoir « limite atteinte ».
+        self.client.memory = mock.Mock(run=mock.AsyncMock(return_value=ToolResult("Noté.")))
+        self.client.memory.system_context.return_value = ""
+        self.client.settings.memory_max_operations = 2
+        usage = SimpleNamespace(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0,
+                                cache_read_input_tokens=0, server_tool_use=None)
+
+        async def note_forever(**params):
+            if params.get("tool_choice") == {"type": "none"}:
+                return SimpleNamespace(stop_reason="end_turn", model="modele", usage=usage,
+                                       content=[SimpleNamespace(type="text", text="Enchantée !")])
+            call = SimpleNamespace(type="tool_use", id="appel", name=MEMORY_TOOL["name"], input={})
+            return SimpleNamespace(stop_reason="tool_use", model="modele", usage=usage, content=[call])
+        self.create.side_effect = note_forever
+        answer = await self.client.ask([], [("J'ai trois chats.", [])], own_messages=self.own)
+        self.assertEqual(answer.text, "Enchantée !")
+        self.assertEqual(self.client.memory.run.await_count, 2)
+        choices = [call.kwargs.get("tool_choice") for call in self.create.await_args_list]
+        self.assertEqual(choices, [None, None, {"type": "none"}])
+
     async def test_no_tool_without_channel(self):
         self.tool_calls = 0
         await self.client.ask([], [("Salut", [])])

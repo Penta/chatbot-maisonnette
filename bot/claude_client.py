@@ -257,15 +257,16 @@ class ClaudeClient:
             if last.stop_reason == "pause_turn" and pauses < MAX_CONTINUATIONS:
                 pauses += 1
                 follow_up = []
-            # Appel à un outil du bot : il l'exécute et renvoie le résultat. Une fois toutes les opérations
-            # permises faites (appels refusés compris), plus aucun outil n'est utilisable : le dernier appel
-            # répond forcément en texte. Le choix est interdit plutôt que les outils retirés, ce qui ferait
-            # réécrire tout le cache.
+            # Appel à un outil du bot : il l'exécute et renvoie le résultat. Dès qu'un outil a fait toutes ses
+            # opérations, plus aucun outil n'est utilisable : le dernier appel répond forcément en texte, sans
+            # appels payés pour rien à recevoir « limite atteinte ». L'API ne permet pas d'interdire un seul
+            # outil, et en retirer un ferait réécrire tout le cache. Le total, appels refusés ou inconnus
+            # compris, garantit la fin de la boucle.
             elif last.stop_reason == "tool_use" and limit and operations <= limit:
                 results = await self._run_tools(last, done, limits, own_messages)
                 follow_up = [{"role": "user", "content": results}]
                 operations += len(results)
-                if operations >= limit:
+                if operations >= limit or any(done.get(name, 0) >= most for name, most in limits.items()):
                     params = {**params, "tool_choice": {"type": "none"}}
             else:
                 break
