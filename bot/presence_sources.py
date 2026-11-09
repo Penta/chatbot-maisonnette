@@ -105,7 +105,7 @@ class PresenceSources:
                 self.games = [g for g in data.get("games", []) if isinstance(g, int)]
         except FileNotFoundError:
             pass
-        except (OSError, ValueError, TypeError) as exc:
+        except (OSError, ValueError, TypeError, AttributeError) as exc:  # AttributeError : entrée qui n'est pas une fiche
             logger.warning("Cache des statuts %s illisible, ignoré : %s", self.cache_file, exc)
 
     def save_cache(self) -> None:

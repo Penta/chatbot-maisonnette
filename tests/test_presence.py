@@ -245,6 +245,15 @@ class SourcesCacheTest(unittest.TestCase):
             sources.load_cache()
         self.assertEqual(sources.anime, [Anime("Film", 1, 100, movie=True), Anime("Série", 12, 24)])
 
+    def test_damaged_anime_entry_ignored_with_a_warning(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder) / "presence_sources.json"
+            cache.write_text(json.dumps({"anime": ["Frieren"]}), encoding="utf-8")
+            sources = PresenceSources(cache, (), None)
+            with self.assertLogs("chatbot.presence", "WARNING"):
+                sources.load_cache()
+        self.assertEqual(sources.anime, [])
+
 
 class RestoreTest(unittest.IsolatedAsyncioTestCase):
     """presence_state.json relu au démarrage : le statut reprend là où il en serait."""
