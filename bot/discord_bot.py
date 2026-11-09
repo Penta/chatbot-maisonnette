@@ -13,7 +13,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -26,6 +25,7 @@ from .claude_client import ClaudeClient, ClaudeError
 from .commands import memory_command, reset_command, server_memory_command, skip_command
 from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
+from .errors import DISCORD_FAILURES
 from .files import write_atomic
 from .gifs import EMBED_WAIT, gif_embed, looks_like_gif_link
 from .history import ConversationHistory, render_line
@@ -35,6 +35,7 @@ from .members import MemberRegistry, with_username
 from .memory import DATE_FORMAT, MemoryStore
 from .memory_views import reply_error, see_user
 from .models import display_name, is_known, thinking_off
+from .own_messages import OwnMessages
 from .pdf_files import PdfError
 from .presence import PresenceManager, Status
 from .spontaneous import CHANCE, RECENT_MESSAGES, SpontaneousLog, finished_activity, is_silence, occasion_note
@@ -60,8 +61,6 @@ BOT_STREAK_RESET = timedelta(minutes=10)
 UNEXPECTED_ERROR = "Désolé, une erreur inattendue est survenue."
 # Messages supprimés retenus (voir forget_deleted) : bien plus que ceux qui peuvent attendre une réponse en même temps.
 DELETED_KEPT = 1000
-# Discord n'a pas pu être joint : son erreur, ou une coupure réseau (OSError comprend les délais dépassés).
-DISCORD_FAILURES = (discord.HTTPException, aiohttp.ClientError, OSError)
 
 
 async def warn_authors(reply: Callable[[discord.Message, str], Awaitable[None]],
@@ -617,7 +616,8 @@ class ChatBot(commands.Bot):
                             try:
                                 notes = await self.member_notes([p.message for p in batch])
                                 answer = await self.claude.ask(self.history.get(channel.id), parts,
-                                                               emojis=emoji_names(last.guild), member_notes=notes)
+                                                               emojis=emoji_names(last.guild), member_notes=notes,
+                                                               own_messages=self.own_messages(channel))
                             except ClaudeError as exc:
                                 await warn_authors(self.safe_reply, [p.message for p in batch], exc.user_message)
                                 continue
@@ -720,7 +720,8 @@ class ChatBot(commands.Bot):
                     text, images = group_parts[0]
                     group_parts[0] = ("\n\n".join([*header, text]), images)
                     answer = await self.claude.ask([], group_parts, emojis=emoji_names(last.guild), cache_history=False,
-                                                   member_notes=await self.member_notes(group))
+                                                   member_notes=await self.member_notes(group),
+                                                   own_messages=self.own_messages(channel, remembered=False))
                 except ClaudeError as exc:
                     await warn_authors(self.safe_reply, group, exc.user_message)
                     continue
@@ -852,7 +853,8 @@ class ChatBot(commands.Bot):
             try:
                 async with typing(channel):
                     answer = await self.claude.ask(self.history.get(channel.id), parts,
-                                                   emojis=emoji_names(channel.guild))
+                                                   emojis=emoji_names(channel.guild),
+                                                   own_messages=self.own_messages(channel))
             except ClaudeError as exc:
                 logger.warning("Message d'absence non envoyé : %s", exc.user_message)
                 return
@@ -903,7 +905,7 @@ class ChatBot(commands.Bot):
             notes = self.memory.notes_for(list(dict.fromkeys(m.author.id for m in members))) if self.memory else ""
             try:
                 answer = await self.claude.ask(self.history.get(channel.id), parts, emojis=emoji_names(channel.guild),
-                                               member_notes=notes)
+                                               member_notes=notes, own_messages=self.own_messages(channel))
             except ClaudeError as exc:
                 logger.warning("Message spontané non envoyé : %s", exc.user_message)
                 return
@@ -1108,6 +1110,16 @@ class ChatBot(commands.Bot):
 
     def presence_note(self) -> str | None:
         return self.presence.prompt_note() if self.presence else None
+
+    def own_messages(self, channel: discord.abc.Messageable, remembered: bool = True) -> OwnMessages:
+        """Outil « mes_messages » de Claude dans ce salon. remembered : salon dont le bot garde la mémoire
+        (le salon dédié), qui prend alors le nouveau texte d'un message modifié. Toujours fourni à Claude :
+        un outil présent à un appel et absent au suivant ferait réécrire tout le cache de prompt."""
+        on_edit = None
+        if remembered:
+            async def on_edit(old: str, new: str) -> None:
+                await self.history.revise_reply(channel.id, old, new)
+        return OwnMessages(channel, self.user, on_edit)
 
     @staticmethod
     def message_body(message: discord.Message) -> str:

@@ -17,6 +17,7 @@ from .errors import UserFacingError
 from .media import ImageData
 from .memory import MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, MEMORY_TOOL, MemoryStore, ToolResult
 from .models import cache_read_ratio, thinking_off
+from .own_messages import MAX_MESSAGE_ACTIONS, OWN_MESSAGES_TOOL, OwnMessages
 from .prompts import (CUSTOM_STATUS_PROMPT, CUSTOM_STATUS_REQUESTS, DEFAULT_PERSONALITY, EMOJI_NOTE, GROUP_NOTE,
                       MEMBER_MEMORY_NOTE, MEMORY_NOTE, OUTPUT_NOTE, PRESENCE_NOTE, TOOL_NOTE, WEB_NOTE)
 from .text_utils import strip_reasoning
@@ -142,14 +143,16 @@ class ClaudeClient:
         return content
 
     async def ask(self, history: list[dict], parts: list[tuple[str, list[ImageData]]],
-                  emojis: list[str] | None = None, cache_history: bool = True, member_notes: str = "") -> Answer:
+                  emojis: list[str] | None = None, cache_history: bool = True, member_notes: str = "",
+                  own_messages: OwnMessages | None = None) -> Answer:
         """Envoie l'historique + le ou les nouveaux messages (texte, images ou PDF), et renvoie la réponse de Claude.
 
         emojis : noms des emojis du serveur que Claude peut écrire (voir EMOJI_NOTE).
         cache_history=False évite d'écrire les messages en cache quand l'appel suivant ne les
         reprendra pas (mentions : contexte différent à chaque fois).
         member_notes : fiches des membres concernés (voir MemoryStore.notes_for), jointes au message
-        mais absentes de l'historique."""
+        mais absentes de l'historique.
+        own_messages : outil « mes_messages » du salon de la conversation (voir own_messages.py)."""
         content = self.build_user_content(parts)
         # Les fiches, absentes de l'historique enregistré, viennent après le marqueur de cache :
         # placées avant, elles empêcheraient le message suivant de relire l'historique en cache.
@@ -184,7 +187,7 @@ class ClaudeClient:
                                                 max_nicknames=MAX_NICKNAMES,
                                                 max_nickname_length=MAX_NICKNAME_LENGTH,
                                                 max_lines=MAX_LINES)
-        if self.settings.web_search or self.memory:
+        if self.settings.web_search or self.memory or own_messages:
             system += TOOL_NOTE
         if self.settings.presence:
             system += PRESENCE_NOTE
@@ -232,13 +235,21 @@ class ClaudeClient:
                 {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": self.settings.web_max_uses,
                  "allowed_callers": ["direct"], "max_content_tokens": WEB_PAGE_MAX_TOKENS},
             ]
+        # Outils exécutés par le bot (voir _run_tools), chacun avec son nombre d'opérations par réponse.
+        limits: dict[str, int] = {}
         if self.memory:
-            tools.append(MEMORY_TOOL)  # exécuté par le bot : voir _run_tools
+            tools.append(MEMORY_TOOL)
+            limits[MEMORY_TOOL["name"]] = self.settings.memory_max_operations
+        if own_messages:
+            tools.append(OWN_MESSAGES_TOOL)
+            limits[OWN_MESSAGES_TOOL["name"]] = MAX_MESSAGE_ACTIONS
         if tools:
             params["tools"] = tools
 
         responses = [await self._call(params, attachments)]
         pauses = operations = 0
+        done: dict[str, int] = {}  # opérations faites par outil
+        limit = sum(limits.values())
         while True:
             last = responses[-1]
             # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
@@ -246,14 +257,15 @@ class ClaudeClient:
             if last.stop_reason == "pause_turn" and pauses < MAX_CONTINUATIONS:
                 pauses += 1
                 follow_up = []
-            # Appel à l'outil « memoire » : le bot l'exécute et renvoie le résultat. Une fois la limite
-            # d'opérations atteinte, plus aucun outil n'est utilisable : le dernier appel répond forcément
-            # en texte. Le choix est interdit plutôt que l'outil retiré, qui ferait réécrire tout le cache.
-            elif last.stop_reason == "tool_use" and self.memory and operations <= self.settings.memory_max_operations:
-                results = await self._run_tools(last, operations)
+            # Appel à un outil du bot : il l'exécute et renvoie le résultat. Une fois toutes les opérations
+            # permises faites (appels refusés compris), plus aucun outil n'est utilisable : le dernier appel
+            # répond forcément en texte. Le choix est interdit plutôt que les outils retirés, ce qui ferait
+            # réécrire tout le cache.
+            elif last.stop_reason == "tool_use" and limit and operations <= limit:
+                results = await self._run_tools(last, done, limits, own_messages)
                 follow_up = [{"role": "user", "content": results}]
                 operations += len(results)
-                if operations >= self.settings.memory_max_operations:
+                if operations >= limit:
                     params = {**params, "tool_choice": {"type": "none"}}
             else:
                 break
@@ -290,22 +302,25 @@ class ClaudeClient:
             raise ClaudeError("Je n'ai rien trouvé à répondre à ça.")
         return Answer(text, web_used)
 
-    async def _run_tools(self, response, done: int) -> list[dict]:
-        """Exécute les appels à l'outil « memoire » d'une réponse. Renvoie leurs résultats, à envoyer
-        tous dans un même message comme l'exige l'API.
-        done : opérations déjà faites pour cette réponse."""
+    async def _run_tools(self, response, done: dict[str, int], limits: dict[str, int],
+                         own_messages: OwnMessages | None) -> list[dict]:
+        """Exécute les appels aux outils du bot (« memoire », « mes_messages ») d'une réponse. Renvoie leurs
+        résultats, à envoyer tous dans un même message comme l'exige l'API.
+        done : opérations déjà faites pour cette réponse, par outil (mis à jour) ; limits : leur maximum."""
         results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            if done >= self.settings.memory_max_operations:
-                result = ToolResult("Limite d'opérations atteinte pour ce message : réponds maintenant, "
-                                    "sans rien noter de plus.", is_error=True)
-            elif block.name != MEMORY_TOOL["name"] or not isinstance(block.input, dict):
+            if block.name not in limits or not isinstance(block.input, dict):
                 result = ToolResult(f"Outil inconnu : {block.name}.", is_error=True)
-            else:
+            elif done.get(block.name, 0) >= limits[block.name]:
+                result = ToolResult("Limite d'opérations atteinte pour ce message : réponds maintenant, "
+                                    "sans utiliser cet outil de nouveau.", is_error=True)
+            elif block.name == MEMORY_TOOL["name"]:
                 result = await self.memory.run(block.input)
-            done += 1
+            else:
+                result = await own_messages.run(block.input)
+            done[block.name] = done.get(block.name, 0) + 1
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": result.content,
                             "is_error": result.is_error})
         return results

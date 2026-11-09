@@ -163,6 +163,21 @@ class ConversationHistory:
                 await self._save()
             return changed
 
+    async def revise_reply(self, channel_id: int | str, old: str, new: str) -> bool:
+        """Le bot a modifié l'un de ses messages (outil « mes_messages ») : sa réponse mémorisée la plus récente
+        qui contient old prend new à la place. Renvoie True si la mémoire a changé.
+
+        Sans verrou : appelé pendant une réponse, qui tient déjà celui du salon."""
+        for entry in reversed(self._data.get(str(channel_id), [])):
+            if entry["role"] == "assistant" and old in entry["content"]:
+                revised = entry["content"].replace(old, new, 1)
+                if not revised.strip():  # l'API refuse un message vide
+                    return False
+                entry["content"] = revised
+                await self._save()
+                return True
+        return False
+
     # ------------------------------------------------------------ internes
 
     def _known(self, channel_id: int | str) -> bool:

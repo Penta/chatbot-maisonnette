@@ -12,6 +12,7 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 - **Mentions ailleurs** : dans les autres salons, il répond quand on le mentionne, en lisant les derniers messages pour comprendre la discussion (sans mémoire d'un appel à l'autre). Comme dans son salon, les mentions reçues dans un salon pendant qu'il écrit reçoivent une seule réponse groupée.
 - **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et ses images. Il lit aussi les messages transférés dans son salon.
 - **Messages modifiés ou supprimés** : sa mémoire suit. Un message supprimé est oublié (et s'il l'est avant la réponse, le bot n'y répond pas), un message modifié prend son nouveau texte.
+- **Ses propres messages** : le bot peut modifier ou supprimer l'un de ses messages récents dans le salon où il parle (parmi les 50 derniers messages), par exemple pour cacher un spoiler sous une balise ou retirer une erreur, quand on le lui demande ou qu'il s'en rend compte. Il ne touche jamais aux messages des autres. Au plus 3 modifications ou suppressions par réponse ; chacune demande un court appel en plus.
 - **Recherche web** (en option, `WEB_SEARCH=on`) : il peut chercher sur Internet et lire un lien partagé quand la question porte sur l'actualité ou des informations précises.
 - **Autres bots** : il les ignore, sauf quand ils le mentionnent ou répondent à l'un de ses messages : deux bots peuvent ainsi discuter ensemble. Pour éviter une boucle sans fin (et un appel à Claude à chaque tour), il ne répond pas à plus de 5 messages de bots d'affilée dans un salon ; le compte repart de zéro au premier message d'un membre, ou après 10 minutes sans message de bot.
 
@@ -191,6 +192,7 @@ bot/members.py           registre des membres (noms, anciens pseudos, réglages 
 bot/memory.py            fiches des membres et fichier général : outil « memoire » de Claude
 bot/memory_views.py      /memoire et /memoire-serveur : affichage, pages, choix des lignes à modifier ou supprimer, fenêtres, confirmations
 bot/discord_bot.py       événements Discord, réponses, messages cités ou transférés, réactions
+bot/own_messages.py      messages du bot : outil « mes_messages » de Claude, pour les modifier ou les supprimer
 bot/commands.py          commandes slash (/reset, /skip, /memoire, /memoire-serveur)
 bot/attachments.py       pièces jointes des messages : vérification et téléchargement
 bot/emojis.py            emojis du serveur : liste pour Claude, noms remplacés à l'envoi

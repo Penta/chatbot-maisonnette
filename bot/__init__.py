@@ -1,3 +1,3 @@
 """Chatbot Discord propulsé par Claude."""
 
-VERSION = "5.16"
+VERSION = "5.17"
