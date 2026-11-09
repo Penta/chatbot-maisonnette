@@ -34,6 +34,9 @@ MAX_CONTINUATIONS = 3
 # Taille maximale du texte d'une page lue, renvoyé à chaque appel suivant du même message (les PDF n'ont pas
 # de limite : l'API ne l'applique qu'au texte).
 WEB_PAGE_MAX_TOKENS = 10_000
+# Ajouté après les résultats quand un outil du bot a fait toutes ses opérations pour cette réponse.
+LIMIT_NOTE = ("Limite d'opérations atteinte pour l'outil « {name} » dans ce message : ne l'utilise plus, "
+              "et réponds quand tu as fini.")
 
 
 class ClaudeError(UserFacingError):
@@ -247,9 +250,8 @@ class ClaudeClient:
             params["tools"] = tools
 
         responses = [await self._call(params, attachments)]
-        pauses = operations = 0
-        done: dict[str, int] = {}  # opérations faites par outil
-        limit = sum(limits.values())
+        pauses = 0
+        done: dict[str, int] = {}  # opérations faites par outil, appels refusés compris
         while True:
             last = responses[-1]
             # Lors de longues recherches, l'API peut rendre la main avant la fin (pause_turn) :
@@ -257,16 +259,23 @@ class ClaudeClient:
             if last.stop_reason == "pause_turn" and pauses < MAX_CONTINUATIONS:
                 pauses += 1
                 follow_up = []
-            # Appel à un outil du bot : il l'exécute et renvoie le résultat. Dès qu'un outil a fait toutes ses
-            # opérations, plus aucun outil n'est utilisable : le dernier appel répond forcément en texte, sans
-            # appels payés pour rien à recevoir « limite atteinte ». L'API ne permet pas d'interdire un seul
-            # outil, et en retirer un ferait réécrire tout le cache. Le total, appels refusés ou inconnus
-            # compris, garantit la fin de la boucle.
-            elif last.stop_reason == "tool_use" and limit and operations <= limit:
-                results = await self._run_tools(last, done, limits, own_messages)
-                follow_up = [{"role": "user", "content": results}]
-                operations += len(results)
-                if operations >= limit or any(done.get(name, 0) >= most for name, most in limits.items()):
+            # Appel à un outil du bot : il l'exécute et renvoie le résultat. Quand un outil a fait toutes ses
+            # opérations, le bot le dit à Claude à la suite des résultats, pour qu'il réponde sans appel de
+            # plus. Ni tool_choice ni la liste des outils ne changent : l'un ferait relire toute la
+            # conversation au prix fort, l'autre réécrire tout le cache.
+            elif last.stop_reason == "tool_use" and limits and "tool_choice" not in params:
+                before = dict(done)
+                results, refused = await self._run_tools(last, done, limits, own_messages)
+                if not results:
+                    break
+                follow_up = [{"role": "user", "content": results + [
+                    {"type": "text", "text": LIMIT_NOTE.format(name=name)}
+                    for name, most in limits.items() if before.get(name, 0) < most <= done.get(name, 0)
+                ]}]
+                # Claude n'a fait que des appels refusés : malgré le prix, l'appel suivant ne peut plus
+                # utiliser d'outil, et répond en texte. Chaque tour fait donc au moins une opération,
+                # ce qui garantit la fin de la boucle.
+                if refused == len(results):
                     params = {**params, "tool_choice": {"type": "none"}}
             else:
                 break
@@ -304,19 +313,23 @@ class ClaudeClient:
         return Answer(text, web_used)
 
     async def _run_tools(self, response, done: dict[str, int], limits: dict[str, int],
-                         own_messages: OwnMessages | None) -> list[dict]:
+                         own_messages: OwnMessages | None) -> tuple[list[dict], int]:
         """Exécute les appels aux outils du bot (« memoire », « mes_messages ») d'une réponse. Renvoie leurs
-        résultats, à envoyer tous dans un même message comme l'exige l'API.
+        résultats, à envoyer tous dans un même message comme l'exige l'API, et le nombre d'appels refusés
+        (outil inconnu ou limite atteinte).
         done : opérations déjà faites pour cette réponse, par outil (mis à jour) ; limits : leur maximum."""
         results = []
+        refused = 0
         for block in response.content:
             if block.type != "tool_use":
                 continue
             if block.name not in limits or not isinstance(block.input, dict):
                 result = ToolResult(f"Outil inconnu : {block.name}.", is_error=True)
+                refused += 1
             elif done.get(block.name, 0) >= limits[block.name]:
                 result = ToolResult("Limite d'opérations atteinte pour ce message : réponds maintenant, "
                                     "sans utiliser cet outil de nouveau.", is_error=True)
+                refused += 1
             elif block.name == MEMORY_TOOL["name"]:
                 result = await self.memory.run(block.input)
             else:
@@ -324,7 +337,7 @@ class ClaudeClient:
             done[block.name] = done.get(block.name, 0) + 1
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": result.content,
                             "is_error": result.is_error})
-        return results
+        return results, refused
 
     async def write_custom_status(self, kind: str, now: str, duration: str, recent: list[str],
                                   max_length: int) -> str | None:

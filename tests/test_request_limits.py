@@ -10,7 +10,7 @@ from unittest import mock
 
 import anthropic
 
-from bot.claude_client import ClaudeClient, ClaudeError
+from bot.claude_client import LIMIT_NOTE, ClaudeClient, ClaudeError
 from bot.discord_bot import ChatBot, PendingMessage
 from bot.media import PDF_MEDIA_TYPE, ImageData, base64_size, fit_in_request
 from bot.memory import MEMORY_TOOL, ToolResult
@@ -230,8 +230,17 @@ class WebToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, first)
 
 
+def limit_notes(params: dict) -> list[str]:
+    """Textes ajoutés par le bot après les résultats d'outils du dernier message (avis de limite atteinte)."""
+    content = params["messages"][-1]["content"]
+    if not isinstance(content, list):
+        return []
+    return [block["text"] for block in content if block.get("type") == "text"]
+
+
 class MemoryLimitTest(unittest.IsolatedAsyncioTestCase):
-    """Modèle qui rappelle l'outil « memoire » tant que l'API le lui permet."""
+    """Modèle qui rappelle l'outil « memoire » tant que l'API le lui permet (ou, avec obeys, jusqu'à
+    ce que le bot lui signale la limite)."""
 
     def setUp(self):
         self.client = ClaudeClient.__new__(ClaudeClient)  # sans __init__ : pas de client Anthropic à créer
@@ -243,37 +252,54 @@ class MemoryLimitTest(unittest.IsolatedAsyncioTestCase):
         self.client.memory.system_context.return_value = ""
         self.client.personality = lambda: "Tu es Rika."
         self.calls_per_response = 1
+        self.obeys = False  # s'arrête de noter dès que le bot lui signale la limite
         self.create = mock.AsyncMock(side_effect=self.answer)
         self.client._client = SimpleNamespace(messages=SimpleNamespace(create=self.create))
 
     async def answer(self, **params) -> SimpleNamespace:
         usage = SimpleNamespace(input_tokens=1, output_tokens=1, cache_creation_input_tokens=0,
                                 cache_read_input_tokens=0, server_tool_use=None)
-        if params.get("tool_choice") == {"type": "none"}:
+        if params.get("tool_choice") == {"type": "none"} or (self.obeys and limit_notes(params)):
             return SimpleNamespace(stop_reason="end_turn", model="modele", usage=usage,
                                    content=[SimpleNamespace(type="text", text="Enchantée !")])
         calls = [SimpleNamespace(type="tool_use", id=f"appel{i}", name=MEMORY_TOOL["name"], input={"action": "ajouter"})
                  for i in range(self.calls_per_response)]
         return SimpleNamespace(stop_reason="tool_use", model="modele", usage=usage, content=calls)
 
-    async def test_text_answer_once_limit_reached(self):
+    async def test_limit_keeps_cache(self):
+        # Changer tool_choice en cours de réponse ferait relire toute la conversation au prix fort : le bot
+        # signale plutôt la limite à Claude, qui répond alors sans outil.
+        self.obeys = True
         answer = await self.client.ask([], [("J'ai trois chats.", [])])
         self.assertEqual(answer.text, "Enchantée !")
         self.assertEqual(self.client.memory.run.await_count, 2)
-        # Le dernier appel ne peut plus noter, sans appel payé en plus pour lui signaler la limite.
         choices = [call.kwargs.get("tool_choice") for call in self.create.await_args_list]
-        self.assertEqual(choices, [None, None, {"type": "none"}])
+        self.assertEqual(choices, [None, None, None])
+        notes = [limit_notes(call.kwargs) for call in self.create.await_args_list[1:]]
+        self.assertEqual(notes, [[], [LIMIT_NOTE.format(name=MEMORY_TOOL["name"])]])
         # La liste des outils ne change pas : retirer un outil ferait réécrire tout le cache de prompt.
         tools = [call.kwargs["tools"] for call in self.create.await_args_list]
         self.assertEqual(tools, [[MEMORY_TOOL]] * 3)
 
+    async def test_text_answer_if_limit_ignored(self):
+        # Claude rappelle quand même l'outil : refusé, puis réponse forcée en texte, une seule fois.
+        answer = await self.client.ask([], [("J'ai trois chats.", [])])
+        self.assertEqual(answer.text, "Enchantée !")
+        self.assertEqual(self.client.memory.run.await_count, 2)
+        choices = [call.kwargs.get("tool_choice") for call in self.create.await_args_list]
+        self.assertEqual(choices, [None, None, None, {"type": "none"}])
+        results = self.create.await_args_list[-1].kwargs["messages"][-1]["content"]
+        self.assertEqual([result["is_error"] for result in results], [True])
+
     async def test_calls_beyond_limit_in_one_response_are_refused(self):
         self.calls_per_response = 3
+        self.obeys = True
         answer = await self.client.ask([], [("J'ai trois chats.", [])])
         self.assertEqual(answer.text, "Enchantée !")
         self.assertEqual(self.client.memory.run.await_count, 2)
         results = self.create.await_args_list[-1].kwargs["messages"][-1]["content"]
-        self.assertEqual([result["is_error"] for result in results], [False, False, True])
+        self.assertEqual([result.get("is_error") for result in results], [False, False, True, None])
+        self.assertNotIn("tool_choice", self.create.await_args_list[-1].kwargs)
 
 
 if __name__ == "__main__":
