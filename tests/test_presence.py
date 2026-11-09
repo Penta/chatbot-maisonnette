@@ -228,6 +228,11 @@ class DrawAnimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.draw(Anime("Kimi no Na wa.", 1, 106, movie=True)),
                          [Status(Kind.ANIME, title="Kimi no Na wa.")])
 
+    async def test_movie_in_several_parts_lasts_all_its_parts(self):
+        self.manager.sources.anime = [Anime("Byousoku 5 Centimeter", 3, 21, movie=True)]
+        program = await self.manager.draw()
+        self.assertEqual(program, [(Status(Kind.ANIME, title="Byousoku 5 Centimeter"), 3 * 21 * 60)])
+
     async def test_series_with_one_aired_episode_keeps_its_number(self):
         self.assertEqual(await self.draw(Anime("Nouvelle saison", 1, 24)),
                          [Status(Kind.ANIME, title="Nouvelle saison", episode=1)])
