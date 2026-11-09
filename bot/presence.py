@@ -439,7 +439,7 @@ class PresenceManager:
 
         if kind is Kind.ANIME:
             anime = self.pick(self.sources.anime, lambda a: a.title == self.status.title)
-            if anime.episodes == 1:  # film
+            if anime.movie:
                 return [(Status(kind, title=anime.title), anime.duration * 60 / speed)]
             available_episodes = anime.episodes or DEFAULT_ANIME_EPISODES
             count = min(random.randint(*ANIME_EPISODES), available_episodes)

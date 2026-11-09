@@ -10,7 +10,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from bot.presence import Kind, PresenceManager, Status, format_duration
-from bot.presence_sources import PresenceSources, Track
+from bot.presence_sources import Anime, PresenceSources, Track
 
 UTC = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
@@ -194,10 +194,56 @@ class FetchAnimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.fetch(status="NOT_YET_RELEASED", episodes=12,
                                           nextAiringEpisode={"episode": 1}), [])
 
+    async def test_movie_recognised_by_its_format(self):
+        anime = await self.fetch(status="FINISHED", format="MOVIE", episodes=1)
+        self.assertEqual([a.movie for a in anime], [True])
+        anime = await self.fetch(status="FINISHED", format="MOVIE", episodes=3)  # film en trois parties
+        self.assertEqual([a.movie for a in anime], [True])
+        anime = await self.fetch(status="FINISHED", format="SPECIAL", episodes=1)  # épisode spécial unique
+        self.assertEqual([a.movie for a in anime], [True])
+        anime = await self.fetch(status="RELEASING", format="TV", episodes=12, nextAiringEpisode={"episode": 2})
+        self.assertEqual([(a.episodes, a.movie) for a in anime], [(1, False)])
+
     async def test_airing_anime_with_unknown_aired_count_left_out(self):
         # En pause ou date du prochain épisode inconnue : impossible de savoir lesquels sont sortis.
         self.assertEqual(await self.fetch(status="RELEASING", episodes=12), [])
         self.assertEqual(await self.fetch(status="HIATUS", episodes=24), [])
+
+
+class DrawAnimeTest(unittest.IsolatedAsyncioTestCase):
+    """Un film s'affiche sans numéro d'épisode ; une série qui n'a qu'un épisode sorti garde le sien."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.manager = make_manager(Path(self._tmp.name), weights={Kind.ANIME.value: 1})
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    async def draw(self, anime: Anime) -> list:
+        self.manager.sources.anime = [anime]
+        return [status for status, _ in await self.manager.draw()]
+
+    async def test_movie_has_no_episode_number(self):
+        self.assertEqual(await self.draw(Anime("Kimi no Na wa.", 1, 106, movie=True)),
+                         [Status(Kind.ANIME, title="Kimi no Na wa.")])
+
+    async def test_series_with_one_aired_episode_keeps_its_number(self):
+        self.assertEqual(await self.draw(Anime("Nouvelle saison", 1, 24)),
+                         [Status(Kind.ANIME, title="Nouvelle saison", episode=1)])
+
+
+class SourcesCacheTest(unittest.TestCase):
+    def test_old_cache_without_movie_field(self):
+        # Fichier écrit avant que le format soit lu : un seul épisode y voulait dire « film ».
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder) / "presence_sources.json"
+            cache.write_text(json.dumps({"anime": [{"title": "Film", "episodes": 1, "duration": 100},
+                                                   {"title": "Série", "episodes": 12, "duration": 24}]}),
+                             encoding="utf-8")
+            sources = PresenceSources(cache, (), None)
+            sources.load_cache()
+        self.assertEqual(sources.anime, [Anime("Film", 1, 100, movie=True), Anime("Série", 12, 24)])
 
 
 class RestoreTest(unittest.IsolatedAsyncioTestCase):

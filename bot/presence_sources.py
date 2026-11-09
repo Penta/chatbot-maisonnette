@@ -18,7 +18,7 @@ ANILIST_QUERY = """
 query ($page: Int) {
   Page(page: $page, perPage: 50) {
     media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-      title { romaji } status episodes duration nextAiringEpisode { episode }
+      title { romaji } format status episodes duration nextAiringEpisode { episode }
     }
   }
 }
@@ -46,8 +46,9 @@ class SourceError(Exception):
 @dataclass(frozen=True)
 class Anime:
     title: str
-    episodes: int | None  # épisodes déjà sortis (None : inconnu) ; 1 pour un film
+    episodes: int | None  # épisodes déjà sortis (None : inconnu)
     duration: int         # minutes par épisode
+    movie: bool = False   # film ou épisode unique : affiché sans numéro d'épisode
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,8 @@ class PresenceSources:
     def load_cache(self) -> None:
         try:
             data = json.loads(self.cache_file.read_text(encoding="utf-8"))
-            self.anime = [Anime(**a) for a in data.get("anime", [])]
+            # Ancien cache, sans « movie » : un seul épisode y voulait dire « film ».
+            self.anime = [Anime(**{"movie": a.get("episodes") == 1, **a}) for a in data.get("anime", [])]
             self.music = [Track(**t) for t in data.get("music", [])]
             if self.steam_enabled:
                 self.games = [g for g in data.get("games", []) if isinstance(g, int)]
@@ -157,7 +159,10 @@ class PresenceSources:
                     if not next_episode or next_episode <= 1:
                         continue
                     episodes = next_episode - 1
-                anime[title] = Anime(title, episodes, m.get("duration") or DEFAULT_EPISODE_DURATION)
+                # Film, ou épisode spécial unique déjà terminé : affiché sans numéro d'épisode.
+                # Une série qui n'a encore qu'un épisode sorti garde le sien.
+                movie = m.get("format") == "MOVIE" or (status == "FINISHED" and episodes == 1)
+                anime[title] = Anime(title, episodes, m.get("duration") or DEFAULT_EPISODE_DURATION, movie)
         return list(anime.values())
 
     async def fetch_music(self, session: aiohttp.ClientSession) -> list[Track]:
