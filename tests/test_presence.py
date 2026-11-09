@@ -168,6 +168,38 @@ class GameDetailsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.details()).name, "Celeste")
 
 
+class FetchAnimeTest(unittest.IsolatedAsyncioTestCase):
+    """Seuls les épisodes déjà diffusés sont proposés, même quand AniList connaît le total prévu."""
+
+    async def fetch(self, **fields) -> list:
+        media = {"title": {"romaji": "Frieren"}, "duration": 24, **fields}
+        response = {"data": {"Page": {"media": [media]}}}
+        with mock.patch("bot.presence_sources.get_json", mock.AsyncMock(return_value=response)):
+            return await PresenceSources.fetch_anime(None)
+
+    async def test_finished_anime_keeps_all_its_episodes(self):
+        anime = await self.fetch(status="FINISHED", episodes=28)
+        self.assertEqual([a.episodes for a in anime], [28])
+
+    async def test_airing_anime_counts_aired_episodes_even_with_known_total(self):
+        anime = await self.fetch(status="RELEASING", episodes=12, nextAiringEpisode={"episode": 7})
+        self.assertEqual([a.episodes for a in anime], [6])
+
+    async def test_airing_anime_without_known_total(self):
+        anime = await self.fetch(status="RELEASING", episodes=None, nextAiringEpisode={"episode": 7})
+        self.assertEqual([a.episodes for a in anime], [6])
+
+    async def test_unreleased_anime_left_out(self):
+        self.assertEqual(await self.fetch(status="NOT_YET_RELEASED", episodes=12), [])
+        self.assertEqual(await self.fetch(status="NOT_YET_RELEASED", episodes=12,
+                                          nextAiringEpisode={"episode": 1}), [])
+
+    async def test_airing_anime_with_unknown_aired_count_left_out(self):
+        # En pause ou date du prochain épisode inconnue : impossible de savoir lesquels sont sortis.
+        self.assertEqual(await self.fetch(status="RELEASING", episodes=12), [])
+        self.assertEqual(await self.fetch(status="HIATUS", episodes=24), [])
+
+
 class RestoreTest(unittest.IsolatedAsyncioTestCase):
     """presence_state.json relu au démarrage : le statut reprend là où il en serait."""
 

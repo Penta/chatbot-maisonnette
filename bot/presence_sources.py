@@ -18,7 +18,7 @@ ANILIST_QUERY = """
 query ($page: Int) {
   Page(page: $page, perPage: 50) {
     media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-      title { romaji } episodes duration nextAiringEpisode { episode }
+      title { romaji } status episodes duration nextAiringEpisode { episode }
     }
   }
 }
@@ -146,10 +146,17 @@ class PresenceSources:
                 title = (m.get("title") or {}).get("romaji")
                 if not title:
                     continue
-                # Anime en cours de diffusion : seuls les épisodes déjà sortis comptent.
-                episodes = m.get("episodes")
-                if episodes is None and m.get("nextAiringEpisode"):
-                    episodes = m["nextAiringEpisode"]["episode"] - 1 or None
+                status = m.get("status")
+                if status == "NOT_YET_RELEASED":
+                    continue
+                episodes = m.get("episodes")  # total prévu, pas forcément tous sortis
+                if status in ("RELEASING", "HIATUS"):
+                    # En cours de diffusion : seuls les épisodes déjà sortis comptent. Sans date du
+                    # prochain épisode (pause), on ne sait pas lesquels sont sortis : anime écarté.
+                    next_episode = (m.get("nextAiringEpisode") or {}).get("episode")
+                    if not next_episode or next_episode <= 1:
+                        continue
+                    episodes = next_episode - 1
                 anime[title] = Anime(title, episodes, m.get("duration") or DEFAULT_EPISODE_DURATION)
         return list(anime.values())
 

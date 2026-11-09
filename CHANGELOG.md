@@ -15,6 +15,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ### Corrections
 
 - **Une réponse où Rika atteint sa limite de notes en mémoire coûte moins cher.**
+- **Rika ne regarde plus un épisode d'anime qui n'est pas encore sorti.**
 
 ---
 
