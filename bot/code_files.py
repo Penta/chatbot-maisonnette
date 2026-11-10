@@ -21,7 +21,8 @@ MAX_FILES = 10
 # Marqueur ajouté par claude_client.py à une réponse coupée par MAX_TOKENS.
 TRUNCATED = " […]"
 
-_OPENING = re.compile(r"^\s*```(.*)$")
+# Pas de ``` plus loin sur la ligne : « ```let x = 1``` » s'ouvre et se referme sur elle-même, ce n'est pas un bloc.
+_OPENING = re.compile(r"^\s*```((?:(?!```).)*)$")
 _CLOSING = re.compile(r"^\s*```\s*$")
 # Nom de fichier écrit sur la ligne d'ouverture (« ```html index.html ») : pas de chemin, une extension.
 _FILE_NAME = re.compile(r"^[\w-][\w.-]{0,59}\.[A-Za-z0-9]{1,10}$")

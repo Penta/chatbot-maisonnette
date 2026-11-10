@@ -64,6 +64,14 @@ class PrepareTest(unittest.TestCase):
         self.assertEqual(prepared.memory, "Voilà le site :\n"
                                           "[code envoyé en fichier joint : index.html, 40 lignes, coupé avant la fin]")
 
+    def test_one_line_block_is_not_an_opening(self):
+        # « ```let x = 1``` » s'ouvre et se referme sur sa ligne : ce n'est pas le début d'un bloc. Sinon, le
+        # texte qui suit disparaîtrait du message, avalé avec le vrai bloc dans un fichier mal nommé.
+        answer = f"Exemple :\n```let x = 1```\nPuis du texte important.\n```js\n{PAGE}\n```"
+        prepared = prepare(answer)
+        self.assertEqual(prepared.text, "Exemple :\n```let x = 1```\nPuis du texte important.")
+        self.assertEqual([(f.name, f.content) for f in prepared.files], [("code.js", PAGE + "\n")])
+
     def test_threshold(self):
         self.assertEqual(prepare(f"```\n{code(MIN_LINES - 1)}\n```").files, [])
         self.assertEqual(len(prepare(f"```\n{code(MIN_LINES)}\n```").files), 1)
