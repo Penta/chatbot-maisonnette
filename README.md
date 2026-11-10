@@ -13,6 +13,7 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 - **Messages cités et transférés** : avec « Répondre », il lit le message cité, même ancien, et ses images. Il lit aussi les messages transférés dans son salon.
 - **Messages modifiés ou supprimés** : sa mémoire suit. Un message supprimé est oublié (et s'il l'est avant la réponse, le bot n'y répond pas), un message modifié prend son nouveau texte.
 - **Ses propres messages** : le bot peut modifier ou supprimer l'un de ses messages récents dans le salon où il parle (parmi les 50 derniers messages), par exemple pour cacher un spoiler sous une balise ou retirer une erreur, quand on le lui demande ou qu'il s'en rend compte. Il ne touche jamais aux messages des autres. Au plus 3 modifications ou suppressions par réponse ; chacune demande un court appel en plus.
+- **Code** : un long bloc de code (25 lignes ou 1 500 caractères au moins) part en fichier joint sous le message du bot, nommé par lui (`index.html`, `style.css`…), au lieu d'une suite de messages. Sa mémoire n'en garde que le nom : pour le faire modifier, on lui renvoie le fichier.
 - **Recherche web** (en option, `WEB_SEARCH=on`) : il peut chercher sur Internet et lire un lien partagé quand la question porte sur l'actualité ou des informations précises.
 - **Autres bots** : il les ignore, sauf quand ils le mentionnent ou répondent à l'un de ses messages : deux bots peuvent ainsi discuter ensemble. Pour éviter une boucle sans fin (et un appel à Claude à chaque tour), il ne répond pas à plus de 5 messages de bots d'affilée dans un salon ; le compte repart de zéro au premier message d'un membre, ou après 10 minutes sans message de bot.
 
@@ -206,6 +207,7 @@ bot/text_files.py        lecture des fichiers texte joints
 bot/media.py             pièce jointe prête pour Claude (image ou PDF)
 bot/errors.py            base des erreurs dont le message s'affiche sur Discord
 bot/text_utils.py        découpage des longues réponses, réflexion affichée retirée
+bot/code_files.py        longs blocs de code des réponses : fichiers joints, résumés en mémoire
 bot/files.py             écriture des fichiers sur le disque, sans fichier à moitié écrit
 tests/                   tests automatisés : python -m unittest
 ```

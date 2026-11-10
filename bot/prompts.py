@@ -27,6 +27,14 @@ GROUP_NOTE = (
     "répondais : réponds à l'ensemble en une seule fois, sans signaler le regroupement."
 )
 
+# Les longs blocs de code partent en fichier joint et ne sont que résumés dans l'historique (code_files.py).
+CODE_NOTE = (
+    "\n\nUn long bloc de code part tout seul en fichier joint sous ton message : écris ton message normalement, "
+    "sans parler de code « ci-dessous », et donne le nom du fichier sur la ligne d'ouverture du bloc "
+    "(```html index.html). « [code envoyé en fichier joint : …] » dans un ancien message veut dire que tu as bien "
+    "envoyé ce fichier, mais que tu ne vois plus son contenu : pour le modifier, demande qu'on te le renvoie."
+)
+
 # Ajouté lui aussi automatiquement. Formulation générique recommandée par Anthropic : nommer les
 # balises de réflexion, ou interdire de réfléchir, rend au contraire leur apparition plus probable.
 OUTPUT_NOTE = "\n\nN'inclus pas de balises XML internes ou système dans ta réponse."

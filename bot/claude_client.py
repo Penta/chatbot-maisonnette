@@ -18,8 +18,8 @@ from .media import ImageData
 from .memory import MAX_LINES, MAX_NICKNAME_LENGTH, MAX_NICKNAMES, MEMORY_TOOL, MemoryStore, ToolResult
 from .models import cache_read_ratio, thinking_off
 from .own_messages import MAX_MESSAGE_ACTIONS, OWN_MESSAGES_TOOL, OwnMessages
-from .prompts import (CUSTOM_STATUS_PROMPT, CUSTOM_STATUS_REQUESTS, DEFAULT_PERSONALITY, EMOJI_NOTE, GROUP_NOTE,
-                      MEMBER_MEMORY_NOTE, MEMORY_NOTE, OUTPUT_NOTE, PRESENCE_NOTE, TOOL_NOTE, WEB_NOTE)
+from .prompts import (CODE_NOTE, CUSTOM_STATUS_PROMPT, CUSTOM_STATUS_REQUESTS, DEFAULT_PERSONALITY, EMOJI_NOTE,
+                      GROUP_NOTE, MEMBER_MEMORY_NOTE, MEMORY_NOTE, OUTPUT_NOTE, PRESENCE_NOTE, TOOL_NOTE, WEB_NOTE)
 from .text_utils import strip_reasoning
 
 logger = logging.getLogger("chatbot.claude")
@@ -181,7 +181,7 @@ class ClaudeClient:
         messages.append({"role": "user", "content": content})
         attachments = {("pdf" if image.is_pdf else "image") for _, images in parts for image in images}
 
-        system = self.personality() + MEMORY_NOTE + GROUP_NOTE + OUTPUT_NOTE
+        system = self.personality() + MEMORY_NOTE + GROUP_NOTE + CODE_NOTE + OUTPUT_NOTE
         if self.settings.web_search:
             system += WEB_NOTE
         if self.memory:

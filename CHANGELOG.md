@@ -10,6 +10,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
+- **Un long morceau de code écrit par Rika arrive en fichier joint**, sous son message, au lieu d'une suite de messages. Pour le faire modifier ensuite, il suffit de lui renvoyer le fichier.
 - **Rika peut modifier ou supprimer ses propres messages récents**, par exemple pour cacher un spoiler sous une balise ou retirer une erreur, quand on le lui demande ou qu'elle s'en rend compte.
 
 ### Corrections

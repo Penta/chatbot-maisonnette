@@ -365,7 +365,7 @@ class SendFailureTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(type(error).__name__):
                 channel = mock.Mock(send=mock.AsyncMock(side_effect=error))
                 message = mock.Mock(channel=channel)
-                with self.assertLogs("chatbot.discord", "ERROR"), mock.patch("bot.discord_bot.split_message",
+                with self.assertLogs("chatbot.discord", "ERROR"), mock.patch("bot.code_files.split_message",
                                                                             lambda text: ["un", "deux"]):
                     await ChatBot.send_answer(mock.Mock(), message, "réponse")
                 channel.send.assert_awaited_once()

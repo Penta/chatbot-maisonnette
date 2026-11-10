@@ -22,6 +22,7 @@ from .attachments import (FILES_QUEUE_FULL, MAX_IMAGES, AttachmentReader, Attach
                           attachments_marker, looks_like_image, looks_like_pdf, looks_like_text, readable_size,
                           text_file_marker, text_file_prompt)
 from .claude_client import ClaudeClient, ClaudeError
+from .code_files import outgoing, prepare
 from .commands import memory_command, reset_command, server_memory_command, skip_command
 from .config import Settings, memory_warning
 from .emojis import discord_emojis, emoji_names, short_emojis, usable_emojis
@@ -40,7 +41,6 @@ from .pdf_files import PdfError
 from .presence import PresenceManager, Status
 from .spontaneous import CHANCE, RECENT_MESSAGES, SpontaneousLog, finished_activity, is_silence, occasion_note
 from .text_files import TextFileError
-from .text_utils import split_message
 
 logger = logging.getLogger("chatbot.discord")
 
@@ -634,7 +634,9 @@ class ChatBot(commands.Bot):
                         logger.info("Message(s) supprimé(s) dans #%s pendant la réponse : elle n'est pas envoyée.",
                                     channel)
                         continue
-                    await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
+                    # Les longs blocs de code, envoyés en fichier joint, n'y sont que résumés (voir code_files.py).
+                    memory = short_emojis(prepare(answer.text).memory)
+                    await self.history.add_exchange(channel.id, lines, memory, answer.web_used)
                 await self.send_answer(kept[-1], answer.text, reply=split)
             finally:
                 if batch:
@@ -738,7 +740,7 @@ class ChatBot(commands.Bot):
             await self.send_answer(last, answer.text, reply=late is not None or split)
             if late:
                 me = last.guild.me if last.guild else self.user
-                sent.append(f"{author_name(me)} : {short_emojis(answer.text)}")
+                sent.append(f"{author_name(me)} : {short_emojis(prepare(answer.text).memory)}")
 
     async def mention_context(self, channel: discord.abc.Messageable, mention_ids: set[int],
                               before: discord.Message | None) -> list[str]:
@@ -859,11 +861,13 @@ class ChatBot(commands.Bot):
                 logger.warning("Message d'absence non envoyé : %s", exc.user_message)
                 return
             lines = [{"content": text} for text, _ in parts]
-            await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
+            await self.history.add_exchange(channel.id, lines, short_emojis(prepare(answer.text).memory),
+                                            answer.web_used)
         logger.info("Conversation en cours dans #%s : le salon est prévenu de l'absence.", channel)
-        for chunk in split_message(discord_emojis(short_emojis(answer.text), channel.guild)):
+        prepared = prepare(answer.text)
+        for chunk, extra in outgoing(discord_emojis(short_emojis(prepared.text), channel.guild), prepared.files):
             try:
-                await channel.send(chunk)
+                await channel.send(chunk, **extra)
             except DISCORD_FAILURES as exc:
                 logger.error("Envoi du message d'absence impossible : %s", exc)
                 return
@@ -917,9 +921,10 @@ class ChatBot(commands.Bot):
                             before.title, channel)
                 return
             sent = None
-            for chunk in split_message(discord_emojis(short_emojis(answer.text), channel.guild)):
+            prepared = prepare(answer.text)
+            for chunk, extra in outgoing(discord_emojis(short_emojis(prepared.text), channel.guild), prepared.files):
                 try:
-                    sent = await channel.send(chunk)
+                    sent = await channel.send(chunk, **extra)
                 except DISCORD_FAILURES as exc:
                     logger.error("Envoi du message spontané impossible : %s", exc)
                     break
@@ -927,7 +932,7 @@ class ChatBot(commands.Bot):
                 return
             self.spontaneous.record(sent.id, discord.utils.utcnow())
             lines = [{"content": text} for text, _ in parts]
-            await self.history.add_exchange(channel.id, lines, short_emojis(answer.text), answer.web_used)
+            await self.history.add_exchange(channel.id, lines, short_emojis(prepared.memory), answer.web_used)
         logger.info("Fin de « %s » : message spontané dans #%s.", before.title, channel)
 
     def remember_waiting(self, message: discord.Message) -> None:
@@ -1136,12 +1141,14 @@ class ChatBot(commands.Bot):
         # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre »
         # (sauf reply=True : le premier morceau répond alors au message).
         # Les emojis passent par leur nom : un code écrit avec un mauvais identifiant est ainsi corrigé.
-        answer = discord_emojis(short_emojis(answer), message.guild)
-        for i, chunk in enumerate(split_message(answer)):
+        # Les longs blocs de code partent en fichier joint (voir code_files.py).
+        prepared = prepare(answer)
+        text = discord_emojis(short_emojis(prepared.text), message.guild)
+        for i, (chunk, extra) in enumerate(outgoing(text, prepared.files)):
             # fail_if_not_exists=False : si le message a été supprimé entre-temps, envoi normal.
             reference = message.to_reference(fail_if_not_exists=False) if reply and i == 0 else None
             try:
-                await message.channel.send(chunk, reference=reference, mention_author=False)
+                await message.channel.send(chunk, reference=reference, mention_author=False, **extra)
             except DISCORD_FAILURES as exc:
                 logger.error("Envoi de la réponse impossible : %s", exc)
                 return
