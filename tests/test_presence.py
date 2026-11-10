@@ -10,7 +10,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from bot.presence import Kind, PresenceManager, Status, format_duration
-from bot.presence_sources import Anime, PresenceSources, Track
+from bot.presence_sources import Anime, PresenceSources, SourceError, Track
 
 UTC = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
@@ -32,7 +32,7 @@ def make_manager(folder: Path, night=None, weights=None) -> PresenceManager:
     settings = SimpleNamespace(
         presence_weights=WEIGHTS if weights is None else weights,
         history_file=folder / "conversation_history.json",
-        deezer_playlists=(), steam_api_key=None,
+        deezer_playlists=(),
         presence_night=night, presence_speed=1.0, timezone=PARIS,
     )
     return PresenceManager(SimpleNamespace(), SimpleNamespace(), settings)
@@ -246,7 +246,7 @@ class SourcesCacheTest(unittest.TestCase):
             cache.write_text(json.dumps({"anime": [{"title": "Film", "episodes": 1, "duration": 100},
                                                    {"title": "Série", "episodes": 12, "duration": 24}]}),
                              encoding="utf-8")
-            sources = PresenceSources(cache, (), None)
+            sources = PresenceSources(cache, ())
             sources.load_cache()
         self.assertEqual(sources.anime, [Anime("Film", 1, 100, movie=True), Anime("Série", 12, 24)])
 
@@ -254,10 +254,61 @@ class SourcesCacheTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             cache = Path(folder) / "presence_sources.json"
             cache.write_text(json.dumps({"anime": ["Frieren"]}), encoding="utf-8")
-            sources = PresenceSources(cache, (), None)
+            sources = PresenceSources(cache, ())
             with self.assertLogs("chatbot.presence", "WARNING"):
                 sources.load_cache()
         self.assertEqual(sources.anime, [])
+
+    def test_old_list_of_the_whole_steam_store_ignored(self):
+        # Avant : toute la boutique Steam, sous « games ». Ces jeux inconnus ne doivent pas revenir.
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder) / "presence_sources.json"
+            cache.write_text(json.dumps({"games": [10, 20]}), encoding="utf-8")
+            sources = PresenceSources(cache, ())
+            sources.load_cache()
+            self.assertEqual(sources.games, [])
+            sources.games = [730, 570]
+            sources.save_cache()
+            sources = PresenceSources(cache, ())
+            sources.load_cache()
+        self.assertEqual(sources.games, [730, 570])
+
+
+def steam_page(*appids: int) -> dict:
+    """Page de la recherche Steam, telle que la boutique la renvoie : l'identifiant est dans l'adresse de l'image."""
+    return {"desc": "", "items": [
+        {"name": f"Jeu {appid}", "logo": f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/"
+                                         f"{appid}/abc123/capsule_sm_120.jpg?t=1794333658"} for appid in appids]}
+
+
+class SteamTopGamesTest(unittest.IsolatedAsyncioTestCase):
+    """Les jeux du statut viennent des meilleures ventes de Steam en France, pas de toute la boutique."""
+
+    async def fetch(self, pages: list[dict]) -> tuple[list[int], list[dict]]:
+        calls = []
+
+        async def fake_get_json(session, method, url, **kwargs):
+            calls.append(kwargs["params"])
+            return pages[len(calls) - 1]
+        with mock.patch("bot.presence_sources.get_json", fake_get_json):
+            return await PresenceSources.fetch_games(None), calls
+
+    async def test_top_500_french_best_sellers(self):
+        pages = [steam_page(*range(start + 1, start + 101)) for start in range(0, 700, 100)]
+        games, calls = await self.fetch(pages)
+        self.assertEqual(games, list(range(1, 501)))
+        self.assertEqual(len(calls), 5)  # rien de demandé au-delà du 500e
+        self.assertEqual({(c["filter"], c["cc"], c["category1"]) for c in calls}, {("topsellers", "fr", "998")})
+        self.assertEqual([c["start"] for c in calls], ["0", "100", "200", "300", "400"])
+
+    async def test_game_moved_between_two_pages_counted_once(self):
+        games, _ = await self.fetch([steam_page(*range(1, 101)), steam_page(100, 200)])
+        self.assertEqual(games, [*range(1, 101), 200])  # page incomplète : fin du classement
+
+    async def test_unexpected_answer_is_an_error(self):
+        # Erreur : la liste précédente est gardée (voir refresh).
+        with self.assertRaises(SourceError):
+            await self.fetch([{"success": 2}])
 
 
 class RestoreTest(unittest.IsolatedAsyncioTestCase):

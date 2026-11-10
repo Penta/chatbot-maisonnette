@@ -6,6 +6,7 @@ import asyncio
 import html
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -26,9 +27,13 @@ query ($page: Int) {
 ANIME_PAGES = 10  # 10 pages de 50 : le top 500 des animes les plus populaires
 # Les tops Deezer contiennent 100 titres.
 DEEZER_TRACKS_URL = "https://api.deezer.com/playlist/{}/tracks?limit=100"
-STEAM_APPS_URL = "https://api.steampowered.com/IStoreService/GetAppList/v1/"
-STEAM_PAGE_SIZE = 50_000  # maximum accepté par Steam
-STEAM_MAX_PAGES = 10
+# Recherche de la boutique Steam (celle du site, sans clé) : meilleures ventes en France, jeux seulement
+# (category1=998, sans DLC ni logiciels). Elle donne le nom et l'image de chaque jeu, pas son identifiant :
+# il est lu dans l'adresse de l'image (…/apps/<identifiant>/…).
+STEAM_SEARCH_URL = "https://store.steampowered.com/search/results/"
+STEAM_TOP_GAMES = 500  # assez pour varier, assez connus pour que les membres en parlent
+STEAM_PAGE_SIZE = 100
+_STEAM_APPID = re.compile(r"/apps/(\d+)/")
 STEAM_DETAILS_URL = "https://store.steampowered.com/api/appdetails"
 # Descripteurs de contenu Steam écartés : 3 = contenu sexuel réservé aux adultes,
 # 4 = nudité ou contenu sexuel fréquents (1 = « un peu de nudité » reste accepté).
@@ -40,7 +45,7 @@ TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
 class SourceError(Exception):
-    """Lecture d'une source impossible. Le message ne contient jamais la clé Steam."""
+    """Lecture d'une source impossible."""
 
 
 @dataclass(frozen=True)
@@ -73,7 +78,6 @@ async def get_json(session: aiohttp.ClientSession, method: str, url: str, **kwar
                 raise SourceError(f"réponse HTTP {response.status}")
             return await response.json(content_type=None)
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-        # Pas de str(exc) : l'adresse de la requête, qu'il peut contenir, porte la clé Steam.
         raise SourceError(type(exc).__name__) from None
 
 
@@ -82,18 +86,12 @@ class PresenceSources:
 
     Si une source ne répond pas, sa liste précédente (ou celle du cache) est conservée."""
 
-    def __init__(self, cache_file: Path, deezer_playlists: tuple[int, ...],
-                 steam_api_key: str | None):
+    def __init__(self, cache_file: Path, deezer_playlists: tuple[int, ...]):
         self.cache_file = cache_file
         self.deezer_playlists = deezer_playlists
-        self.steam_api_key = steam_api_key
         self.anime: list[Anime] = []
         self.music: list[Track] = []
-        self.games: list[int] = []  # identifiants de tous les jeux de la boutique Steam
-
-    @property
-    def steam_enabled(self) -> bool:
-        return bool(self.steam_api_key)
+        self.games: list[int] = []  # identifiants des meilleures ventes de Steam en France
 
     def load_cache(self) -> None:
         try:
@@ -101,25 +99,25 @@ class PresenceSources:
             # Ancien cache, sans « movie » : un seul épisode y voulait dire « film ».
             self.anime = [Anime(**{"movie": a.get("episodes") == 1, **a}) for a in data.get("anime", [])]
             self.music = [Track(**t) for t in data.get("music", [])]
-            if self.steam_enabled:
-                self.games = [g for g in data.get("games", []) if isinstance(g, int)]
+            # « top_games » : l'ancienne liste « games », toute la boutique Steam, est ignorée.
+            self.games = [g for g in data.get("top_games", []) if isinstance(g, int)]
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError, AttributeError) as exc:  # AttributeError : entrée qui n'est pas une fiche
             logger.warning("Cache des statuts %s illisible, ignoré : %s", self.cache_file, exc)
 
     def save_cache(self) -> None:
-        data = {"anime": [asdict(a) for a in self.anime], "music": [asdict(t) for t in self.music], "games": self.games}
+        data = {"anime": [asdict(a) for a in self.anime], "music": [asdict(t) for t in self.music],
+                "top_games": self.games}
         try:
-            # Sans indentation : la liste des jeux compte plus de 100 000 identifiants.
+            # Sans indentation : le fichier n'est pas fait pour être lu.
             self.cache_file.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         except OSError as exc:
             logger.warning("Impossible d'écrire le cache des statuts %s : %s", self.cache_file, exc)
 
     async def refresh(self) -> None:
-        sources = [("anime", "Animes (AniList)", self.fetch_anime), ("music", "Musiques (Deezer)", self.fetch_music)]
-        if self.steam_enabled:
-            sources.append(("games", "Jeux (Steam)", self.fetch_games))
+        sources = [("anime", "Animes (AniList)", self.fetch_anime), ("music", "Musiques (Deezer)", self.fetch_music),
+                   ("games", "Jeux (Steam)", self.fetch_games)]
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             for attr, label, fetch in sources:
                 try:
@@ -176,20 +174,24 @@ class PresenceSources:
                     tracks[t["id"]] = Track(t["title"], t["artist"]["name"], t.get("duration") or DEFAULT_TRACK_DURATION)
         return list(tracks.values())
 
-    async def fetch_games(self, session: aiohttp.ClientSession) -> list[int]:
-        """Identifiants de tous les jeux de la boutique (sans DLC, logiciels ni vidéos), page par page."""
-        games: list[int] = []
-        last_appid = 0
-        for _ in range(STEAM_MAX_PAGES):
-            params = {"key": self.steam_api_key, "include_games": "true", "include_dlc": "false",
-                      "include_software": "false", "include_videos": "false", "include_hardware": "false",
-                      "max_results": str(STEAM_PAGE_SIZE), "last_appid": str(last_appid)}
-            data = (await get_json(session, "GET", STEAM_APPS_URL, params=params)).get("response", {})
-            games += [app["appid"] for app in data.get("apps", []) if app.get("appid")]
-            if not data.get("have_more_results") or not data.get("last_appid"):
-                break
-            last_appid = data["last_appid"]
-        return games
+    @staticmethod
+    async def fetch_games(session: aiohttp.ClientSession) -> list[int]:
+        """Identifiants des STEAM_TOP_GAMES meilleures ventes de Steam en France (jeux seulement), page par page."""
+        games: dict[int, None] = {}  # dans l'ordre, sans doublon (le classement peut bouger entre deux pages)
+        for start in range(0, STEAM_TOP_GAMES, STEAM_PAGE_SIZE):
+            params = {"filter": "topsellers", "category1": "998", "cc": "fr", "json": "1",
+                      "start": str(start), "count": str(STEAM_PAGE_SIZE)}
+            data = await get_json(session, "GET", STEAM_SEARCH_URL, params=params)
+            items = data.get("items") if isinstance(data, dict) else None
+            if not isinstance(items, list):
+                raise SourceError("réponse inattendue")
+            for item in items:
+                logo = item.get("logo") if isinstance(item, dict) else None
+                if isinstance(logo, str) and (match := _STEAM_APPID.search(logo)):
+                    games[int(match.group(1))] = None
+            if len(items) < STEAM_PAGE_SIZE:
+                break  # fin du classement
+        return list(games)[:STEAM_TOP_GAMES]
 
     @staticmethod
     async def game_details(appid: int) -> Game | None:

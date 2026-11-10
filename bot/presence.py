@@ -186,7 +186,7 @@ class PresenceManager:
         self.weights = {Kind(name): weight for name, weight in settings.presence_weights.items()}
         self.sources = PresenceSources(
             settings.history_file.with_name("presence_sources.json"),
-            settings.deezer_playlists, settings.steam_api_key,
+            settings.deezer_playlists,
         )
         self.status = Status(Kind.ONLINE)
         self.program: list[Step] = []  # étapes restantes du statut en cours
@@ -201,8 +201,6 @@ class PresenceManager:
         self._wake = asyncio.Event()  # réveille la boucle après un /skip
 
     def start(self) -> None:
-        if not self.sources.steam_enabled:
-            logger.info("STEAM_API_KEY absent : pas de statut « joue à ».")
         if self.is_night(datetime.now(self.settings.timezone)):
             self.status = Status(Kind.NIGHT)  # démarrage la nuit : absent dès le premier message
         else:
@@ -466,7 +464,7 @@ class PresenceManager:
         return [(Status(kind), seconds / speed)]
 
     async def pick_game(self) -> Game | None:
-        """Jeu au hasard dans toute la boutique Steam, en écartant les jeux pas sortis ou pour adultes."""
+        """Jeu au hasard parmi les meilleures ventes de Steam, en écartant les jeux pas sortis ou pour adultes."""
         for appid in random.sample(self.sources.games, min(GAME_ATTEMPTS, len(self.sources.games))):
             try:
                 game = await self.sources.game_details(appid)

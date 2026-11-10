@@ -196,7 +196,6 @@ class Settings:
     presence_weights: dict[str, int]
     presence_night: tuple[int, int] | None  # heures de début et de fin ; None = pas de nuit
     deezer_playlists: tuple[int, ...]
-    steam_api_key: str | None = field(repr=False)
     spontaneous_per_day: int  # messages spontanés au plus par 24 h (voir spontaneous.py) ; 0 = jamais
 
     # Divers
@@ -322,7 +321,6 @@ def load_settings() -> Settings:
         presence_weights=check(_get_presence_weights),
         presence_night=check(_get_night),
         deezer_playlists=check(_get_deezer_playlists),
-        steam_api_key=_get_str("STEAM_API_KEY"),
         # Chacun est un appel à Claude, et un bot qui parle trop souvent seul devient agaçant.
         spontaneous_per_day=check(_get_int, "SPONTANEOUS_PER_DAY", default=0, minimum=0, maximum=10),
         timezone=timezone,
@@ -344,12 +342,6 @@ def load_settings() -> Settings:
             check(_check_output, "MEMORY_DIR", settings.memory_dir, folder_only=True)
         else:
             check(_check_output, "MEMORY_DIR", settings.memory_dir)
-    # Sans clé Steam, « jeu » est retiré au tirage : s'il était le seul statut possible, le bot resterait
-    # « en ligne » sans activité.
-    if settings.presence and settings.presence_weights and not settings.steam_api_key and not any(
-            weight for name, weight in settings.presence_weights.items() if name != "jeu"):
-        errors.append("PRESENCE_WEIGHTS : le statut jeu est le seul possible, mais il nécessite STEAM_API_KEY. "
-                      "Renseigne STEAM_API_KEY ou donne une valeur supérieure à 0 à un autre statut.")
     if (settings.memory and None not in (settings.max_tokens, *memory_limits.values())
             and settings.max_tokens < (minimum := memory_max_tokens(settings)[0])):
         errors.append(f"MAX_TOKENS ({settings.max_tokens}) est trop petit pour la mémoire des membres : la "

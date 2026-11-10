@@ -171,14 +171,8 @@ class PresenceWeightsTest(unittest.TestCase):
             settings(MEMORY="off", PRESENCE_WEIGHTS="anime=5,Anime=0")
         self.assertIn("le statut anime apparaît plusieurs fois", str(ctx.exception))
 
-    def test_only_game_without_steam_key_refused(self):
-        with self.assertRaises(ConfigError) as ctx:
-            settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME)
-        self.assertIn("nécessite STEAM_API_KEY", str(ctx.exception))
-
-    def test_only_game_accepted_with_steam_key_or_presence_off(self):
-        settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME, STEAM_API_KEY="x")
-        settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME, PRESENCE="off")
+    def test_only_game_accepted(self):
+        settings(MEMORY="off", PRESENCE_WEIGHTS=self.ONLY_GAME)
 
 
 if __name__ == "__main__":

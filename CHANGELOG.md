@@ -10,6 +10,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ### Changements
 
+- **Rika joue à des jeux connus**, choisis parmi les 500 meilleures ventes de Steam en France au lieu de toute la boutique. `STEAM_API_KEY` ne sert plus et peut être retirée.
 - **Un long morceau de code écrit par Rika arrive en fichier joint**, sous son message, au lieu d'une suite de messages. Pour le faire modifier ensuite, il suffit de citer son message (« Répondre ») ou de lui renvoyer le fichier.
 - **Rika lit plusieurs fichiers texte dans un même message**, jusqu'à 100 Ko au total, et bien plus de formats de code et de configuration (`.scss`, `.svg`, `.vue`, `.conf`, `.env`, `.scala`, `.dart`…).
 - **Rika peut modifier ou supprimer ses propres messages récents**, par exemple pour cacher un spoiler sous une balise ou retirer une erreur, quand on le lui demande ou qu'elle s'en rend compte.
