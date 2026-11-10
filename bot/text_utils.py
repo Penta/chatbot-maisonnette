@@ -6,7 +6,8 @@ import re
 
 DISCORD_LIMIT = 2000
 
-_FENCE_RE = re.compile(r"^\s*```(\S*)")
+# Pas de ``` plus loin sur la ligne : « ```let x = 1``` » s'ouvre et se referme sur elle-même, ce n'est pas un bloc.
+_FENCE_RE = re.compile(r"^\s*```(?!.*```)(\S*)")
 # Au-delà, le mot collé à ``` n'est pas un nom de langage : le bloc est rouvert avec ``` seul.
 _MAX_LANGUAGE = 20
 

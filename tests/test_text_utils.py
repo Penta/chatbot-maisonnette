@@ -70,6 +70,15 @@ class SplitMessageTest(unittest.TestCase):
         text = FULL + "\n" + code_block("js", 3)
         self.assertEqual(split_message(text), [FULL, code_block("js", 3)])
 
+    def test_one_line_block_is_not_an_opening(self):
+        # « ```let x = 1``` » s'ouvre et se referme sur sa ligne : ce n'est pas le début d'un bloc. Sinon, le
+        # premier message finirait par des ``` en trop et tout le suivant s'afficherait comme du code.
+        lines = ["Pour déclarer une variable :", "```let x = 1```"]
+        lines += [f"Explication numéro {i}, avec un peu de texte pour la remplir." for i in range(60)]
+        chunks = split_message("\n".join(lines))
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual([line for chunk in chunks for line in chunk.split("\n")], lines)
+
     def test_unclosed_block_left_as_is(self):
         # Un bloc que le modèle n'a pas fermé ne l'est pas artificiellement dans le dernier morceau.
         text = FULL + "\n```python\nprint('oups')"
