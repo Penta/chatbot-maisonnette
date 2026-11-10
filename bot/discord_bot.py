@@ -209,7 +209,7 @@ class ChatBot(commands.Bot):
         self._announced = False
         self.config_error: str | None = None  # salon dédié inutilisable : main.py sort en erreur
         self._memory_warning = memory_warning(settings) if self.memory else None
-        self.presence =PresenceManager(self, self.claude, settings) if settings.presence else None
+        self.presence = PresenceManager(self, self.claude, settings) if settings.presence else None
         # Messages spontanés (voir spontaneous.py) : ils naissent des statuts, rien sans eux.
         self.spontaneous = None
         if self.presence and settings.spontaneous_per_day:
