@@ -618,9 +618,10 @@ class ChatBot(commands.Bot):
                             lines.insert(0, {"content": note})
                         async with typing(channel):
                             try:
-                                notes = await self.member_notes([p.message for p in batch])
+                                member_notes = await self.member_notes([p.message for p in batch])
                                 answer = await self.claude.ask(self.history.get(channel.id), parts,
-                                                               emojis=emoji_names(last.guild), member_notes=notes,
+                                                               emojis=emoji_names(last.guild),
+                                                               member_notes=member_notes,
                                                                own_messages=self.own_messages(channel))
                             except ClaudeError as exc:
                                 await warn_authors(self.safe_reply, [p.message for p in batch], exc.user_message)
