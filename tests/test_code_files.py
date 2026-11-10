@@ -98,6 +98,8 @@ class SentBackTest(unittest.TestCase):
             "nginx nginx.conf": "nginx.conf", "js script.mjs": "script.mjs", "scala Main.scala": "Main.scala",
             "dart app.dart": "app.dart", "zsh run.zsh": "run.zsh", "json data.jsonl": "data.jsonl",
             "bash prod.env": "prod.env", "text notes.xyz": "notes.xyz.txt", "Plan.WEIRD": "Plan.WEIRD.txt",
+            # Un numéro de version n'est pas un nom de fichier.
+            "python 2.7": "code.py", "python 3.12.1": "code.py", "node v18.4": "code.txt",
         }
         for info, expected in cases.items():
             with self.subTest(info=info):

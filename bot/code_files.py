@@ -25,8 +25,9 @@ TRUNCATED = " […]"
 # Pas de ``` plus loin sur la ligne : « ```let x = 1``` » s'ouvre et se referme sur elle-même, ce n'est pas un bloc.
 _OPENING = re.compile(r"^\s*```((?:(?!```).)*)$")
 _CLOSING = re.compile(r"^\s*```\s*$")
-# Nom de fichier écrit sur la ligne d'ouverture (« ```html index.html ») : pas de chemin, une extension.
-_FILE_NAME = re.compile(r"^[\w-][\w.-]{0,59}\.[A-Za-z0-9]{1,10}$")
+# Nom de fichier écrit sur la ligne d'ouverture (« ```html index.html ») : pas de chemin, une extension avec au
+# moins une lettre (« ```python 2.7 » donne un numéro de version, pas un nom).
+_FILE_NAME = re.compile(r"^[\w-][\w.-]{0,59}\.(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{1,10}$")
 _BLANK_LINES = re.compile(r"\n{3,}")
 
 # Extension du fichier selon le langage du bloc, quand Claude n'a pas donné de nom.
