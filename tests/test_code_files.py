@@ -138,6 +138,7 @@ class ChannelTest(unittest.IsolatedAsyncioTestCase):
         bot.history.lock.return_value = asyncio.Lock()
         bot.history.get.return_value = []
         bot.history.add_exchange = mock.AsyncMock()
+        bot.history.set_reply_ids = mock.AsyncMock()
         bot.presence_note.return_value = None
         bot.member_notes = mock.AsyncMock(return_value="")
         bot.claude.ask = mock.AsyncMock(return_value=mock.Mock(text=ANSWER, web_used=False))

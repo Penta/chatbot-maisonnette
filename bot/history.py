@@ -30,6 +30,11 @@ EDITED_MARKER = "[message modifié après ta réponse]"
 DELETED_MARKER = "[message supprimé du salon depuis ta réponse]"
 # … et sa citation dans les messages qui y répondaient.
 DELETED_REPLY = "en réponse à un message supprimé depuis"
+# Remplace une réponse du bot supprimée du salon (par lui-même ou par un modérateur), ou seulement le passage
+# supprimé quand sa réponse tenait en plusieurs messages Discord.
+OWN_DELETED_MARKER = "[ton message supprimé du salon]"
+# Suit le texte d'un message que le bot a modifié lui-même, après l'avoir envoyé.
+OWN_EDITED_MARKER = "[tu as modifié ce message après l'avoir envoyé]"
 # Ce qu'un message supprimé perd dans la mémoire : seuls son identifiant, sa date et son auteur restent.
 _DELETED_KEYS = ("reply_to", "reply", "forward", "content", "edited", "attachments")
 
@@ -106,17 +111,31 @@ class ConversationHistory:
         return [self._render(m) for m in self._data.get(key, [])]
 
     async def add_exchange(self, channel_id: int | str, lines: list[dict], assistant_text: str,
-                           web_used: bool = False) -> None:
-        """Ajoute un échange complet (lignes de l'utilisateur + réponse) puis sauvegarde."""
+                           web_used: bool = False, reply_ids: list[int] | None = None) -> dict:
+        """Ajoute un échange complet (lignes de l'utilisateur + réponse) puis sauvegarde.
+
+        reply_ids : identifiants des messages Discord de la réponse, si elle est déjà envoyée. Sinon, les donner
+        ensuite à set_reply_ids avec l'entrée de la réponse, que cette méthode renvoie."""
         key = str(channel_id)
         messages = self._data.setdefault(key, [])
         user: dict = {"role": "user", "lines": lines}
         if web_used:
             user["web"] = True
         messages.append(user)
-        messages.append({"role": "assistant", "content": assistant_text})
+        reply: dict = {"role": "assistant", "content": assistant_text}
+        if reply_ids:
+            reply["ids"] = list(reply_ids)
+        messages.append(reply)
         self._data[key] = self._trim(messages)
         await self._save()
+        return reply
+
+    async def set_reply_ids(self, reply: dict, reply_ids: list[int]) -> None:
+        """Note les identifiants des messages Discord d'une réponse envoyée après avoir été mémorisée : sa
+        suppression du salon pourra être retrouvée (voir delete)."""
+        if reply_ids:
+            reply["ids"] = list(reply_ids)
+            await self._save()
 
     async def reset(self, channel_id: int | str) -> None:
         """Vide la mémoire du salon, après la fin d'une éventuelle réponse en cours."""
@@ -139,16 +158,22 @@ class ConversationHistory:
                     return True
         return False
 
-    async def delete(self, channel_id: int | str, message_ids: set[int]) -> bool:
+    async def delete(self, channel_id: int | str, message_ids: set[int],
+                     texts: dict[int, str] | None = None) -> bool:
         """Efface le contenu des messages supprimés sur Discord, ainsi que leurs citations.
 
-        La ligne reste, réduite à sa date et à son auteur, avec la réponse du bot : la
-        conversation garde son fil sans conserver ce qui a été supprimé.
+        La ligne d'un membre reste, réduite à sa date et à son auteur, avec la réponse du bot : la
+        conversation garde son fil sans conserver ce qui a été supprimé. Une réponse du bot supprimée devient
+        OWN_DELETED_MARKER (voir _forget_reply ; texts : texte des messages supprimés, quand il est connu).
         Renvoie True si la mémoire a changé."""
         if not self._known(channel_id):
             return False
         async with self.lock(channel_id):
             changed = False
+            for entry in self._data.get(str(channel_id), []):
+                if entry["role"] == "assistant" and message_ids & set(entry.get("ids", ())):
+                    self._forget_reply(entry, message_ids, texts or {})
+                    changed = True
             for line in self._lines(channel_id):
                 if line.get("id") in message_ids and not line.get("deleted"):
                     for key in _DELETED_KEYS:
@@ -163,20 +188,62 @@ class ConversationHistory:
                 await self._save()
             return changed
 
-    async def revise_reply(self, channel_id: int | str, old: str, new: str) -> bool:
-        """Le bot a modifié l'un de ses messages (outil « mes_messages ») : sa réponse mémorisée la plus récente
-        qui contient old prend new à la place. Renvoie True si la mémoire a changé.
+    @staticmethod
+    def _forget_reply(entry: dict, message_ids: set[int], texts: dict[int, str]) -> None:
+        """Retire d'une réponse mémorisée ses messages Discord supprimés.
 
+        Une réponse en plusieurs messages perd seulement le passage supprimé, s'il se retrouve d'après le texte
+        du message (connu tant que Discord le garde en cache : le cas d'un message récent). Sinon, toute la
+        réponse est oubliée : mieux vaut perdre un passage resté visible que garder celui qu'un modérateur a retiré."""
+        deleted = [i for i in entry["ids"] if i in message_ids]
+        remaining = [i for i in entry["ids"] if i not in message_ids]
+        content = entry["content"]
+        for message_id in deleted if remaining else ():
+            text = texts.get(message_id, "").strip()
+            if not text or text not in content:
+                remaining = []
+                break
+            edited = f"{text} {OWN_EDITED_MARKER}"  # le repère d'une modification part avec le message
+            content = content.replace(edited if edited in content else text, OWN_DELETED_MARKER, 1)
+        if remaining:
+            entry["content"], entry["ids"] = content, remaining
+        else:
+            entry["content"] = OWN_DELETED_MARKER
+            del entry["ids"]
+
+    async def revise_reply(self, channel_id: int | str, message_id: int, before: str, after: str) -> bool:
+        """Le bot a modifié l'un de ses messages Discord (outil « mes_messages ») : before, son texte complet
+        avant, devient after dans la réponse mémorisée, suivi de OWN_EDITED_MARKER. Sans ce repère, le bot
+        verrait son message déjà modifié, sans trace de son geste, et croirait n'y avoir jamais touché.
+
+        La réponse se retrouve par l'identifiant du message ; pour une réponse mémorisée sans identifiants
+        (avant la 5.18), c'est la plus récente qui contient before. Renvoie True si la mémoire a changé.
         Sans verrou : appelé pendant une réponse, qui tient déjà celui du salon."""
-        for entry in reversed(self._data.get(str(channel_id), [])):
-            if entry["role"] == "assistant" and old in entry["content"]:
-                revised = entry["content"].replace(old, new, 1)
-                if not revised.strip():  # l'API refuse un message vide
-                    return False
-                entry["content"] = revised
-                await self._save()
-                return True
-        return False
+        replies = [entry for entry in self._data.get(str(channel_id), []) if entry["role"] == "assistant"]
+        entry = next((e for e in replies if message_id in e.get("ids", ())), None)
+        if entry is None:
+            entry = next((e for e in reversed(replies) if "ids" not in e and before in e["content"]), None)
+        if entry is None or not after.strip():  # l'API refuse un message vide
+            return False
+        content = entry["content"]
+        if before in content:
+            start = content.index(before)
+            end = start + len(after)
+            content = content[:start] + after + content[start + len(before):]
+            if not content[end:].startswith(f" {OWN_EDITED_MARKER}"):  # déjà là après une modification précédente
+                content = f"{content[:end]} {OWN_EDITED_MARKER}{content[end:]}"
+        elif entry.get("ids") == [message_id]:
+            content = f"{after} {OWN_EDITED_MARKER}"  # la réponse entière était ce message
+        else:
+            # Passage introuvable dans une réponse en plusieurs messages (texte mémorisé différent de celui
+            # envoyé, par exemple là où un long code est parti en fichier joint) : au moins, le bot le sait.
+            logger.warning("Message %s modifié, introuvable dans la mémoire du salon %s : seul le repère est ajouté.",
+                           message_id, channel_id)
+            if not content.endswith(OWN_EDITED_MARKER):
+                content = f"{content} {OWN_EDITED_MARKER}"
+        entry["content"] = content
+        await self._save()
+        return True
 
     # ------------------------------------------------------------ internes
 
@@ -271,6 +338,8 @@ class ConversationHistory:
                         previous["web"] = True
                 else:
                     previous["content"] += "\n" + entry["content"]
+                    if entry.get("ids"):
+                        previous["ids"] = previous.get("ids", []) + entry["ids"]
             else:
                 clean.append(entry)
         return clean
@@ -282,7 +351,12 @@ class ConversationHistory:
             return None
         if msg.get("role") == "assistant":
             content = msg.get("content")
-            return {"role": "assistant", "content": content} if isinstance(content, str) and content.strip() else None
+            if not isinstance(content, str) or not content.strip():
+                return None
+            ids = msg.get("ids")
+            if isinstance(ids, list) and ids and all(isinstance(i, int) for i in ids):
+                return {"role": "assistant", "content": content, "ids": ids}
+            return {"role": "assistant", "content": content}
         if msg.get("role") == "user" and isinstance(msg.get("lines"), list):
             lines = [line for line in msg["lines"] if cls._readable(line)]
             if lines:

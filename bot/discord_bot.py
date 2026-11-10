@@ -470,13 +470,18 @@ class ChatBot(commands.Bot):
             logger.info("Message modifié dans le salon %s : mémoire mise à jour.", payload.channel_id)
 
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
-        await self.forget_deleted(payload.channel_id, {payload.message_id})
+        cached = [payload.cached_message] if payload.cached_message else []
+        await self.forget_deleted(payload.channel_id, {payload.message_id}, cached)
 
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent) -> None:
-        await self.forget_deleted(payload.channel_id, payload.message_ids)
+        await self.forget_deleted(payload.channel_id, payload.message_ids, payload.cached_messages)
 
-    async def forget_deleted(self, channel_id: int, message_ids: set[int]) -> None:
-        """Messages supprimés : ils sortent de la mémoire et n'attendent plus de réponse."""
+    async def forget_deleted(self, channel_id: int, message_ids: set[int],
+                             cached: list[discord.Message] = ()) -> None:
+        """Messages supprimés : ils sortent de la mémoire et n'attendent plus de réponse. Le bot oublie aussi ses
+        propres messages supprimés, par lui-même (outil « mes_messages ») ou par un modérateur. cached : les
+        messages supprimés que discord.py avait encore en cache, dont le texte permet de retrouver le passage
+        d'une réponse en plusieurs messages."""
         # Listes modifiées sur place : une réponse sur le point de partir les lit encore.
         if pending := self._pending.get(channel_id):
             pending[:] = [p for p in pending if p.message.id not in message_ids]
@@ -492,7 +497,8 @@ class ChatBot(commands.Bot):
         if keys & self._waiting:
             self._waiting -= keys
             self._save_waiting()
-        if await self.history.delete(channel_id, message_ids):
+        texts = {m.id: short_emojis(m.content) for m in cached if self.user and m.author.id == self.user.id}
+        if await self.history.delete(channel_id, message_ids, texts):
             logger.info("%s message(s) supprimé(s) dans le salon %s : mémoire mise à jour.", len(message_ids), channel_id)
 
     async def handle_main_channel(self, message: discord.Message) -> None:
@@ -643,8 +649,9 @@ class ChatBot(commands.Bot):
                         continue
                     # Les longs blocs de code, envoyés en fichier joint, n'y sont que résumés (voir code_files.py).
                     memory = short_emojis(prepare(answer.text).memory)
-                    await self.history.add_exchange(channel.id, lines, memory, answer.web_used)
-                await self.send_answer(kept[-1], answer.text, reply=split)
+                    reply = await self.history.add_exchange(channel.id, lines, memory, answer.web_used)
+                # Identifiants notés pour retrouver la réponse si elle est supprimée du salon (voir forget_deleted).
+                await self.history.set_reply_ids(reply, await self.send_answer(kept[-1], answer.text, reply=split))
             finally:
                 if batch:
                     self.forget_waiting(*(p.message for p in batch))
@@ -872,16 +879,18 @@ class ChatBot(commands.Bot):
                 logger.warning("Message d'absence non envoyé : %s", exc.user_message)
                 return
             lines = [{"content": text} for text, _ in parts]
-            await self.history.add_exchange(channel.id, lines, short_emojis(prepare(answer.text).memory),
-                                            answer.web_used)
+            reply = await self.history.add_exchange(channel.id, lines, short_emojis(prepare(answer.text).memory),
+                                                    answer.web_used)
         logger.info("Conversation en cours dans #%s : le salon est prévenu de l'absence.", channel)
         prepared = prepare(answer.text)
+        sent: list[int] = []
         for chunk, extra in outgoing(discord_emojis(short_emojis(prepared.text), channel.guild), prepared.files):
             try:
-                await channel.send(chunk, **extra)
+                sent.append((await channel.send(chunk, **extra)).id)
             except DISCORD_FAILURES as exc:
                 logger.error("Envoi du message d'absence impossible : %s", exc)
-                return
+                break
+        await self.history.set_reply_ids(reply, sent)
 
     async def speak_up(self, before: Status, after: Status) -> None:
         """Vient de finir son anime ou sa partie de jeu : en parle peut-être de lui-même dans le salon dédié, s'il
@@ -931,19 +940,20 @@ class ChatBot(commands.Bot):
                 logger.info("Fin de « %s » : un membre vient d'écrire dans #%s, message spontané abandonné.",
                             before.title, channel)
                 return
-            sent = None
+            sent: list[int] = []
             prepared = prepare(answer.text)
             for chunk, extra in outgoing(discord_emojis(short_emojis(prepared.text), channel.guild), prepared.files):
                 try:
-                    sent = await channel.send(chunk, **extra)
+                    sent.append((await channel.send(chunk, **extra)).id)
                 except DISCORD_FAILURES as exc:
                     logger.error("Envoi du message spontané impossible : %s", exc)
                     break
-            if sent is None:
+            if not sent:
                 return
-            self.spontaneous.record(sent.id, discord.utils.utcnow())
+            self.spontaneous.record(sent[-1], discord.utils.utcnow())
             lines = [{"content": text} for text, _ in parts]
-            await self.history.add_exchange(channel.id, lines, short_emojis(prepared.memory), answer.web_used)
+            await self.history.add_exchange(channel.id, lines, short_emojis(prepared.memory), answer.web_used,
+                                            reply_ids=sent)
         logger.info("Fin de « %s » : message spontané dans #%s.", before.title, channel)
 
     def remember_waiting(self, message: discord.Message) -> None:
@@ -1183,8 +1193,8 @@ class ChatBot(commands.Bot):
         un outil présent à un appel et absent au suivant ferait réécrire tout le cache de prompt."""
         on_edit = None
         if remembered:
-            async def on_edit(old: str, new: str) -> None:
-                await self.history.revise_reply(channel.id, old, new)
+            async def on_edit(message_id: int, before: str, after: str) -> None:
+                await self.history.revise_reply(channel.id, message_id, before, after)
         return OwnMessages(channel, self.user, on_edit)
 
     @staticmethod
@@ -1198,21 +1208,25 @@ class ChatBot(commands.Bot):
     def timestamp(self, message: discord.Message | discord.MessageSnapshot) -> str:
         return message.created_at.astimezone(self.settings.timezone).strftime(DATE_FORMAT)
 
-    async def send_answer(self, message: discord.Message, answer: str, reply: bool = False) -> None:
+    async def send_answer(self, message: discord.Message, answer: str, reply: bool = False) -> list[int]:
+        """Envoie la réponse et renvoie les identifiants des messages Discord envoyés."""
         # Comme un humain : la réponse est postée à la suite dans le salon, sans « Répondre »
         # (sauf reply=True : le premier morceau répond alors au message).
         # Les emojis passent par leur nom : un code écrit avec un mauvais identifiant est ainsi corrigé.
         # Les longs blocs de code partent en fichier joint (voir code_files.py).
         prepared = prepare(answer)
         text = discord_emojis(short_emojis(prepared.text), message.guild)
+        sent: list[int] = []
         for i, (chunk, extra) in enumerate(outgoing(text, prepared.files)):
             # fail_if_not_exists=False : si le message a été supprimé entre-temps, envoi normal.
             reference = message.to_reference(fail_if_not_exists=False) if reply and i == 0 else None
             try:
-                await message.channel.send(chunk, reference=reference, mention_author=False, **extra)
+                sent.append((await message.channel.send(chunk, reference=reference, mention_author=False,
+                                                        **extra)).id)
             except DISCORD_FAILURES as exc:
                 logger.error("Envoi de la réponse impossible : %s", exc)
-                return
+                break
+        return sent
 
     async def safe_reply(self, message: discord.Message, text: str) -> None:
         """Prévient l'auteur d'un message en y répondant ; si Discord refuse, à la suite dans le salon. Sauf si le

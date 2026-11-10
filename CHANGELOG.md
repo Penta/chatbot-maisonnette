@@ -11,6 +11,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 ### Corrections
 
 - **Dans un message transféré, Rika reconnaît les membres, rôles et salons mentionnés** comme dans un message normal.
+- **Rika sait ce qu'il est arrivé à ses propres messages** : elle se souvient de les avoir modifiés, au lieu de croire n'y avoir jamais touché, et oublie ceux qui ont été supprimés, par elle-même ou par un modérateur.
 
 ---
 

@@ -11,7 +11,7 @@ import discord
 
 from bot.claude_client import LIMIT_NOTE, ClaudeClient
 from bot.discord_bot import ChatBot
-from bot.history import ConversationHistory
+from bot.history import OWN_DELETED_MARKER, OWN_EDITED_MARKER, ConversationHistory
 from bot.memory import MEMORY_TOOL, ToolResult
 from bot.own_messages import MAX_MESSAGE_ACTIONS, OWN_MESSAGES_TOOL, OwnMessages
 
@@ -56,7 +56,8 @@ class OwnMessagesTest(unittest.IsolatedAsyncioTestCase):
         self.mine.edit.assert_awaited_once_with(content=f"hurley c'est le cœur de lost, et ||{SPOILER}|| :hap:")
         self.theirs.edit.assert_not_awaited()
         # La mémoire du salon prend le nouveau texte.
-        self.on_edit.assert_awaited_once_with(SPOILER, f"||{SPOILER}||")
+        self.on_edit.assert_awaited_once_with(10, f"hurley c'est le cœur de lost, et {SPOILER} :hap:",
+                                              f"hurley c'est le cœur de lost, et ||{SPOILER}|| :hap:")
 
     async def test_deletes_own_message(self):
         result = await self.run_tool("supprimer", "hurley c'est le cœur")
@@ -125,19 +126,65 @@ class OwnMessagesTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReviseReplyTest(unittest.IsolatedAsyncioTestCase):
-    async def test_latest_reply_takes_new_text(self):
-        with tempfile.TemporaryDirectory() as folder:
-            history = ConversationHistory(Path(folder) / "historique.json", 10)
-            line = {"id": 5, "date": "09/11/2026 16:17", "author": "pnt", "content": "Quid de Hurley"}
-            await history.add_exchange(30, [line], f"vieux : {SPOILER}")
-            await history.add_exchange(30, [line], f"hurley, {SPOILER}")
-            self.assertTrue(await history.revise_reply(30, SPOILER, f"||{SPOILER}||"))
-            replies = [m["content"] for m in history.get(30) if m["role"] == "assistant"]
-            self.assertEqual(replies, [f"vieux : {SPOILER}", f"hurley, ||{SPOILER}||"])
-            # Gardé après un redémarrage.
-            reloaded = ConversationHistory(Path(folder) / "historique.json", 10)
-            self.assertEqual(reloaded.get(30)[-1]["content"], f"hurley, ||{SPOILER}||")
-            self.assertFalse(await history.revise_reply(30, "absent", "x"))
+    """Message modifié par le bot : la mémoire prend le nouveau texte, avec un repère qui lui dit qu'il l'a fait."""
+
+    LINE = {"id": 5, "date": "09/11/2026 16:17", "author": "pnt", "content": "Quid de Hurley"}
+
+    async def asyncSetUp(self):
+        self._folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self._folder.cleanup)
+        self.path = Path(self._folder.name) / "historique.json"
+        self.history = ConversationHistory(self.path, 10)
+
+    def replies(self, history: ConversationHistory | None = None) -> list[str]:
+        return [m["content"] for m in (history or self.history).get(30) if m["role"] == "assistant"]
+
+    async def test_edit_marked(self):
+        # Capture de la production : Rika raccourcit son message, puis, ne voyant aucune trace de la modification,
+        # croit n'y avoir jamais touché et s'accuse d'avoir menti.
+        await self.history.add_exchange(30, [self.LINE], f"tu l'auras voulu : ||{SPOILER}||", reply_ids=[40])
+        self.assertTrue(await self.history.revise_reply(30, 40, f"tu l'auras voulu : ||{SPOILER}||",
+                                                        "tu l'auras voulu : ||il meurt||"))
+        self.assertEqual(self.replies(), [f"tu l'auras voulu : ||il meurt|| {OWN_EDITED_MARKER}"])
+        # Gardé après un redémarrage.
+        self.assertEqual(self.replies(ConversationHistory(self.path, 10)), self.replies())
+
+    async def test_edited_twice_marked_once(self):
+        await self.history.add_exchange(30, [self.LINE], "première version", reply_ids=[40])
+        await self.history.revise_reply(30, 40, "première version", "deuxième version")
+        await self.history.revise_reply(30, 40, "deuxième version", "troisième version")
+        self.assertEqual(self.replies(), [f"troisième version {OWN_EDITED_MARKER}"])
+
+    async def test_found_by_id_not_by_text(self):
+        # La même phrase dans deux réponses : seule celle du message modifié change.
+        await self.history.add_exchange(30, [self.LINE], SPOILER, reply_ids=[40])
+        await self.history.add_exchange(30, [self.LINE], SPOILER, reply_ids=[41])
+        await self.history.revise_reply(30, 40, SPOILER, f"||{SPOILER}||")
+        self.assertEqual(self.replies(), [f"||{SPOILER}|| {OWN_EDITED_MARKER}", SPOILER])
+
+    async def test_one_message_of_several(self):
+        await self.history.add_exchange(30, [self.LINE], f"début\n{SPOILER}", reply_ids=[40, 41])
+        await self.history.revise_reply(30, 41, SPOILER, f"||{SPOILER}||")
+        self.assertEqual(self.replies(), [f"début\n||{SPOILER}|| {OWN_EDITED_MARKER}"])
+        # Supprimé ensuite : le repère part avec lui.
+        await self.history.delete(30, {41}, {41: f"||{SPOILER}||"})
+        self.assertEqual(self.replies(), [f"début\n{OWN_DELETED_MARKER}"])
+
+    async def test_text_not_found_still_marked(self):
+        await self.history.add_exchange(30, [self.LINE], "début\n[code envoyé en fichier joint : a.py]",
+                                        reply_ids=[40, 41])
+        with self.assertLogs("chatbot.history", "WARNING"):
+            self.assertTrue(await self.history.revise_reply(30, 41, "texte envoyé", "texte modifié"))
+        self.assertTrue(self.replies()[0].endswith(OWN_EDITED_MARKER))
+
+    async def test_reply_without_ids_found_by_text(self):
+        # Réponse mémorisée avant la 5.18 : la plus récente qui contient le texte.
+        line = self.LINE
+        await self.history.add_exchange(30, [line], f"vieux : {SPOILER}")
+        await self.history.add_exchange(30, [line], f"hurley, {SPOILER}")
+        self.assertTrue(await self.history.revise_reply(30, 41, f"hurley, {SPOILER}", f"hurley, ||{SPOILER}||"))
+        self.assertEqual(self.replies(), [f"vieux : {SPOILER}", f"hurley, ||{SPOILER}|| {OWN_EDITED_MARKER}"])
+        self.assertFalse(await self.history.revise_reply(30, 42, "absent", "x"))
 
 
 class ChatBotWiringTest(unittest.IsolatedAsyncioTestCase):
@@ -146,11 +193,26 @@ class ChatBotWiringTest(unittest.IsolatedAsyncioTestCase):
         channel = mock.Mock(id=30)
         tool = ChatBot.own_messages(bot, channel)
         self.assertIs(tool.channel, channel)
-        await tool.on_edit("ancien", "nouveau")
-        bot.history.revise_reply.assert_awaited_once_with(30, "ancien", "nouveau")
+        await tool.on_edit(40, "ancien", "nouveau")
+        bot.history.revise_reply.assert_awaited_once_with(30, 40, "ancien", "nouveau")
 
     def test_mentions_have_no_memory(self):
         self.assertIsNone(ChatBot.own_messages(mock.Mock(), mock.Mock(id=30), remembered=False).on_edit)
+
+    async def test_deleted_reply_text_given_to_memory(self):
+        # Le texte des messages du bot encore en cache sert à retrouver le passage supprimé ; jamais celui des autres.
+        bot = mock.Mock(_pending={}, _mentions={}, _deleted=set(), _waiting=set())
+        bot.user.id = BOT_ID
+        bot.history.delete = mock.AsyncMock(return_value=True)
+        mine, other = fake_message(10, BOT_ID, "Deuxième partie"), fake_message(11, MEMBER_ID, "coucou")
+        await ChatBot.forget_deleted(bot, 30, {10, 11}, [mine, other])
+        bot.history.delete.assert_awaited_once_with(30, {10, 11}, {10: "Deuxième partie"})
+
+    async def test_send_answer_gives_ids(self):
+        channel = mock.Mock()
+        channel.send = mock.AsyncMock(side_effect=[mock.Mock(id=20), mock.Mock(id=21)])
+        message = mock.Mock(channel=channel, guild=None)
+        self.assertEqual(await ChatBot.send_answer(mock.Mock(), message, "a" * 2500), [20, 21])
 
 
 class ClaudeToolTest(unittest.IsolatedAsyncioTestCase):

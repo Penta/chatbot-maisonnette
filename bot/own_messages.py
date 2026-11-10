@@ -47,11 +47,11 @@ OWN_MESSAGES_TOOL = {
 class OwnMessages:
     """Exécute l'outil « mes_messages » dans un salon : seuls les messages du bot lui-même y sont touchés.
 
-    on_edit(ancien, nouveau) : appelé après une modification, pour que la mémoire du salon garde le
-    nouveau texte (None hors du salon dédié, qui n'a pas de mémoire)."""
+    on_edit(identifiant, texte avant, texte après) : appelé après une modification, pour que la mémoire du salon
+    garde le nouveau texte du message (None hors du salon dédié, qui n'a pas de mémoire)."""
 
     def __init__(self, channel: discord.abc.Messageable, me: discord.abc.User,
-                 on_edit: Callable[[str, str], Awaitable[None]] | None = None):
+                 on_edit: Callable[[int, str, str], Awaitable[None]] | None = None):
         self.channel = channel
         self.me = me
         self.on_edit = on_edit
@@ -97,7 +97,7 @@ class OwnMessages:
             return ToolResult("Discord a refusé la modification.", is_error=True)
         logger.info("Message %s du bot modifié dans #%s.", message.id, self.channel)
         if self.on_edit:
-            await self.on_edit(passage, text)
+            await self.on_edit(message.id, current, revised)
         return ToolResult("Message modifié.")
 
     async def _delete(self, message: discord.Message) -> ToolResult:

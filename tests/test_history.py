@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-from bot.history import (DELETED_MARKER, DELETED_REPLY, EDITED_MARKER, FILE_VERSION, IMAGE_MARKER, WEB_MARKER,
-                         ConversationHistory, images_marker, render_line)
+from bot.history import (DELETED_MARKER, DELETED_REPLY, EDITED_MARKER, FILE_VERSION, IMAGE_MARKER,
+                         OWN_DELETED_MARKER, WEB_MARKER, ConversationHistory, images_marker, render_line)
 
 CHANNEL = 123
 DATE = "lundi 2 novembre 2026 à 14:05"
@@ -295,6 +295,59 @@ class DeleteTest(HistoryTestCase):
     async def test_unknown_channel(self):
         self.assertFalse(await self.history.delete(456, {1}))
         self.assertEqual(self.history.get(456), [])
+
+
+class OwnReplyDeletedTest(HistoryTestCase):
+    """Réponse du bot supprimée du salon, par lui-même ou par un modérateur : retrouvée par ses identifiants."""
+
+    async def asyncSetUp(self):
+        self.history = self.load()
+        await self.history.add_exchange(CHANNEL, [line(1, "Et la fin ?")], "À la fin, il meurt.", reply_ids=[10])
+        reply = await self.history.add_exchange(CHANNEL, [line(2, "Et la suite ?")], "Première partie\nDeuxième partie")
+        await self.history.set_reply_ids(reply, [20, 21])
+
+    def replies(self) -> list[str]:
+        return [m["content"] for m in self.history.get(CHANNEL) if m["role"] == "assistant"]
+
+    async def test_reply_forgotten(self):
+        self.assertTrue(await self.history.delete(CHANNEL, {10}))
+        self.assertEqual(self.replies(), [OWN_DELETED_MARKER, "Première partie\nDeuxième partie"])
+        self.assertNotIn("il meurt", self.path.read_text(encoding="utf-8"))
+        self.assertEqual(self.load().get(CHANNEL), self.history.get(CHANNEL))  # gardé après un redémarrage
+
+    async def test_question_kept(self):
+        await self.history.delete(CHANNEL, {10})
+        self.assertEqual(self.history.get(CHANNEL)[0]["content"], said("Et la fin ?"))
+
+    async def test_only_the_deleted_part(self):
+        self.assertTrue(await self.history.delete(CHANNEL, {21}, {21: "Deuxième partie"}))
+        self.assertEqual(self.replies()[1], f"Première partie\n{OWN_DELETED_MARKER}")
+        # L'autre message reste retrouvable.
+        await self.history.delete(CHANNEL, {20}, {20: "Première partie"})
+        self.assertEqual(self.replies()[1], OWN_DELETED_MARKER)
+
+    async def test_whole_reply_when_part_unknown(self):
+        # Texte inconnu (message sorti du cache de Discord) : rien du passage supprimé ne doit rester.
+        await self.history.delete(CHANNEL, {21})
+        self.assertEqual(self.replies()[1], OWN_DELETED_MARKER)
+
+    async def test_whole_reply_when_part_not_found(self):
+        await self.history.delete(CHANNEL, {21}, {21: "texte qui n'est pas dans la mémoire"})
+        self.assertEqual(self.replies()[1], OWN_DELETED_MARKER)
+
+    async def test_all_parts_at_once(self):
+        await self.history.delete(CHANNEL, {20, 21})
+        self.assertEqual(self.replies()[1], OWN_DELETED_MARKER)
+
+    async def test_already_forgotten(self):
+        await self.history.delete(CHANNEL, {10})
+        self.assertFalse(await self.history.delete(CHANNEL, {10}))
+
+    async def test_reply_without_ids_untouched(self):
+        # Réponse mémorisée avant cette version, ou jamais envoyée : rien à retrouver.
+        await self.history.add_exchange(CHANNEL, [line(3, "Salut")], "Coucou")
+        self.assertFalse(await self.history.delete(CHANNEL, {30}))
+        self.assertEqual(self.replies()[-1], "Coucou")
 
 
 class ResetTest(HistoryTestCase):
