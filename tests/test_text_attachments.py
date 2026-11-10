@@ -83,7 +83,11 @@ class CitedFilesTest(unittest.IsolatedAsyncioTestCase):
         reply, images, texts = await ChatBot.read_reply(self.bot, message, want_images=True)
         self.assertEqual(texts, [("index.html", "<p>page</p>")])
         self.assertEqual(reply, "en réponse à ton message du 10/11/2026 17:00 : « Tiens, ta page ! » "
-                                "[fichier texte « index.html » : son contenu est joint à ce message]")
+                                "[fichier texte « index.html » : tu le lis avec ce message seulement, son contenu "
+                                "n'est pas conservé en mémoire]")
+        # Cette description reste dans la mémoire : relue trois messages plus tard, elle ne doit pas laisser croire
+        # que Rika a encore le fichier sous les yeux (elle le réécrirait de mémoire au lieu de le redemander).
+        self.assertNotIn("est joint", reply)
 
     async def test_cited_file_shares_the_limit(self):
         # Penta joint déjà 80 Ko de fichiers : les 30 Ko du fichier cité ne tiennent plus, il n'est pas téléchargé.

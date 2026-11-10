@@ -1115,7 +1115,9 @@ class ChatBot(commands.Bot):
         elif images:
             parts.append("[son image est jointe à ce message]")
         for name in texts:
-            parts.append(f"[fichier texte « {name} » : son contenu est joint à ce message]")
+            # Gardé dans la mémoire : vrai aussi quand elle relit ce message plus tard, sans le fichier.
+            parts.append(f"[fichier texte « {name} » : tu le lis avec ce message seulement, son contenu n'est pas "
+                         "conservé en mémoire]")
         for name in too_long:
             parts.append(f"[fichier texte « {name} » : trop long pour être relu avec ce message]")
         if attachments and not (images or texts or too_long):
