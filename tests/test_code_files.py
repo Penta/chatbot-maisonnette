@@ -7,7 +7,8 @@ import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
-from bot.code_files import MIN_LINES, outgoing, prepare
+from bot.attachments import looks_like_image, looks_like_text
+from bot.code_files import _EXTENSIONS, MIN_LINES, outgoing, prepare
 from bot.discord_bot import ChatBot, PendingMessage
 
 
@@ -75,6 +76,20 @@ class PrepareTest(unittest.TestCase):
     def test_threshold(self):
         self.assertEqual(prepare(f"```\n{code(MIN_LINES - 1)}\n```").files, [])
         self.assertEqual(len(prepare(f"```\n{code(MIN_LINES)}\n```").files), 1)
+
+
+class SentBackTest(unittest.TestCase):
+    def test_every_file_rika_names_can_be_sent_back(self):
+        # Penta reçoit style.scss (ou un .svg, un .vue…) et le renvoie pour le faire modifier : le bot doit le
+        # lire comme un fichier texte. Un .svg, que Discord annonce comme une image, ne doit pas être pris pour
+        # une photo.
+        for language in sorted(set(_EXTENSIONS) | {"klingon"}):
+            name = prepare(f"```{language}\n{PAGE}\n```").files[0].name
+            with self.subTest(name=name):
+                attachment = mock.Mock(filename=name, content_type="image/svg+xml" if name.endswith(".svg")
+                                       else "text/plain")
+                self.assertTrue(looks_like_text(attachment))
+                self.assertFalse(looks_like_image(attachment))
 
 
 class OutgoingTest(unittest.TestCase):

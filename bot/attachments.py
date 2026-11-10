@@ -79,6 +79,9 @@ async def fetch(attachment: discord.Attachment, kind: str, error: type[UserFacin
 
 
 def looks_like_image(attachment: discord.Attachment) -> bool:
+    # Un .svg est annoncé comme une image (image/svg+xml), mais c'est du texte : il est lu comme tel.
+    if looks_like_text(attachment):
+        return False
     return (attachment.content_type or "").startswith("image/") or attachment.filename.lower().endswith(IMAGE_EXTENSIONS)
 
 
