@@ -1097,7 +1097,7 @@ class ChatBot(commands.Bot):
 
         images = await self.attachments.quoted_images(snapshot.attachments, "transféré")
         # Contrairement à un message normal, le contenu transféré garde ses mentions brutes (<@123>).
-        content = self.clean_mentions(snapshot.content, message.guild)
+        content = await self.clean_mentions(snapshot.content, message.guild)
         description = self.describe_quoted(content, images, snapshot.attachments, snapshot.stickers)
         if not description:
             return None, []
@@ -1131,14 +1131,18 @@ class ChatBot(commands.Bot):
             parts.append("[sticker]")
         return " ".join(parts)
 
-    def clean_mentions(self, text: str, guild: discord.Guild | None) -> str:
+    async def clean_mentions(self, text: str, guild: discord.Guild | None) -> str:
         """Remplace les mentions brutes (<@123>, <@&123>, <#123>) par des noms, comme le fait clean_content :
         un membre de ce serveur est nommé par son surnom sur le serveur. Un rôle ou un salon inconnu (transfert
         venu d'un autre serveur) devient « @rôle » ou « #salon »."""
+        # Sans l'option « membres », le bot ne garde presque personne en mémoire, et discord.py ne lit pas
+        # les personnes mentionnées dans un transfert : chacune est demandée à Discord, une seule fois.
+        names: dict[int, str] = {}
+        for user_id in {int(found) for found in USER_MENTION.findall(text)}:
+            names[user_id] = await self.mentioned_name(user_id, guild)
+
         def user_name(match: re.Match) -> str:
-            user_id = int(match.group(1))
-            user = (guild.get_member(user_id) if guild else None) or self.get_user(user_id)
-            return f"@{user.display_name}" if user else "@quelqu'un"
+            return names[int(match.group(1))]
 
         def role_name(match: re.Match) -> str:
             role = guild.get_role(int(match.group(1))) if guild else None
@@ -1151,6 +1155,22 @@ class ChatBot(commands.Bot):
         text = USER_MENTION.sub(user_name, text)
         text = ROLE_MENTION.sub(role_name, text)
         return CHANNEL_MENTION.sub(channel_name, text)
+
+    async def mentioned_name(self, user_id: int, guild: discord.Guild | None) -> str:
+        """« @nom » d'une personne mentionnée : son surnom si elle est membre du serveur, sinon son nom global,
+        ou « @quelqu'un » si Discord ne la connaît pas ou ne répond pas."""
+        user = guild.get_member(user_id) if guild else None
+        try:
+            if not user and guild:
+                try:
+                    user = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    pass  # pas membre du serveur : son nom global
+            if not user:
+                user = self.get_user(user_id) or await self.fetch_user(user_id)
+        except discord.HTTPException as e:  # NotFound compris : compte supprimé
+            logger.debug("Nom de la personne mentionnée %s introuvable : %s", user_id, e)
+        return f"@{user.display_name}" if user else "@quelqu'un"
 
     # ------------------------------------------------------------- envoi
 
