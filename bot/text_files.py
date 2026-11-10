@@ -12,9 +12,14 @@ TEXT_EXTENSIONS = (
     ".srt", ".vtt", ".html", ".htm", ".css", ".scss", ".svg", ".tex", ".sql",
     ".py", ".js", ".ts", ".jsx", ".tsx", ".vue", ".svelte", ".java", ".kt", ".swift", ".c", ".h", ".cpp", ".hpp",
     ".cs", ".go", ".rs", ".rb", ".php", ".lua", ".sh", ".bat", ".ps1", ".dockerfile",
+    ".conf", ".cnf", ".env", ".properties", ".service", ".tf", ".hcl", ".nginx", ".jsonl", ".ndjson", ".rst",
+    ".sass", ".less", ".mjs", ".cjs", ".mdx", ".astro", ".scala", ".dart", ".kts", ".gradle", ".groovy", ".cc",
+    ".cxx", ".hh", ".m", ".r", ".pl", ".jl", ".hs", ".ex", ".exs", ".erl", ".clj", ".elm", ".ml", ".fs", ".vb",
+    ".zig", ".nim", ".asm", ".zsh", ".fish", ".cmd", ".psm1", ".graphql", ".gql", ".proto", ".diff", ".patch",
+    ".cmake", ".mk", ".j2", ".jinja", ".twig", ".ejs", ".hbs",
 )
 # Toute extension que code_files.py peut donner à un fichier envoyé par le bot doit être ici : on doit pouvoir
-# le lui renvoyer pour le faire modifier.
+# le lui renvoyer pour le faire modifier. Un nom choisi par Claude avec une autre extension reçoit « .txt » en plus.
 # Taille maximale d'un fichier .txt (environ 25 000 tokens, pour limiter le coût d'un message).
 TEXT_FILE_MAX_BYTES = 100_000
 

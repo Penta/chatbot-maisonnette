@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import discord
 
+from .text_files import TEXT_EXTENSIONS
 from .text_utils import split_message
 
 # Au-delà de l'une de ces tailles, un bloc de code part en fichier joint ; en dessous (un extrait de quelques
@@ -115,7 +116,8 @@ def _file_name(info: str) -> str:
     words = info.split()
     for word in words:
         if _FILE_NAME.match(word):
-            return word
+            # Extension que le bot ne relit pas : « .txt » en plus, pour qu'on puisse lui renvoyer le fichier.
+            return word if word.lower().endswith(TEXT_EXTENSIONS) else f"{word}.txt"
     language = words[0].lower() if words else ""
     return f"code.{_EXTENSIONS.get(language, 'txt')}"
 

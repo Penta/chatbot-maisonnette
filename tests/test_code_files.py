@@ -91,6 +91,20 @@ class SentBackTest(unittest.TestCase):
                 self.assertTrue(looks_like_text(attachment))
                 self.assertFalse(looks_like_image(attachment))
 
+    def test_names_chosen_by_claude_can_be_sent_back(self):
+        # Claude nomme lui-même le fichier (« ```nginx nginx.conf ») : le membre doit pouvoir le renvoyer, que
+        # l'extension soit courante (lue telle quelle) ou inconnue (le nom est alors complété par .txt).
+        cases = {
+            "nginx nginx.conf": "nginx.conf", "js script.mjs": "script.mjs", "scala Main.scala": "Main.scala",
+            "dart app.dart": "app.dart", "zsh run.zsh": "run.zsh", "json data.jsonl": "data.jsonl",
+            "bash prod.env": "prod.env", "text notes.xyz": "notes.xyz.txt", "Plan.WEIRD": "Plan.WEIRD.txt",
+        }
+        for info, expected in cases.items():
+            with self.subTest(info=info):
+                name = prepare(f"```{info}\n{PAGE}\n```").files[0].name
+                self.assertEqual(name, expected)
+                self.assertTrue(looks_like_text(mock.Mock(filename=name, content_type="text/plain")))
+
 
 class OutgoingTest(unittest.TestCase):
     def test_files_go_with_the_last_message(self):
