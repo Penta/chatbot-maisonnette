@@ -1120,7 +1120,9 @@ class ChatBot(commands.Bot):
                          "conservé en mémoire]")
         for name in too_long:
             parts.append(f"[fichier texte « {name} » : trop long pour être relu avec ce message]")
-        if attachments and not (images or texts or too_long):
+        # Les autres pièces jointes (images non transmises, vidéos…) sont signalées, même à côté d'un fichier lu.
+        described = set(texts) | set(too_long)
+        if not images and any(getattr(a, "filename", None) not in described for a in attachments):
             parts.append("[pièce jointe]")
         if stickers:
             parts.append("[sticker]")

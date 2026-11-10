@@ -97,6 +97,17 @@ class CitedFilesTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[fichier texte « index.html » : trop long pour être relu avec ce message]", reply)
         self.page.read.assert_not_awaited()
 
+    async def test_cited_photo_still_mentioned_next_to_the_file(self):
+        # Lucas envoie sa propre photo en citant un message qui contient une photo et notes.txt : la photo citée
+        # n'est pas transmise (celle de Lucas passe avant), mais Rika doit encore savoir qu'elle existe.
+        photo = mock.Mock(filename="photo.jpg", content_type="image/jpeg", size=1000)
+        notes = text_file("notes.txt", "à faire")
+        self.cited.attachments = [photo, notes]
+        reply, images, _ = await ChatBot.read_reply(self.bot, mock.Mock(), want_images=False)
+        self.assertEqual(images, [])
+        self.assertIn("[pièce jointe]", reply)
+        self.assertIn("notes.txt", reply)
+
     async def test_given_to_claude_but_not_kept_in_memory(self):
         bot = mock.Mock()
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
