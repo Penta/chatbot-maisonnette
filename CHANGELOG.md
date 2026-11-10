@@ -20,6 +20,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 - **Une réponse où Rika atteint sa limite de notes en mémoire coûte moins cher.**
 - **Une longue réponse contenant un petit bout de code ne s'affiche plus en partie comme du code.**
 - **Rika ne regarde plus un épisode d'anime qui n'est pas encore sorti.**
+- **Le statut de Rika ne reste plus figé quand AniList, Deezer ou Steam répond de façon inattendue.**
 
 ---
 

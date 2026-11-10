@@ -311,6 +311,28 @@ class SteamTopGamesTest(unittest.IsolatedAsyncioTestCase):
             await self.fetch([{"success": 2}])
 
 
+class RefreshTest(unittest.IsolatedAsyncioTestCase):
+    """Une source qui répond de façon inattendue ne fait pas perdre les autres, ni planter le démarrage du statut."""
+
+    async def test_unexpected_answer_keeps_other_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sources = PresenceSources(Path(tmp) / "presence_sources.json", deezer_playlists=(1,))
+            sources.music = [Track("Ancien titre", "Artiste", 180)]
+
+            async def fake_get_json(session, method, url, **kwargs):
+                return {"data": [{"id": 7, "title": "Titre", "artist": None}]}  # artiste vide : forme inattendue
+            anime = [Anime("Frieren", 28, 24)]
+            with mock.patch("bot.presence_sources.get_json", fake_get_json), \
+                    mock.patch.object(PresenceSources, "fetch_anime", mock.AsyncMock(return_value=anime)), \
+                    mock.patch.object(PresenceSources, "fetch_games", mock.AsyncMock(return_value=[10, 20])), \
+                    self.assertLogs("chatbot.presence", "ERROR"):
+                await sources.refresh()
+            self.assertEqual(sources.anime, anime)
+            self.assertEqual(sources.music, [Track("Ancien titre", "Artiste", 180)])  # liste précédente gardée
+            self.assertEqual(sources.games, [10, 20])
+            self.assertTrue(sources.cache_file.exists())
+
+
 class RestoreTest(unittest.IsolatedAsyncioTestCase):
     """presence_state.json relu au démarrage : le statut reprend là où il en serait."""
 

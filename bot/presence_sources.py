@@ -127,6 +127,11 @@ class PresenceSources:
                 except SourceError as exc:
                     logger.warning("%s : lecture impossible (%s), %d élément(s) conservé(s).",
                                    label, exc, len(getattr(self, attr)))
+                except Exception:
+                    # Réponse d'une forme inattendue : sans ce filet, les autres sources seraient perdues, et
+                    # au démarrage (PresenceManager._run) toute la gestion du statut s'arrêterait.
+                    logger.exception("%s : réponse inattendue, %d élément(s) conservé(s).",
+                                     label, len(getattr(self, attr)))
                 else:
                     setattr(self, attr, items)
                     logger.info("%s : %d élément(s).", label, len(items))
