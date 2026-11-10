@@ -8,11 +8,15 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.17
 
+*Publiée le 10 novembre 2026*
+
+> **En bref :** des jeux connus dans le statut, du code envoyé en fichier joint, plusieurs fichiers texte lus d'un coup, et une Rika qui peut retoucher ses propres messages.
+
 ### Changements
 
 - **Rika joue à des jeux connus**, choisis parmi les 500 meilleures ventes de Steam en France au lieu de toute la boutique. `STEAM_API_KEY` ne sert plus et peut être retirée.
 - **Un long morceau de code écrit par Rika arrive en fichier joint**, sous son message, au lieu d'une suite de messages. Pour le faire modifier ensuite, il suffit de citer son message (« Répondre ») ou de lui renvoyer le fichier.
-- **Rika lit plusieurs fichiers texte dans un même message**, jusqu'à 100 Ko au total, et bien plus de formats de code et de configuration (`.scss`, `.svg`, `.vue`, `.conf`, `.env`, `.scala`, `.dart`…).
+- **Rika lit plusieurs fichiers texte dans un même message**, jusqu'à 100 Ko au total, y compris ceux d'un message cité, et bien plus de formats de code et de configuration (`.scss`, `.svg`, `.vue`, `.conf`, `.env`, `.scala`, `.dart`…).
 - **Rika peut modifier ou supprimer ses propres messages récents**, par exemple pour cacher un spoiler sous une balise ou retirer une erreur, quand on le lui demande ou qu'elle s'en rend compte.
 
 ### Corrections
