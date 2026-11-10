@@ -32,7 +32,8 @@ CODE_NOTE = (
     "\n\nUn long bloc de code part tout seul en fichier joint sous ton message : écris ton message normalement, "
     "sans parler de code « ci-dessous », et donne le nom du fichier sur la ligne d'ouverture du bloc "
     "(```html index.html). « [code envoyé en fichier joint : …] » dans un ancien message veut dire que tu as bien "
-    "envoyé ce fichier, mais que tu ne vois plus son contenu : pour le modifier, demande qu'on te le renvoie."
+    "envoyé ce fichier, mais que tu ne vois plus son contenu : pour le modifier, demande qu'on cite ton message "
+    "ou qu'on te le renvoie."
 )
 
 # Ajouté lui aussi automatiquement. Formulation générique recommandée par Anthropic : nommer les

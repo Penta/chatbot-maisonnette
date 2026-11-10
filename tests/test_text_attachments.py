@@ -51,10 +51,11 @@ class MainChannelTest(unittest.IsolatedAsyncioTestCase):
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
         bot.read_attachments = mock.AsyncMock(return_value=([], [("index.html", "<p>page</p>"), ("style.css", "p{}")]))
         bot.read_gif = mock.AsyncMock(return_value=None)
-        bot.read_reply = mock.AsyncMock(return_value=(None, []))
+        bot.read_reply = mock.AsyncMock(return_value=(None, [], []))
         bot.timestamp.return_value = "10/11/2026 18:00"
         bot.message_body.return_value = "corrige le menu"
-        message = mock.Mock(attachments=[mock.Mock(), mock.Mock()], stickers=[])
+        message = mock.Mock(attachments=[text_file("index.html", "<p>page</p>"), text_file("style.css", "p{}")],
+                            stickers=[])
         message.author.display_name = message.author.name = "Penta"
         pending = await ChatBot.read_main_message(bot, message, "corrige le menu")
         self.assertIn("<p>page</p>", pending.extra)
@@ -64,13 +65,57 @@ class MainChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("style.css", pending.line["attachments"][1])
 
 
+class CitedFilesTest(unittest.IsolatedAsyncioTestCase):
+    """Penta clique sur « Répondre » sous le message de Rika qui porte index.html : elle relit le fichier."""
+
+    def setUp(self):
+        self.bot = bot = mock.Mock()
+        bot.attachments = AttachmentReader(SimpleNamespace(max_image_size=10_000_000, pdf_max_pages=10))
+        bot.timestamp.return_value = "10/11/2026 17:00"
+        bot.describe_quoted = ChatBot.describe_quoted
+        self.page = text_file("index.html", "<p>page</p>")
+        self.cited = mock.Mock(clean_content="Tiens, ta page !", attachments=[self.page], stickers=[])
+        self.cited.author = bot.user
+        bot.fetch_cited = mock.AsyncMock(return_value=self.cited)
+
+    async def test_cited_file_read(self):
+        message = mock.Mock(attachments=[])
+        reply, images, texts = await ChatBot.read_reply(self.bot, message, want_images=True)
+        self.assertEqual(texts, [("index.html", "<p>page</p>")])
+        self.assertEqual(reply, "en réponse à ton message du 10/11/2026 17:00 : « Tiens, ta page ! » "
+                                "[fichier texte « index.html » : son contenu est joint à ce message]")
+
+    async def test_cited_file_shares_the_limit(self):
+        # Penta joint déjà 80 Ko de fichiers : les 30 Ko du fichier cité ne tiennent plus, il n'est pas téléchargé.
+        self.page.size = 30_000
+        reply, _, texts = await ChatBot.read_reply(self.bot, mock.Mock(), want_images=True, text_budget=20_000)
+        self.assertEqual(texts, [])
+        self.assertIn("[fichier texte « index.html » : trop long pour être relu avec ce message]", reply)
+        self.page.read.assert_not_awaited()
+
+    async def test_given_to_claude_but_not_kept_in_memory(self):
+        bot = mock.Mock()
+        bot.read_forward = mock.AsyncMock(return_value=(None, []))
+        bot.read_attachments = mock.AsyncMock(return_value=([], []))
+        bot.read_gif = mock.AsyncMock(return_value=None)
+        bot.read_reply = mock.AsyncMock(return_value=("en réponse à ton message : [fichier texte « index.html »]", [],
+                                                      [("index.html", "<p>page</p>")]))
+        bot.timestamp.return_value = "10/11/2026 18:00"
+        bot.message_body.return_value = "mets le menu en bleu"
+        message = mock.Mock(attachments=[], stickers=[])
+        message.author.display_name = message.author.name = "Penta"
+        pending = await ChatBot.read_main_message(bot, message, "mets le menu en bleu")
+        self.assertIn("[Contenu du fichier « index.html » du message cité :]\n<p>page</p>", pending.extra)
+        self.assertNotIn("<p>page</p>", str(pending.line))  # la mémoire ne garde que le nom
+
+
 class MentionTest(unittest.IsolatedAsyncioTestCase):
     async def test_every_text_file_of_a_mention_read(self):
         bot = mock.Mock()
         bot.settings.pdf_max_pages = 10
         bot.attachments = AttachmentReader(SimpleNamespace(max_image_size=10_000_000, pdf_max_pages=10))
         bot.read_gif = mock.AsyncMock(return_value=None)
-        bot.read_reply = mock.AsyncMock(return_value=(None, []))
+        bot.read_reply = mock.AsyncMock(return_value=(None, [], []))
         bot.timestamp.return_value = "10/11/2026 18:00"
         message = mock.Mock(attachments=[text_file("index.html", "<p>page</p>"), text_file("style.css", "p{}")],
                             clean_content="@Rika regarde", guild=None)

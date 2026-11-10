@@ -104,6 +104,11 @@ def check_text_size(attachments: list[discord.Attachment]) -> None:
     raise TextFileError(f"Ces fichiers texte sont trop longs ensemble (maximum {limit} Ko au total).")
 
 
+def text_budget(attachments: list[discord.Attachment]) -> int:
+    """Place, en octets, que les fichiers texte d'un message laissent à ceux du message qu'il cite."""
+    return max(0, TEXT_FILE_MAX_BYTES - sum(a.size for a in attachments if looks_like_text(a)))
+
+
 def readable_size(attachments: list[discord.Attachment]) -> int:
     """Taille annoncée des fichiers que le bot peut lire : les autres (vidéos…) ne sont jamais téléchargés."""
     return sum(a.size for a in attachments if looks_like_image(a) or looks_like_pdf(a) or looks_like_text(a))
@@ -112,6 +117,11 @@ def readable_size(attachments: list[discord.Attachment]) -> int:
 def text_file_prompt(name: str, content: str) -> str:
     """Contenu d'un fichier .txt tel qu'il est transmis à Claude."""
     return f"\n\n[Contenu du fichier joint « {name} » :]\n{content}\n[Fin du fichier « {name} »]"
+
+
+def quoted_text_prompt(name: str, content: str) -> str:
+    """Contenu d'un fichier texte du message cité, tel qu'il est transmis à Claude."""
+    return f"\n\n[Contenu du fichier « {name} » du message cité :]\n{content}\n[Fin du fichier « {name} »]"
 
 
 def text_file_marker(name: str) -> str:
@@ -236,6 +246,29 @@ class AttachmentReader:
             elif isinstance(result, BaseException):
                 raise result
         return [r for r in results if isinstance(r, ImageData)]
+
+    async def quoted_text_files(self, attachments: list[discord.Attachment],
+                                budget: int) -> tuple[list[tuple[str, str]], list[str]]:
+        """Fichiers texte d'un message cité, tant qu'ils tiennent dans budget octets (ce que les fichiers du
+        message lui-même laissent des TEXT_FILE_MAX_BYTES). Renvoie (nom, contenu) de ceux qui sont lus, et le
+        nom de ceux qui ne tiennent pas. Un fichier qui ne se télécharge pas est ignoré."""
+        kept, too_long = [], []
+        for attachment in (a for a in attachments if looks_like_text(a)):
+            if attachment.size <= budget:
+                kept.append(attachment)
+                budget -= attachment.size
+            else:
+                too_long.append(attachment.filename)
+        results = await asyncio.gather(*(self.download_text_file(a) for a in kept), return_exceptions=True)
+        read = []
+        for result in results:
+            if isinstance(result, TextFileError):
+                logger.warning("Fichier texte du message cité ignoré : %s", result.user_message)
+            elif isinstance(result, BaseException):
+                raise result
+            else:
+                read.append(result)
+        return read, too_long
 
     async def read_gif(self, embeds: list[discord.Embed]) -> tuple[ImageData, str, str] | None:
         """GIF choisi dans le sélecteur de Discord (voir gifs.py) : (image, explication pour Claude, repère pour

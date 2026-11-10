@@ -214,7 +214,7 @@ class ReadGifTest(unittest.IsolatedAsyncioTestCase):
         bot.read_gif = ChatBot.read_gif.__get__(bot)
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
         bot.read_attachments = mock.AsyncMock(return_value=([], []))
-        bot.read_reply = mock.AsyncMock(return_value=(None, []))
+        bot.read_reply = mock.AsyncMock(return_value=(None, [], []))
         bot.message_body = ChatBot.message_body
         bot.timestamp.return_value = "07/11/2026 18:00"
         self.downloaded: list[str] = []
@@ -241,7 +241,7 @@ class ReadGifTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(pending.line["attachments"],
                          ["[GIF « No No No Don'T Do That » : tu l'as vu à ce moment-là, mais il n'est plus "
                           "conservé en mémoire]"])
-        self.bot.read_reply.assert_awaited_once_with(message, want_images=False)
+        self.bot.read_reply.assert_awaited_once_with(message, want_images=False, text_budget=mock.ANY)
 
     async def test_claude_sees_favorite_gif(self):
         # GIF des favoris : son aperçu arrive aussi après le message, et il est attendu.

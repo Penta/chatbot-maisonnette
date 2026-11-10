@@ -20,7 +20,7 @@ from discord.ext import commands
 from . import VERSION
 from .attachments import (FILES_QUEUE_FULL, MAX_IMAGES, AttachmentReader, AttachmentRefused, HeldFiles,
                           attachments_marker, looks_like_image, looks_like_pdf, looks_like_text, readable_size,
-                          text_file_marker, text_file_prompt)
+                          quoted_text_prompt, text_budget, text_file_marker, text_file_prompt)
 from .claude_client import ClaudeClient, ClaudeError
 from .code_files import outgoing, prepare
 from .commands import memory_command, reset_command, server_memory_command, skip_command
@@ -40,7 +40,7 @@ from .own_messages import OwnMessages
 from .pdf_files import PdfError
 from .presence import PresenceManager, Status
 from .spontaneous import CHANCE, RECENT_MESSAGES, SpontaneousLog, finished_activity, is_silence, occasion_note
-from .text_files import TextFileError
+from .text_files import TEXT_FILE_MAX_BYTES, TextFileError
 
 logger = logging.getLogger("chatbot.discord")
 
@@ -555,8 +555,10 @@ class ChatBot(commands.Bot):
         if gif:
             images = [gif[0]]
 
-        # Les images du message cité ne sont utilisées que si le message n'en contient pas lui-même.
-        reply, reply_images = await self.read_reply(message, want_images=not (images or forward_images))
+        # Les images du message cité ne sont utilisées que si le message n'en contient pas lui-même. Ses fichiers
+        # texte se partagent la limite de taille avec ceux du message.
+        reply, reply_images, reply_texts = await self.read_reply(
+            message, want_images=not (images or forward_images), text_budget=text_budget(message.attachments))
         images = images or forward_images or reply_images
 
         line: dict = {"id": message.id, "date": self.timestamp(message), "author": author_name(message.author)}
@@ -572,6 +574,8 @@ class ChatBot(commands.Bot):
         for name, text in text_files:
             extra += text_file_prompt(name, text)
             markers.append(text_file_marker(name))
+        for name, text in reply_texts:
+            extra += quoted_text_prompt(name, text)
         if markers:
             line["attachments"] = markers
         return PendingMessage(message, line, extra, images)
@@ -786,7 +790,8 @@ class ChatBot(commands.Bot):
         gif = None if images else await self.read_gif(message)
         if gif:
             images = [gif[0]]
-        reply, reply_images = await self.read_reply(message, want_images=not images)
+        reply, reply_images, reply_texts = await self.read_reply(message, want_images=not images,
+                                                                 text_budget=text_budget(message.attachments))
         images = images or reply_images
 
         bot_name = f"@{message.guild.me.display_name}" if message.guild else f"@{self.user.name}"
@@ -795,6 +800,8 @@ class ChatBot(commands.Bot):
         prompt = f"{self.timestamp(message)}, {author_name(message.author)} te mentionne{reply_part} et écrit : {text}"
         if gif:
             prompt += gif[1]
+        for name, content in reply_texts:
+            prompt += quoted_text_prompt(name, content)
 
         text_files = [a for a in message.attachments if looks_like_text(a)]
         if text_files:
@@ -1054,21 +1061,26 @@ class ChatBot(commands.Bot):
         cited = await self.fetch_cited(message)
         return cited is not None and cited.author == self.user
 
-    async def read_reply(self, message: discord.Message, want_images: bool) -> tuple[str | None, list[ImageData]]:
+    async def read_reply(self, message: discord.Message, want_images: bool, text_budget: int = TEXT_FILE_MAX_BYTES
+                         ) -> tuple[str | None, list[ImageData], list[tuple[str, str]]]:
         """Lit le message auquel l'utilisateur répond.
 
-        Renvoie sa description pour Claude, ainsi que ses images si want_images est vrai,
-        ou (None, []) si le message ne répond à rien ou si le message cité est inaccessible.
+        Renvoie sa description pour Claude, ses images si want_images est vrai, et (nom, contenu) de ses fichiers
+        texte qui tiennent dans text_budget octets ; ou (None, [], []) si le message ne répond à rien ou si le
+        message cité est inaccessible. Citer un fichier de code envoyé par le bot suffit ainsi à le lui faire
+        relire, sans le renvoyer.
         """
         cited = await self.fetch_cited(message)
         if cited is None:
-            return None, []
+            return None, [], []
 
         images = await self.attachments.quoted_images(cited.attachments, "cité") if want_images else []
-        description = self.describe_quoted(cited.clean_content, images, cited.attachments, cited.stickers)
+        texts, too_long = await self.attachments.quoted_text_files(cited.attachments, text_budget)
+        description = self.describe_quoted(cited.clean_content, images, cited.attachments, cited.stickers,
+                                           [name for name, _ in texts], too_long)
 
         who = "à ton message" if cited.author == self.user else f"au message de {author_name(cited.author)}"
-        return f"en réponse {who} du {self.timestamp(cited)} : {description or '(message vide)'}", images
+        return f"en réponse {who} du {self.timestamp(cited)} : {description or '(message vide)'}", images, texts
 
     async def read_forward(self, message: discord.Message) -> tuple[str | None, list[ImageData]]:
         """Lit le message transféré (bouton « Transférer » de Discord).
@@ -1089,8 +1101,11 @@ class ChatBot(commands.Bot):
         return f"du {self.timestamp(snapshot)} : {description}", images
 
     @staticmethod
-    def describe_quoted(content: str, images: list[ImageData], attachments: list, stickers: list) -> str:
-        """Description d'un message cité ou transféré (vide s'il n'y a rien de lisible)."""
+    def describe_quoted(content: str, images: list[ImageData], attachments: list, stickers: list,
+                        texts: list[str] | None = None, too_long: list[str] | None = None) -> str:
+        """Description d'un message cité ou transféré (vide s'il n'y a rien de lisible). texts : noms de ses
+        fichiers texte lus ; too_long : ceux qui ne l'ont pas été, faute de place."""
+        texts, too_long = texts or [], too_long or []
         content = short_emojis(content.strip())
         if len(content) > QUOTE_MAX_LENGTH:
             content = content[:QUOTE_MAX_LENGTH].rstrip() + "…"
@@ -1099,7 +1114,11 @@ class ChatBot(commands.Bot):
             parts.append(f"[ses {len(images)} images sont jointes à ce message]")
         elif images:
             parts.append("[son image est jointe à ce message]")
-        elif attachments:
+        for name in texts:
+            parts.append(f"[fichier texte « {name} » : son contenu est joint à ce message]")
+        for name in too_long:
+            parts.append(f"[fichier texte « {name} » : trop long pour être relu avec ce message]")
+        if attachments and not (images or texts or too_long):
             parts.append("[pièce jointe]")
         if stickers:
             parts.append("[sticker]")
