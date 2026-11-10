@@ -126,7 +126,7 @@ class PendingMessage:
     """Message du salon dédié, prêt à être envoyé à Claude."""
     message: discord.Message
     line: dict   # ligne conservée en mémoire (voir history.render_line)
-    extra: str   # ajouté pour Claude seulement : explication du GIF, contenu du fichier texte joint
+    extra: str   # ajouté pour Claude seulement : explication du GIF, contenu des fichiers texte joints
     images: list[ImageData]  # images (ou la grille d'un GIF), ou un seul PDF
 
     @property
@@ -550,7 +550,7 @@ class ChatBot(commands.Bot):
         attachments = await self.read_attachments(message)
         if attachments is False:
             return None  # pièce jointe refusée, l'utilisateur a été prévenu
-        images, text_file = attachments
+        images, text_files = attachments
         gif = None if images else await self.read_gif(message)
         if gif:
             images = [gif[0]]
@@ -569,9 +569,9 @@ class ChatBot(commands.Bot):
             line["content"] = self.message_body(message)
         markers = [gif[2] if gif else attachments_marker(images)] if images else []
         extra = gif[1] if gif else ""
-        if text_file:
-            extra += text_file_prompt(*text_file)
-            markers.append(text_file_marker(text_file[0]))
+        for name, text in text_files:
+            extra += text_file_prompt(name, text)
+            markers.append(text_file_marker(name))
         if markers:
             line["attachments"] = markers
         return PendingMessage(message, line, extra, images)
@@ -770,8 +770,8 @@ class ChatBot(commands.Bot):
     async def mention_part(self, message: discord.Message) -> tuple[str, list[ImageData]] | None:
         """Une mention telle qu'elle est transmise à Claude, ou None si une pièce jointe est refusée
         (l'auteur a été prévenu)."""
-        # Seuls les MAX_IMAGES premières images (à défaut, le premier PDF) et le premier fichier texte
-        # de la mention sont lus (les autres pièces jointes sont ignorées). Les images du message cité
+        # Seuls les MAX_IMAGES premières images (à défaut, le premier PDF) et les fichiers texte de la
+        # mention sont lus (les autres pièces jointes sont ignorées). Les images du message cité
         # ne servent que s'il n'y a ni image ni PDF.
         image_files = [a for a in message.attachments if looks_like_image(a)][:MAX_IMAGES]
         pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
@@ -799,7 +799,8 @@ class ChatBot(commands.Bot):
         text_files = [a for a in message.attachments if looks_like_text(a)]
         if text_files:
             try:
-                prompt += text_file_prompt(*await self.attachments.download_text_file(text_files[0]))
+                for name, content in await self.attachments.download_text_files(text_files):
+                    prompt += text_file_prompt(name, content)
             except TextFileError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return None
@@ -1011,7 +1012,7 @@ class ChatBot(commands.Bot):
 
     async def read_attachments(
         self, message: discord.Message
-    ) -> tuple[list[ImageData], tuple[str, str] | None] | bool:
+    ) -> tuple[list[ImageData], list[tuple[str, str]]] | bool:
         """Pièces jointes du message (voir AttachmentReader.read), ou False si l'envoi est refusé :
         l'utilisateur est alors prévenu."""
         try:

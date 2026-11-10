@@ -213,7 +213,7 @@ class ReadGifTest(unittest.IsolatedAsyncioTestCase):
         bot.attachments = AttachmentReader(mock.Mock())
         bot.read_gif = ChatBot.read_gif.__get__(bot)
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
-        bot.read_attachments = mock.AsyncMock(return_value=([], None))
+        bot.read_attachments = mock.AsyncMock(return_value=([], []))
         bot.read_reply = mock.AsyncMock(return_value=(None, []))
         bot.message_body = ChatBot.message_body
         bot.timestamp.return_value = "07/11/2026 18:00"

@@ -78,7 +78,7 @@ class MessageOrderTest(unittest.IsolatedAsyncioTestCase):
         bot = self.bot
         bot.read_main_message = ChatBot.read_main_message.__get__(bot)
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
-        bot.read_attachments = mock.AsyncMock(return_value=([], None))
+        bot.read_attachments = mock.AsyncMock(return_value=([], []))
         bot.read_reply = mock.AsyncMock(return_value=(None, []))
         bot.read_gif = mock.AsyncMock(return_value=None)
         bot.message_body = ChatBot.message_body

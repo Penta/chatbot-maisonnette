@@ -14,8 +14,9 @@ PDF_MEDIA_TYPE = "application/pdf"
 # occuperaient beaucoup de mémoire le temps de l'envoi.
 REQUEST_MAX_BASE64 = 24_000_000  # octets une fois encodés en base64 (+33 %), soit 18 Mo bruts
 REQUEST_MAX_PAGES = 100  # pages de PDF et images, jusqu'à plusieurs milliers de tokens chacune
-# Caractères de texte par requête, fichiers texte joints compris : environ 100 000 tokens, soit trois fichiers
-# à leur taille maximale (TEXT_FILE_MAX_BYTES). Laisse de la place à l'historique, et limite le coût d'un appel.
+# Caractères de texte par requête, fichiers texte joints compris : environ 100 000 tokens, soit trois messages
+# avec leurs fichiers à la taille maximale (TEXT_FILE_MAX_BYTES). Laisse de la place à l'historique, et limite
+# le coût d'un appel.
 REQUEST_MAX_TEXT = 350_000
 
 

@@ -19,11 +19,11 @@ Le bot parle français. Sa façon de parler, son caractère et son nom sont ceux
 
 ### Pièces jointes
 
-Dans son salon comme dans les mentions, le bot lit jusqu'à 4 images ou un PDF, et un fichier texte, par message :
+Dans son salon comme dans les mentions, le bot lit jusqu'à 4 images ou un PDF, et des fichiers texte, par message :
 
 - **Images** (JPEG, PNG, GIF, WebP, BMP, TIFF) : réduites et converties automatiquement si besoin, 40 millions de pixels au plus (120 millions pour la plupart des photos JPEG). Avec plusieurs images, il peut les comparer ou parler de « la deuxième ».
 - **PDF** : texte, tableaux, schémas et pages scannées, 20 pages (`PDF_MAX_PAGES`) et 20 Mo au plus. Les PDF protégés par un mot de passe d'ouverture sont refusés ; ceux protégés seulement contre la modification ou l'impression sont lus.
-- **Fichiers texte** (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, configuration, HTML, code…), 100 Ko au plus.
+- **Fichiers texte** (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, configuration, HTML, code…) : autant qu'on veut dans un même message, 100 Ko au total.
 - **GIF du sélecteur de Discord** : pour un GIF Klipy ou un favori gardé par Discord, le bot voit 6 moments de l'animation, du début à la fin, réunis en une seule image ; pour les autres (Giphy, anciens favoris Tenor), seulement la première image. Une image partagée par un lien Discord (par exemple une photo déjà postée ailleurs) est vue elle aussi.
 
 Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a lu, sans en repayer le contenu à chaque message.

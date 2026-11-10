@@ -93,6 +93,17 @@ def looks_like_pdf(attachment: discord.Attachment) -> bool:
     return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
 
 
+def check_text_size(attachments: list[discord.Attachment]) -> None:
+    """Lève TextFileError si ces fichiers texte dépassent ensemble TEXT_FILE_MAX_BYTES : vérifié sur la taille
+    annoncée par Discord, avant tout téléchargement."""
+    if sum(a.size for a in attachments) <= TEXT_FILE_MAX_BYTES:
+        return
+    limit = TEXT_FILE_MAX_BYTES // 1000
+    if len(attachments) == 1:
+        raise TextFileError(f"Ce fichier texte est trop long (maximum {limit} Ko).")
+    raise TextFileError(f"Ces fichiers texte sont trop longs ensemble (maximum {limit} Ko au total).")
+
+
 def readable_size(attachments: list[discord.Attachment]) -> int:
     """Taille annoncée des fichiers que le bot peut lire : les autres (vidéos…) ne sont jamais téléchargés."""
     return sum(a.size for a in attachments if looks_like_image(a) or looks_like_pdf(a) or looks_like_text(a))
@@ -124,14 +135,14 @@ class AttachmentReader:
 
     async def read(
         self, attachments: list[discord.Attachment]
-    ) -> tuple[list[ImageData], tuple[str, str] | None]:
-        """Vérifie les pièces jointes du salon dédié, puis télécharge les images (ou le PDF) et le fichier texte.
+    ) -> tuple[list[ImageData], list[tuple[str, str]]]:
+        """Vérifie les pièces jointes du salon dédié, puis télécharge les images (ou le PDF) et les fichiers texte.
 
-        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) du fichier texte ou None).
+        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) de chaque fichier texte).
         Lève AttachmentRefused, ImageError, PdfError ou TextFileError si l'envoi est refusé.
         """
         if not attachments:
-            return [], None
+            return [], []
 
         images = [a for a in attachments if looks_like_image(a)]
         pdfs = [a for a in attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
@@ -145,21 +156,26 @@ class AttachmentReader:
             raise AttachmentRefused(f"{MAX_IMAGES} images par message au maximum, s'il te plaît.")
         if pdfs and (images or len(pdfs) > 1):
             raise AttachmentRefused("Un seul PDF par message, sans image, s'il te plaît.")
-        if len(texts) > 1:
-            raise AttachmentRefused("Un seul fichier texte par message, s'il te plaît.")
+        check_text_size(texts)
 
         if images:
             files = await self.download_images(images)
         else:
             files = [await self.download_pdf(pdfs[0])] if pdfs else []
-        text_file = await self.download_text_file(texts[0]) if texts else None
-        return files, text_file
+        return files, await self.download_text_files(texts)
+
+    async def download_text_files(self, attachments: list[discord.Attachment]) -> list[tuple[str, str]]:
+        """Télécharge des fichiers texte en parallèle et renvoie (nom, contenu) de chacun, dans l'ordre du message
+        (lève TextFileError s'ils sont trop longs ensemble ou si l'un ne se télécharge pas)."""
+        check_text_size(attachments)
+        results = await asyncio.gather(*(self.download_text_file(a) for a in attachments), return_exceptions=True)
+        for result in results:  # la première erreur dans l'ordre du message, pas la plus rapide
+            if isinstance(result, BaseException):
+                raise result
+        return list(results)
 
     async def download_text_file(self, attachment: discord.Attachment) -> tuple[str, str]:
         """Télécharge un fichier texte et renvoie (nom, contenu) (lève TextFileError en cas de problème)."""
-        if attachment.size > TEXT_FILE_MAX_BYTES:
-            raise TextFileError(f"Ce fichier texte est trop long (maximum {TEXT_FILE_MAX_BYTES // 1000} Ko).")
-
         data = await fetch(attachment, "fichier", TextFileError)
         return attachment.filename, decode_text_file(data)
 
