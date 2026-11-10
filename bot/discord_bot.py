@@ -45,6 +45,8 @@ from .text_files import TEXT_FILE_MAX_BYTES, TextFileError
 logger = logging.getLogger("chatbot.discord")
 
 USER_MENTION = re.compile(r"<@!?(\d+)>")
+ROLE_MENTION = re.compile(r"<@&(\d+)>")
+CHANNEL_MENTION = re.compile(r"<#(\d+)>")
 # Couleur du message de démarrage : le vert du statut « en ligne » de Discord.
 ONLINE_COLOR = discord.Color(0x23A55A)
 # Longueur maximale du texte d'un message cité ou transféré transmis à Claude.
@@ -1095,7 +1097,7 @@ class ChatBot(commands.Bot):
 
         images = await self.attachments.quoted_images(snapshot.attachments, "transféré")
         # Contrairement à un message normal, le contenu transféré garde ses mentions brutes (<@123>).
-        content = self.clean_mentions(snapshot.content)
+        content = self.clean_mentions(snapshot.content, message.guild)
         description = self.describe_quoted(content, images, snapshot.attachments, snapshot.stickers)
         if not description:
             return None, []
@@ -1129,12 +1131,26 @@ class ChatBot(commands.Bot):
             parts.append("[sticker]")
         return " ".join(parts)
 
-    def clean_mentions(self, text: str) -> str:
-        """Remplace les mentions brutes (<@123>) par des pseudos, comme le fait clean_content."""
-        def name(match: re.Match) -> str:
-            user = self.get_user(int(match.group(1)))
+    def clean_mentions(self, text: str, guild: discord.Guild | None) -> str:
+        """Remplace les mentions brutes (<@123>, <@&123>, <#123>) par des noms, comme le fait clean_content :
+        un membre de ce serveur est nommé par son surnom sur le serveur. Un rôle ou un salon inconnu (transfert
+        venu d'un autre serveur) devient « @rôle » ou « #salon »."""
+        def user_name(match: re.Match) -> str:
+            user_id = int(match.group(1))
+            user = (guild.get_member(user_id) if guild else None) or self.get_user(user_id)
             return f"@{user.display_name}" if user else "@quelqu'un"
-        return USER_MENTION.sub(name, text)
+
+        def role_name(match: re.Match) -> str:
+            role = guild.get_role(int(match.group(1))) if guild else None
+            return f"@{role.name}" if role else "@rôle"
+
+        def channel_name(match: re.Match) -> str:
+            channel = self.get_channel(int(match.group(1)))
+            return f"#{channel.name}" if channel and getattr(channel, "name", None) else "#salon"
+
+        text = USER_MENTION.sub(user_name, text)
+        text = ROLE_MENTION.sub(role_name, text)
+        return CHANNEL_MENTION.sub(channel_name, text)
 
     # ------------------------------------------------------------- envoi
 
