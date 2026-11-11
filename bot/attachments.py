@@ -31,6 +31,8 @@ DOWNLOAD_TIMEOUT = 30
 # de PDF reçus pendant une absence feraient tomber le bot, et de nouveau à chaque reprise au redémarrage.
 # Le conteneur de production a 512 Mo pour tout le bot, préparation des images comprise.
 HELD_FILES_MAX_BYTES = 100_000_000
+# Vidéos : jamais lues, mais nommées comme telles pour Claude (voir unread_marker).
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".wmv", ".flv", ".mpg", ".mpeg", ".3gp")
 FILES_QUEUE_FULL = "J'ai déjà trop de fichiers en attente : renvoie ton message un peu plus tard, s'il te plaît."
 
 
@@ -91,7 +93,9 @@ def looks_like_pdf(attachment: discord.Attachment) -> bool:
 
 
 def looks_like_video(attachment: discord.Attachment) -> bool:
-    return (attachment.content_type or "").startswith("video/")
+    # L'extension sert quand Discord n'annonce pas le type, comme pour les images et les PDF.
+    return ((attachment.content_type or "").startswith("video/")
+            or attachment.filename.lower().endswith(VIDEO_EXTENSIONS))
 
 
 class Picked(NamedTuple):

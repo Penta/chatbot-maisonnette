@@ -40,6 +40,13 @@ class PickTest(unittest.TestCase):
         self.assertEqual((picked.images, picked.pdf, picked.texts), ([], None, []))
         self.assertEqual(picked.unread, ["[vidéo jointe « clip.mp4 » : tu ne peux pas voir les vidéos]"])
 
+    def test_video_without_announced_type(self):
+        # Discord n'annonce pas toujours le type : l'extension suffit à reconnaître une vidéo.
+        for name in ("clip.mp4", "Souvenir.MOV", "extrait.webm", "film.mkv"):
+            with self.subTest(name=name):
+                picked = pick([attachment(name, None)], read_pdfs=True)
+                self.assertEqual(picked.unread, [f"[vidéo jointe « {name} » : tu ne peux pas voir les vidéos]"])
+
     def test_extra_images_counted(self):
         shots = [image(f"capture{i}.png") for i in range(6)]
         picked = pick(shots, read_pdfs=True)
