@@ -35,6 +35,8 @@ DELETED_REPLY = "en réponse à un message supprimé depuis"
 OWN_DELETED_MARKER = "[ton message supprimé du salon]"
 # Suit le texte d'un message que le bot a modifié lui-même, après l'avoir envoyé.
 OWN_EDITED_MARKER = "[tu as modifié ce message après l'avoir envoyé]"
+# Caractères ajoutés de chaque côté d'un passage modifié, au plus, pour le retrouver sans ambiguïté en mémoire.
+MAX_EDIT_MARGIN = 40
 # Ce qu'un message supprimé perd dans la mémoire : seuls son identifiant, sa date et son auteur restent.
 _DELETED_KEYS = ("reply_to", "reply", "forward", "content", "edited", "attachments")
 
@@ -64,6 +66,54 @@ def render_line(line: dict) -> str:
         if line.get("edited"):
             text += f" {EDITED_MARKER}"
     return " ".join([text, *line.get("attachments", [])])
+
+
+def _changed_part(before: str, after: str, content: str) -> tuple[int, int, str] | None:
+    """Où appliquer dans content (texte mémorisé) la modification d'un message de before en after.
+
+    Le message entier s'il y figure tel quel. Sinon, le passage qui a changé, élargi autour jusqu'à ne figurer
+    qu'une fois dans content : le texte mémorisé peut différer de celui envoyé (un long code y est résumé par une
+    ligne, absente du message). Renvoie (début, longueur du passage dans content, nouveau texte), ou None."""
+    if before in content:
+        return content.index(before), len(before), after
+    prefix = 0
+    while prefix < min(len(before), len(after)) and before[prefix] == after[prefix]:
+        prefix += 1
+    suffix = 0
+    while suffix < min(len(before), len(after)) - prefix and before[-1 - suffix] == after[-1 - suffix]:
+        suffix += 1
+    # Mots entiers : le repère ne coupe pas un mot (« fonctionn [repère]e » pour « marche » devenu « fonctionne »).
+    while prefix and before[prefix - 1].isalnum():
+        prefix -= 1
+    while suffix and before[-suffix].isalnum():
+        suffix -= 1
+    # Au moins un mot de contexte de chaque côté (sauf au bord du message) : un mot changé seul peut figurer
+    # ailleurs dans la réponse, et c'est là qu'il serait remplacé.
+    left, right = _word_before(before, prefix), _word_after(before, len(before) - suffix)
+    for margin in range(MAX_EDIT_MARGIN + 1):
+        start, end = max(0, left - margin), min(len(before), right + margin)
+        part = before[start:end]
+        if part and content.count(part) == 1:
+            return content.index(part), len(part), after[start:len(after) - (len(before) - end)]
+    return None
+
+
+def _word_before(text: str, i: int) -> int:
+    """Début du mot qui précède la position i (séparateurs compris), ou 0."""
+    while i and not text[i - 1].isalnum():
+        i -= 1
+    while i and text[i - 1].isalnum():
+        i -= 1
+    return i
+
+
+def _word_after(text: str, i: int) -> int:
+    """Fin du mot qui suit la position i (séparateurs compris), ou la fin du texte."""
+    while i < len(text) and not text[i].isalnum():
+        i += 1
+    while i < len(text) and text[i].isalnum():
+        i += 1
+    return i
 
 
 class ConversationHistory:
@@ -226,17 +276,16 @@ class ConversationHistory:
         if entry is None or not after.strip():  # l'API refuse un message vide
             return False
         content = entry["content"]
-        if before in content:
-            start = content.index(before)
-            end = start + len(after)
-            content = content[:start] + after + content[start + len(before):]
+        found = _changed_part(before, after, content)
+        if found:
+            start, length, new = found
+            end = start + len(new)
+            content = content[:start] + new + content[start + length:]
             if not content[end:].startswith(f" {OWN_EDITED_MARKER}"):  # déjà là après une modification précédente
                 content = f"{content[:end]} {OWN_EDITED_MARKER}{content[end:]}"
-        elif entry.get("ids") == [message_id]:
-            content = f"{after} {OWN_EDITED_MARKER}"  # la réponse entière était ce message
         else:
-            # Passage introuvable dans une réponse en plusieurs messages (texte mémorisé différent de celui
-            # envoyé, par exemple là où un long code est parti en fichier joint) : au moins, le bot le sait.
+            # Passage introuvable dans la mémoire : au moins, le bot sait qu'il a modifié son message. Le reste de
+            # la réponse est gardé (y compris la ligne d'un code parti en fichier joint, absente du texte envoyé).
             logger.warning("Message %s modifié, introuvable dans la mémoire du salon %s : seul le repère est ajouté.",
                            message_id, channel_id)
             if not content.endswith(OWN_EDITED_MARKER):

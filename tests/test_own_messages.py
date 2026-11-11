@@ -170,6 +170,25 @@ class ReviseReplyTest(unittest.IsolatedAsyncioTestCase):
         await self.history.delete(30, {41}, {41: f"||{SPOILER}||"})
         self.assertEqual(self.replies(), [f"début\n{OWN_DELETED_MARKER}"])
 
+    async def test_code_file_kept_when_text_differs(self):
+        # Un long code parti en fichier joint : sur Discord, le texte n'a pas la ligne qui le résume en mémoire. Seul
+        # le passage modifié change, et Rika se souvient encore d'avoir envoyé le fichier.
+        code = "[code envoyé en fichier joint : code.py, 30 lignes]"
+        await self.history.add_exchange(30, [self.LINE], f"Voici le code :\n{code}\nDis-moi si ça marche.",
+                                        reply_ids=[40])
+        await self.history.revise_reply(30, 40, "Voici le code :\nDis-moi si ça marche.",
+                                        "Voici le code :\nDis-moi si ça fonctionne.")
+        self.assertEqual(self.replies(),
+                         [f"Voici le code :\n{code}\nDis-moi si ça fonctionne. {OWN_EDITED_MARKER}"])
+
+    async def test_changed_word_found_elsewhere_untouched(self):
+        # « envoyé » figure ailleurs dans la réponse : sans contexte autour, c'est ce mot-là qui aurait changé.
+        await self.history.add_exchange(30, [self.LINE], "début\n[code envoyé en fichier joint : a.py]",
+                                        reply_ids=[40])
+        with self.assertLogs("chatbot.history", "WARNING"):
+            await self.history.revise_reply(30, 40, "texte envoyé", "texte modifié")
+        self.assertEqual(self.replies(), [f"début\n[code envoyé en fichier joint : a.py] {OWN_EDITED_MARKER}"])
+
     async def test_text_not_found_still_marked(self):
         await self.history.add_exchange(30, [self.LINE], "début\n[code envoyé en fichier joint : a.py]",
                                         reply_ids=[40, 41])
