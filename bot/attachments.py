@@ -85,9 +85,11 @@ def looks_like_image(attachment: discord.Attachment) -> bool:
 
 
 def looks_like_text(attachment: discord.Attachment) -> bool:
-    # Un .ts est du TypeScript ou une vidéo MPEG-TS (video/mp2t) : un fichier que Discord annonce comme vidéo
-    # ou son n'est jamais lu comme du texte.
-    if (attachment.content_type or "").startswith(("video/", "audio/")):
+    # Un .ts est du TypeScript ou une vidéo MPEG-TS. Discord déduit le type de l'extension et annonce souvent
+    # video/mp2t même pour du code : seule la taille tranche. Au-delà de la limite des fichiers texte, un fichier
+    # annoncé comme vidéo ou son en est presque sûrement un (il serait refusé comme texte de toute façon).
+    if ((attachment.content_type or "").startswith(("video/", "audio/"))
+            and attachment.size > TEXT_FILE_MAX_BYTES):
         return False
     return attachment.filename.lower().endswith(TEXT_EXTENSIONS)
 

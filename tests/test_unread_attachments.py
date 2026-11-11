@@ -56,12 +56,14 @@ class PickTest(unittest.TestCase):
         self.assertEqual(picked.unread, ["[vidéo jointe « extrait.ts » : tu ne peux pas voir les vidéos]"])
 
     def test_announced_audio_not_read_as_text(self):
-        picked = pick([attachment("chanson.ts", "audio/mp2t")], read_pdfs=True)
+        picked = pick([attachment("chanson.ts", "audio/mp2t", size=3_000_000)], read_pdfs=True)
         self.assertEqual(picked.texts, [])
         self.assertEqual(len(picked.unread), 1)
 
     def test_typescript_still_read(self):
-        for content_type in ("text/plain", "application/typescript", None):
+        # Discord déduit le type de l'extension, et .ts est souvent rangé parmi les vidéos (video/mp2t) : le
+        # code.ts que Rika a envoyé, renvoyé par un membre, doit rester lu comme du code.
+        for content_type in ("text/plain", "application/typescript", None, "video/mp2t"):
             with self.subTest(content_type=content_type):
                 code = attachment("app.ts", content_type)
                 self.assertEqual(pick([code], read_pdfs=True).texts, [code])
