@@ -23,7 +23,7 @@ class SeveralTextFilesTest(unittest.IsolatedAsyncioTestCase):
     async def test_whole_site_read(self):
         # Penta renvoie index.html, style.css et script.js d'un coup : les trois sont lus, dans l'ordre.
         files = [text_file("index.html", "<p>page</p>"), text_file("style.css", "p{}"), text_file("script.js", "go()")]
-        images, texts = await self.reader.read(files)
+        images, texts, _ = await self.reader.read(files)
         self.assertEqual(images, [])
         self.assertEqual(texts, [("index.html", "<p>page</p>"), ("style.css", "p{}"), ("script.js", "go()")])
 
@@ -42,14 +42,14 @@ class SeveralTextFilesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.user_message, "Ce fichier texte est trop long (maximum 100 Ko).")
 
     async def test_no_attachment(self):
-        self.assertEqual(await self.reader.read([]), ([], []))
+        self.assertEqual(await self.reader.read([]), ([], [], []))
 
 
 class MainChannelTest(unittest.IsolatedAsyncioTestCase):
     async def test_each_file_given_to_claude_and_named_in_memory(self):
         bot = mock.Mock()
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
-        bot.read_attachments = mock.AsyncMock(return_value=([], [("index.html", "<p>page</p>"), ("style.css", "p{}")]))
+        bot.read_attachments = mock.AsyncMock(return_value=([], [("index.html", "<p>page</p>"), ("style.css", "p{}")], []))
         bot.read_gif = mock.AsyncMock(return_value=None)
         bot.read_reply = mock.AsyncMock(return_value=(None, [], []))
         bot.timestamp.return_value = "10/11/2026 18:00"
@@ -111,7 +111,7 @@ class CitedFilesTest(unittest.IsolatedAsyncioTestCase):
     async def test_given_to_claude_but_not_kept_in_memory(self):
         bot = mock.Mock()
         bot.read_forward = mock.AsyncMock(return_value=(None, []))
-        bot.read_attachments = mock.AsyncMock(return_value=([], []))
+        bot.read_attachments = mock.AsyncMock(return_value=([], [], []))
         bot.read_gif = mock.AsyncMock(return_value=None)
         bot.read_reply = mock.AsyncMock(return_value=("en réponse à ton message : [fichier texte « index.html »]", [],
                                                       [("index.html", "<p>page</p>")]))

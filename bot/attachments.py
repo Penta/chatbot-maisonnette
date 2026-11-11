@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import NamedTuple
 
 import aiohttp
 import discord
@@ -64,10 +65,6 @@ class HeldFiles:
             self._sizes.pop(message_id, None)
 
 
-class AttachmentRefused(UserFacingError):
-    """Pièces jointes refusées avant téléchargement (type non pris en charge, trop nombreuses…)."""
-
-
 async def fetch(attachment: discord.Attachment, kind: str, error: type[UserFacingError]) -> bytes:
     """Télécharge une pièce jointe (`kind` : « image », « PDF », « fichier »). En cas d'échec
     (erreur HTTP, coupure réseau, délai dépassé), lève `error` qui demande de réessayer."""
@@ -91,6 +88,45 @@ def looks_like_text(attachment: discord.Attachment) -> bool:
 
 def looks_like_pdf(attachment: discord.Attachment) -> bool:
     return attachment.content_type == "application/pdf" or attachment.filename.lower().endswith(PDF_EXTENSIONS)
+
+
+def looks_like_video(attachment: discord.Attachment) -> bool:
+    return (attachment.content_type or "").startswith("video/")
+
+
+class Picked(NamedTuple):
+    """Pièces jointes d'un message triées : ce que le bot lit, et ce qu'il ignore (voir pick)."""
+    images: list[discord.Attachment]
+    pdf: discord.Attachment | None
+    texts: list[discord.Attachment]
+    unread: list[str]  # repères pour Claude : ce qu'il n'a pas vu, pour qu'il puisse le dire lui-même
+
+
+def unread_marker(attachment: discord.Attachment) -> str:
+    """Repère d'une pièce jointe que le bot ne sait pas lire (vidéo, archive…)."""
+    if looks_like_video(attachment):
+        return f"[vidéo jointe « {attachment.filename} » : tu ne peux pas voir les vidéos]"
+    return f"[fichier joint « {attachment.filename} » : tu ne peux pas ouvrir ce type de fichier]"
+
+
+def pick(attachments: list[discord.Attachment], read_pdfs: bool) -> Picked:
+    """Choisit ce qui est lu, la même chose dans le salon dédié et dans les mentions : les MAX_IMAGES premières
+    images, à défaut le premier PDF (read_pdfs : PDF acceptés par le .env), et les fichiers texte. Le reste
+    n'empêche pas de répondre au message : il est signalé à Claude."""
+    images = [a for a in attachments if looks_like_image(a)]
+    pdfs = [a for a in attachments if looks_like_pdf(a)] if read_pdfs else []
+    texts = [a for a in attachments if looks_like_text(a)]
+    unread = [unread_marker(a) for a in attachments if a not in images + pdfs + texts]
+    if len(images) > MAX_IMAGES:
+        extra = len(images) - MAX_IMAGES
+        unread.append(f"[{extra} autre{'s' if extra > 1 else ''} image{'s' if extra > 1 else ''} "
+                      f"jointe{'s' if extra > 1 else ''}, que tu n'as pas vue{'s' if extra > 1 else ''} : "
+                      f"{MAX_IMAGES} au maximum par message]")
+    pdf = None if images else (pdfs[0] if pdfs else None)
+    for skipped in pdfs[1:] if pdf else pdfs:
+        unread.append(f"[PDF joint « {skipped.filename} », que tu n'as pas lu : un seul PDF par message, "
+                      "et seulement sans image]")
+    return Picked(images[:MAX_IMAGES], pdf, texts, unread)
 
 
 def check_text_size(attachments: list[discord.Attachment]) -> None:
@@ -145,34 +181,20 @@ class AttachmentReader:
 
     async def read(
         self, attachments: list[discord.Attachment]
-    ) -> tuple[list[ImageData], list[tuple[str, str]]]:
-        """Vérifie les pièces jointes du salon dédié, puis télécharge les images (ou le PDF) et les fichiers texte.
+    ) -> tuple[list[ImageData], list[tuple[str, str]], list[str]]:
+        """Télécharge les pièces jointes que le bot lit (voir pick) : images ou PDF, et fichiers texte.
 
-        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) de chaque fichier texte).
-        Lève AttachmentRefused, ImageError, PdfError ou TextFileError si l'envoi est refusé.
+        Renvoie (images ou PDF, éventuellement aucun ; (nom, contenu) de chaque fichier texte ; repères de ce qui
+        n'est pas lu). Lève ImageError, PdfError ou TextFileError si un fichier lu pose problème (trop lourd…).
         """
-        if not attachments:
-            return [], []
-
-        images = [a for a in attachments if looks_like_image(a)]
-        pdfs = [a for a in attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
-        texts = [a for a in attachments if looks_like_text(a)]
-        others = [a.filename for a in attachments if a not in images + pdfs + texts]
-        if others:
-            kinds = "des images, des PDF" if self.settings.pdf_max_pages else "des images"
-            raise AttachmentRefused(f"Je ne peux lire que {kinds} et des fichiers texte (.txt, .md, .csv, code…). "
-                                    f"Fichier(s) non pris en charge : {', '.join(others)}.")
-        if len(images) > MAX_IMAGES:
-            raise AttachmentRefused(f"{MAX_IMAGES} images par message au maximum, s'il te plaît.")
-        if pdfs and (images or len(pdfs) > 1):
-            raise AttachmentRefused("Un seul PDF par message, sans image, s'il te plaît.")
-        check_text_size(texts)
-
-        if images:
-            files = await self.download_images(images)
+        picked = pick(attachments, read_pdfs=bool(self.settings.pdf_max_pages))
+        check_text_size(picked.texts)
+        if picked.images:
+            files = await self.download_images(picked.images)
         else:
-            files = [await self.download_pdf(pdfs[0])] if pdfs else []
-        return files, await self.download_text_files(texts)
+            files = [await self.download_pdf(picked.pdf)] if picked.pdf else []
+        texts = await self.download_text_files(picked.texts) if picked.texts else []
+        return files, texts, picked.unread
 
     async def download_text_files(self, attachments: list[discord.Attachment]) -> list[tuple[str, str]]:
         """Télécharge des fichiers texte en parallèle et renvoie (nom, contenu) de chacun, dans l'ordre du message

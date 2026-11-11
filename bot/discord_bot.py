@@ -18,8 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from . import VERSION
-from .attachments import (FILES_QUEUE_FULL, MAX_IMAGES, AttachmentReader, AttachmentRefused, HeldFiles,
-                          attachments_marker, looks_like_image, looks_like_pdf, looks_like_text, readable_size,
+from .attachments import (FILES_QUEUE_FULL, AttachmentReader, HeldFiles, attachments_marker, pick, readable_size,
                           quoted_text_prompt, text_budget, text_file_marker, text_file_prompt)
 from .claude_client import ClaudeClient, ClaudeError
 from .code_files import outgoing, prepare
@@ -558,7 +557,7 @@ class ChatBot(commands.Bot):
         attachments = await self.read_attachments(message)
         if attachments is False:
             return None  # pièce jointe refusée, l'utilisateur a été prévenu
-        images, text_files = attachments
+        images, text_files, unread = attachments
         gif = None if images else await self.read_gif(message)
         if gif:
             images = [gif[0]]
@@ -584,6 +583,9 @@ class ChatBot(commands.Bot):
             markers.append(text_file_marker(name))
         for name, text in reply_texts:
             extra += quoted_text_prompt(name, text)
+        if unread:  # gardé en mémoire, et donné à Claude dès maintenant (user_text ne lit pas les repères)
+            extra += " " + " ".join(unread)
+            markers += unread
         if markers:
             line["attachments"] = markers
         return PendingMessage(message, line, extra, images)
@@ -784,16 +786,14 @@ class ChatBot(commands.Bot):
     async def mention_part(self, message: discord.Message) -> tuple[str, list[ImageData]] | None:
         """Une mention telle qu'elle est transmise à Claude, ou None si une pièce jointe est refusée
         (l'auteur a été prévenu)."""
-        # Seuls les MAX_IMAGES premières images (à défaut, le premier PDF) et les fichiers texte de la
-        # mention sont lus (les autres pièces jointes sont ignorées). Les images du message cité
-        # ne servent que s'il n'y a ni image ni PDF.
-        image_files = [a for a in message.attachments if looks_like_image(a)][:MAX_IMAGES]
-        pdfs = [a for a in message.attachments if looks_like_pdf(a)] if self.settings.pdf_max_pages else []
+        # Même choix que dans le salon dédié (voir pick) : le reste est signalé à Claude. Les images du message
+        # cité ne servent que s'il n'y a ni image ni PDF.
+        picked = pick(message.attachments, read_pdfs=bool(self.settings.pdf_max_pages))
         try:
-            if image_files:
-                images = await self.attachments.download_images(image_files)
+            if picked.images:
+                images = await self.attachments.download_images(picked.images)
             else:
-                images = [await self.attachments.download_pdf(pdfs[0])] if pdfs else []
+                images = [await self.attachments.download_pdf(picked.pdf)] if picked.pdf else []
         except (ImageError, PdfError) as exc:
             await self.safe_reply(message, exc.user_message)
             return None
@@ -813,10 +813,11 @@ class ChatBot(commands.Bot):
         for name, content in reply_texts:
             prompt += quoted_text_prompt(name, content)
 
-        text_files = [a for a in message.attachments if looks_like_text(a)]
-        if text_files:
+        if picked.unread:
+            prompt += " " + " ".join(picked.unread)
+        if picked.texts:
             try:
-                for name, content in await self.attachments.download_text_files(text_files):
+                for name, content in await self.attachments.download_text_files(picked.texts):
                     prompt += text_file_prompt(name, content)
             except TextFileError as exc:
                 await self.safe_reply(message, exc.user_message)
@@ -1032,12 +1033,12 @@ class ChatBot(commands.Bot):
 
     async def read_attachments(
         self, message: discord.Message
-    ) -> tuple[list[ImageData], list[tuple[str, str]]] | bool:
+    ) -> tuple[list[ImageData], list[tuple[str, str]], list[str]] | bool:
         """Pièces jointes du message (voir AttachmentReader.read), ou False si l'envoi est refusé :
         l'utilisateur est alors prévenu."""
         try:
             return await self.attachments.read(message.attachments)
-        except (AttachmentRefused, ImageError, PdfError, TextFileError) as exc:
+        except (ImageError, PdfError, TextFileError) as exc:
             await self.safe_reply(message, exc.user_message)
             return False
 

@@ -26,6 +26,8 @@ Dans son salon comme dans les mentions, le bot lit jusqu'à 4 images ou un PDF, 
 - **Fichiers texte** (`.txt`, `.md`, `.csv`, `.json`, `.log`, sous-titres, configuration, HTML, code…) : autant qu'on veut dans un même message, 100 Ko au total.
 - **GIF du sélecteur de Discord** : pour un GIF Klipy ou un favori gardé par Discord, le bot voit 6 moments de l'animation, du début à la fin, réunis en une seule image ; pour les autres (Giphy, anciens favoris Tenor), seulement la première image. Une image partagée par un lien Discord (par exemple une photo déjà postée ailleurs) est vue elle aussi.
 
+Le reste (vidéos, images au-delà de la 4e, PDF accompagné d'images ou deuxième PDF, autres types de fichier) n'empêche pas le bot de répondre : il est ignoré, et le bot sait ce qu'il n'a pas vu, pour pouvoir le dire.
+
 Seul le nom du fichier reste ensuite en mémoire : le bot se souvient qu'il l'a lu, sans en repayer le contenu à chaque message.
 
 ### Vie sur le serveur
