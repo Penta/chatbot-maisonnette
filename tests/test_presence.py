@@ -335,9 +335,17 @@ class MusicTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("playlist 2" in line for line in logs.output))  # l'administrateur sait laquelle corriger
         self.assertTrue(any("playlist 3" in line for line in logs.output))
 
+    async def test_malformed_playlist_is_skipped(self):
+        track = {"id": 7, "title": "Titre", "artist": {"name": "Artiste"}, "duration": 200}
+        malformed = {"data": [{"id": 8, "title": "Autre", "artist": None}]}
+        with self.assertLogs("chatbot.presence", "WARNING"):
+            tracks = await self.run_fetch({1: {"data": [track]}, 2: malformed, 3: [], 4: {"data": "page vide"}})
+        self.assertEqual(tracks, [Track("Titre", "Artiste", 200)])
+
     async def test_all_playlists_failing_is_an_error(self):
-        # Erreur : la liste précédente est gardée (voir refresh).
-        with self.assertRaises(SourceError):
+        # Erreur : la liste précédente est gardée (voir refresh), qui l'écrit une seule fois dans le journal.
+        # Pas de « Vérifier DEEZER_PLAYLISTS » : c'est Deezer qui est en panne, pas les numéros.
+        with self.assertNoLogs("chatbot.presence", "WARNING"), self.assertRaises(SourceError):
             await self.run_fetch({1: {"error": {"message": "no data"}}, 2: SourceError("TimeoutError")})
 
 
@@ -349,10 +357,8 @@ class RefreshTest(unittest.IsolatedAsyncioTestCase):
             sources = PresenceSources(Path(tmp) / "presence_sources.json", deezer_playlists=(1,))
             sources.music = [Track("Ancien titre", "Artiste", 180)]
 
-            async def fake_get_json(session, method, url, **kwargs):
-                return {"data": [{"id": 7, "title": "Titre", "artist": None}]}  # artiste vide : forme inattendue
             anime = [Anime("Frieren", 28, 24)]
-            with mock.patch("bot.presence_sources.get_json", fake_get_json), \
+            with mock.patch.object(PresenceSources, "fetch_music", mock.AsyncMock(side_effect=TypeError)), \
                     mock.patch.object(PresenceSources, "fetch_anime", mock.AsyncMock(return_value=anime)), \
                     mock.patch.object(PresenceSources, "fetch_games", mock.AsyncMock(return_value=[10, 20])), \
                     self.assertLogs("chatbot.presence", "ERROR"):

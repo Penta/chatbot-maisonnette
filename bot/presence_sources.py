@@ -172,23 +172,38 @@ class PresenceSources:
         """Titres de toutes les playlists lisibles. Une playlist illisible (supprimée, numéro faux, panne) est
         ignorée et nommée dans le journal ; erreur seulement si aucune ne répond."""
         tracks: dict[int, Track] = {}  # par identifiant Deezer : un titre présent dans deux tops ne compte qu'une fois
-        errors: list[str] = []
+        errors: dict[int, SourceError] = {}
         for playlist in self.deezer_playlists:
             try:
                 data = await get_json(session, "GET", DEEZER_TRACKS_URL.format(playlist))
-                if "error" in data:  # Deezer signale ses erreurs avec un code HTTP 200
-                    raise SourceError(data["error"].get("message", "erreur"))
+                tracks.update(self._playlist_tracks(data))
             except SourceError as exc:
-                errors.append(f"playlist {playlist} : {exc}")
-                logger.warning("Musiques (Deezer) : playlist %s illisible (%s), ignorée. "
-                               "Vérifier DEEZER_PLAYLISTS si cela dure.", playlist, exc)
-                continue
+                errors[playlist] = exc
+        if errors and len(errors) == len(self.deezer_playlists):
+            # Aucune playlist lue : sans doute Deezer en panne, pas les numéros. refresh l'écrit une seule fois
+            # dans le journal et garde la liste précédente.
+            raise SourceError(" ; ".join(f"playlist {playlist} : {exc}" for playlist, exc in errors.items()))
+        for playlist, exc in errors.items():
+            logger.warning("Musiques (Deezer) : playlist %s illisible (%s), ignorée. "
+                           "Vérifier DEEZER_PLAYLISTS si cela dure.", playlist, exc)
+        return list(tracks.values())
+
+    @staticmethod
+    def _playlist_tracks(data) -> dict[int, Track]:
+        """Titres d'une réponse Deezer, par identifiant. Réponse d'une forme inattendue : SourceError."""
+        if not isinstance(data, dict):
+            raise SourceError("réponse inattendue")
+        if "error" in data:  # Deezer signale ses erreurs avec un code HTTP 200
+            error = data["error"]
+            raise SourceError(error.get("message", "erreur") if isinstance(error, dict) else "erreur")
+        tracks: dict[int, Track] = {}
+        try:
             for t in data.get("data", []):
                 if t.get("id") and t.get("title") and t.get("artist", {}).get("name"):
                     tracks[t["id"]] = Track(t["title"], t["artist"]["name"], t.get("duration") or DEFAULT_TRACK_DURATION)
-        if errors and len(errors) == len(self.deezer_playlists):
-            raise SourceError(" ; ".join(errors))  # aucune playlist lue : la liste précédente est gardée
-        return list(tracks.values())
+        except (AttributeError, TypeError, KeyError):
+            raise SourceError("réponse inattendue") from None
+        return tracks
 
     @staticmethod
     async def fetch_games(session: aiohttp.ClientSession) -> list[int]:
