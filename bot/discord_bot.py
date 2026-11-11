@@ -1172,17 +1172,17 @@ class ChatBot(commands.Bot):
 
     async def mentioned_name(self, user_id: int, guild: discord.Guild | None) -> str:
         """« @nom » d'une personne mentionnée : son surnom si elle est membre du serveur, sinon son nom global,
-        ou « @quelqu'un » si Discord ne la connaît pas ou ne répond pas."""
+        ou « @quelqu'un » si Discord ne la connaît pas ou ne répond pas : un nom ne fait jamais perdre la réponse."""
         user = guild.get_member(user_id) if guild else None
         try:
             if not user and guild:
                 try:
                     user = await guild.fetch_member(user_id)
-                except discord.NotFound:
-                    pass  # pas membre du serveur : son nom global
+                except (discord.NotFound, discord.Forbidden):
+                    pass  # pas membre du serveur, ou Discord refuse de le dire : son nom global
             if not user:
                 user = self.get_user(user_id) or await self.fetch_user(user_id)
-        except discord.HTTPException as e:  # NotFound compris : compte supprimé
+        except DISCORD_FAILURES as e:  # compte supprimé, panne de Discord, réseau coupé, délai dépassé
             logger.debug("Nom de la personne mentionnée %s introuvable : %s", user_id, e)
         return f"@{user.display_name}" if user else "@quelqu'un"
 

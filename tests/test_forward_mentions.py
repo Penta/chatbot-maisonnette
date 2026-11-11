@@ -4,6 +4,7 @@ Lancer depuis la racine du projet : python -m unittest"""
 import unittest
 from unittest import mock
 
+import aiohttp
 import discord
 
 from bot.discord_bot import ChatBot
@@ -60,6 +61,18 @@ class ForwardMentionsTest(unittest.IsolatedAsyncioTestCase):
     async def test_discord_failure_keeps_someone(self):
         self.guild.fetch_member.side_effect = discord.HTTPException(mock.Mock(status=500, reason="Erreur"), "panne")
         self.assertEqual(await self.clean("salut <@1>", self.guild), "salut @quelqu'un")
+
+    async def test_network_failure_keeps_someone(self):
+        # Discord ne répond pas du tout (connexion coupée, délai dépassé) : le message est lu quand même.
+        for error in (aiohttp.ClientConnectionError("coupure"), TimeoutError()):
+            with self.subTest(error=type(error).__name__):
+                self.guild.fetch_member.side_effect = error
+                self.assertEqual(await self.clean("salut <@1>", self.guild), "salut @quelqu'un")
+
+    async def test_member_lookup_refused_keeps_global_name(self):
+        # Discord refuse de dire si la personne est membre du serveur : son nom global plutôt que « quelqu'un ».
+        self.guild.fetch_member.side_effect = discord.Forbidden(mock.Mock(status=403, reason="Forbidden"), "refus")
+        self.assertEqual(await self.clean("salut <@1>", self.guild), "salut @paul_42")
 
     async def test_roles_and_channels(self):
         self.assertEqual(await self.clean("<@&5> voir <#7>", self.guild), "@Modérateurs voir #général")
