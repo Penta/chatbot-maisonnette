@@ -145,9 +145,11 @@ def text_budget(attachments: list[discord.Attachment]) -> int:
     return max(0, TEXT_FILE_MAX_BYTES - sum(a.size for a in attachments if looks_like_text(a)))
 
 
-def readable_size(attachments: list[discord.Attachment]) -> int:
-    """Taille annoncée des fichiers que le bot peut lire : les autres (vidéos…) ne sont jamais téléchargés."""
-    return sum(a.size for a in attachments if looks_like_image(a) or looks_like_pdf(a) or looks_like_text(a))
+def readable_size(attachments: list[discord.Attachment], read_pdfs: bool) -> int:
+    """Taille annoncée des fichiers que le bot lit (voir pick) : les autres (vidéos, images en trop…) ne sont
+    jamais téléchargés."""
+    picked = pick(attachments, read_pdfs)
+    return sum(a.size for a in [*picked.images, *([picked.pdf] if picked.pdf else []), *picked.texts])
 
 
 def text_file_prompt(name: str, content: str) -> str:

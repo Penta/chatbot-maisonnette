@@ -503,7 +503,8 @@ class ChatBot(commands.Bot):
     async def handle_main_channel(self, message: discord.Message) -> None:
         content = message.content.strip()
         # Place réservée avant tout téléchargement, et jusqu'à la réponse (voir answer_main_channel).
-        if not self.held_files.reserve(message.id, readable_size(message.attachments)):
+        size = readable_size(message.attachments, read_pdfs=bool(self.settings.pdf_max_pages))
+        if not self.held_files.reserve(message.id, size):
             logger.warning("Trop de fichiers en attente : message %s de %s refusé.", message.id, message.author)
             await self.safe_reply(message, FILES_QUEUE_FULL)
             return
@@ -662,7 +663,8 @@ class ChatBot(commands.Bot):
         # Comme dans le salon dédié : les mentions arrivées pendant une réponse attendent dans la file,
         # puis partent ensemble dans un seul appel (ou plusieurs, si elles sont trop lourdes ensemble).
         # Leurs fichiers sont téléchargés au moment de répondre : leur place est réservée dès maintenant.
-        if not self.held_files.reserve(message.id, readable_size(message.attachments)):
+        size = readable_size(message.attachments, read_pdfs=bool(self.settings.pdf_max_pages))
+        if not self.held_files.reserve(message.id, size):
             logger.warning("Trop de fichiers en attente : mention %s de %s refusée.", message.id, message.author)
             await self.safe_reply(message, FILES_QUEUE_FULL)
             return

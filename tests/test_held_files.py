@@ -95,9 +95,18 @@ class HeldFilesTest(unittest.TestCase):
 
     def test_only_readable_files_count(self):
         # Une vidéo n'est jamais téléchargée : elle ne doit pas faire refuser la mention qui la contient.
-        files = [attachment(500_000_000, "film.mp4", "video/mp4"), attachment(1000, "photo.png", "image/png"),
-                 attachment(2000), attachment(300, "notes.txt", "text/plain")]
-        self.assertEqual(readable_size(files), 3300)
+        files = [attachment(500_000_000, "film.mp4", "video/mp4"), attachment(2000),
+                 attachment(300, "notes.txt", "text/plain")]
+        self.assertEqual(readable_size(files, read_pdfs=True), 2300)
+
+    def test_files_left_aside_dont_count(self):
+        # Lucas poste 10 photos de 9 Mo et un PDF : Rika lit les 4 premières photos, pas le reste. Seules
+        # celles-ci réservent de la place, sinon un autre message en attente serait refusé pour rien.
+        photos = [attachment(9_000_000, f"photo{i}.png", "image/png") for i in range(10)]
+        self.assertEqual(readable_size(photos + [attachment(2000)], read_pdfs=True), 36_000_000)
+
+    def test_pdf_not_counted_when_pdfs_are_off(self):
+        self.assertEqual(readable_size([attachment(2000)], read_pdfs=False), 0)
 
 
 class MainChannelTest(unittest.IsolatedAsyncioTestCase):
