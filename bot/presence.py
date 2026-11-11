@@ -235,7 +235,7 @@ class PresenceManager:
             data = json.loads(self.state_file.read_text(encoding="utf-8"))
             self.recent_custom.extend(data.get("recent_custom", []))
             self.recent_kinds.extend(Kind(value) for value in data.get("recent_kinds", []))
-            status =Status.from_dict(data["status"])
+            status = Status.from_dict(data["status"])
             program = [(Status.from_dict(step), float(seconds)) for step, seconds in data.get("program", [])]
             saved_at = datetime.fromisoformat(data["saved_at"])
             step_end = datetime.fromisoformat(data["step_end"])
@@ -408,7 +408,7 @@ class PresenceManager:
             if not self.program:
                 self.program = await self.draw()
                 self.recent_kinds.append(self.program[0][0].kind)  # celui affiché (en ligne si un jeu échoue…)
-                total =sum(seconds for _, seconds in self.program)
+                total = sum(seconds for _, seconds in self.program)
                 self.status_end = now + timedelta(seconds=total)
                 logger.info("Nouveau statut pour %s.", format_duration(total * self.settings.presence_speed))
             status, seconds = self.program.pop(0)
@@ -432,7 +432,7 @@ class PresenceManager:
                 del available[recent]
             elif factor > 0:
                 available[recent] *= factor
-        kind =random.choices(list(available), weights=list(available.values()))[0] if available else Kind.ONLINE
+        kind = random.choices(list(available), weights=list(available.values()))[0] if available else Kind.ONLINE
         speed = self.settings.presence_speed
 
         if kind is Kind.ANIME:
