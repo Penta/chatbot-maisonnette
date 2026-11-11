@@ -15,7 +15,7 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 - **`/reset` vide la mémoire de Rika depuis n'importe quel salon**, au lieu de ne rien effacer quand il était lancé ailleurs que dans son salon.
 - **Dans son salon, Rika répond aux messages accompagnés d'une vidéo, de plus de 4 images ou d'un PDF en trop**, comme dans les mentions, au lieu de les refuser : elle lit ce qu'elle peut et sait ce qu'elle n'a pas vu.
 - **Quand un message dépasse ce que Rika peut lire en une fois, elle le dit clairement** et propose de raccourcir le message ou ses fichiers, au lieu de conseiller un `/reset` qui n'y changeait rien.
-- **Une playlist Deezer introuvable n'empêche plus Rika de renouveler ses musiques** : les autres sont lues quand même. Si le journal signale une playlist ignorée, vérifier son numéro dans `DEEZER_PLAYLISTS`.
+- **Une playlist Deezer introuvable ou illisible n'empêche plus Rika de renouveler ses musiques** : les autres sont lues quand même. Si le journal signale une playlist ignorée, vérifier son numéro dans `DEEZER_PLAYLISTS`.
 
 ---
 
