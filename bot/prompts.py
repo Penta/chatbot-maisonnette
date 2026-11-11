@@ -84,7 +84,8 @@ MEMBER_MEMORY_NOTE = (
     "la fin du message ; pour un autre membre de la liste, lis sa fiche avec l'outil si besoin."
 )
 
-# Ajouté quand Claude a au moins un outil (recherche web ou mémoire). Le texte écrit avant un appel
+# Ajouté quand Claude a au moins un outil (recherche web, mémoire ou « mes_messages ») : toujours en pratique,
+# puisque « mes_messages » est fourni à chaque réponse (voir ChatBot.own_messages). Le texte écrit avant un appel
 # d'outil n'est jamais affiché (voir _final_text dans claude_client.py) ; l'interdire pousserait
 # au contraire le modèle à écrire ses appels d'outils sous forme de texte.
 TOOL_NOTE = (
