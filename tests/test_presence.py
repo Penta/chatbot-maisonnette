@@ -10,7 +10,7 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from bot.presence import Kind, PresenceManager, Status, format_duration
-from bot.presence_sources import Anime, PresenceSources, SourceError, Track
+from bot.presence_sources import DEEZER_TRACKS_URL, Anime, PresenceSources, SourceError, Track
 
 UTC = timezone.utc
 PARIS = ZoneInfo("Europe/Paris")
@@ -309,6 +309,36 @@ class SteamTopGamesTest(unittest.IsolatedAsyncioTestCase):
         # Erreur : la liste précédente est gardée (voir refresh).
         with self.assertRaises(SourceError):
             await self.fetch([{"success": 2}])
+
+
+class MusicTest(unittest.IsolatedAsyncioTestCase):
+    """Une playlist Deezer illisible n'empêche pas de lire les autres."""
+
+    async def run_fetch(self, answers: dict) -> list[Track]:
+        urls = {DEEZER_TRACKS_URL.format(p): a for p, a in answers.items()}
+
+        async def fake_get_json(session, method, url, **kwargs):
+            answer = urls[url]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        sources = PresenceSources(Path("inutilise.json"), deezer_playlists=tuple(answers))
+        with mock.patch("bot.presence_sources.get_json", fake_get_json):
+            return await sources.fetch_music(None)
+
+    async def test_missing_playlist_is_skipped(self):
+        track = {"id": 7, "title": "Titre", "artist": {"name": "Artiste"}, "duration": 200}
+        answers = {1: {"data": [track]}, 2: {"error": {"message": "no data"}}, 3: SourceError("réponse HTTP 500")}
+        with self.assertLogs("chatbot.presence", "WARNING") as logs:
+            tracks = await self.run_fetch(answers)
+        self.assertEqual(tracks, [Track("Titre", "Artiste", 200)])
+        self.assertTrue(any("playlist 2" in line for line in logs.output))  # l'administrateur sait laquelle corriger
+        self.assertTrue(any("playlist 3" in line for line in logs.output))
+
+    async def test_all_playlists_failing_is_an_error(self):
+        # Erreur : la liste précédente est gardée (voir refresh).
+        with self.assertRaises(SourceError):
+            await self.run_fetch({1: {"error": {"message": "no data"}}, 2: SourceError("TimeoutError")})
 
 
 class RefreshTest(unittest.IsolatedAsyncioTestCase):

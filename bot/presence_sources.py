@@ -169,14 +169,25 @@ class PresenceSources:
         return list(anime.values())
 
     async def fetch_music(self, session: aiohttp.ClientSession) -> list[Track]:
+        """Titres de toutes les playlists lisibles. Une playlist illisible (supprimée, numéro faux, panne) est
+        ignorée et nommée dans le journal ; erreur seulement si aucune ne répond."""
         tracks: dict[int, Track] = {}  # par identifiant Deezer : un titre présent dans deux tops ne compte qu'une fois
+        errors: list[str] = []
         for playlist in self.deezer_playlists:
-            data = await get_json(session, "GET", DEEZER_TRACKS_URL.format(playlist))
-            if "error" in data:  # Deezer signale ses erreurs avec un code HTTP 200
-                raise SourceError(f"playlist {playlist} : {data['error'].get('message', 'erreur')}")
+            try:
+                data = await get_json(session, "GET", DEEZER_TRACKS_URL.format(playlist))
+                if "error" in data:  # Deezer signale ses erreurs avec un code HTTP 200
+                    raise SourceError(data["error"].get("message", "erreur"))
+            except SourceError as exc:
+                errors.append(f"playlist {playlist} : {exc}")
+                logger.warning("Musiques (Deezer) : playlist %s illisible (%s), ignorée. "
+                               "Vérifier DEEZER_PLAYLISTS si cela dure.", playlist, exc)
+                continue
             for t in data.get("data", []):
                 if t.get("id") and t.get("title") and t.get("artist", {}).get("name"):
                     tracks[t["id"]] = Track(t["title"], t["artist"]["name"], t.get("duration") or DEFAULT_TRACK_DURATION)
+        if errors and len(errors) == len(self.deezer_playlists):
+            raise SourceError(" ; ".join(errors))  # aucune playlist lue : la liste précédente est gardée
         return list(tracks.values())
 
     @staticmethod
