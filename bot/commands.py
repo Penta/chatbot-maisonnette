@@ -29,7 +29,7 @@ async def allowed(interaction: discord.Interaction) -> bool:
     return False
 
 
-@app_commands.command(name="reset", description="Réinitialise la mémoire du bot dans ce salon")
+@app_commands.command(name="reset", description="Efface la mémoire de conversation du salon du bot")
 @app_commands.guild_only()
 # Masque la commande aux membres qui n'ont pas la permission Administrateur.
 @app_commands.default_permissions(administrator=True)
@@ -40,9 +40,13 @@ async def reset_command(interaction: discord.Interaction) -> None:
     # Le reset attend la fin d'une éventuelle réponse en cours, ce qui peut dépasser
     # les 3 secondes accordées par Discord pour répondre à une commande.
     await interaction.response.defer()
-    await bot.history.reset(interaction.channel_id)
-    logger.info("Historique réinitialisé dans le salon %s par %s", interaction.channel_id, interaction.user)
-    await interaction.followup.send("L'historique de conversation a été réinitialisé.")
+    # Seul le salon dédié (CHANNEL_ID) a une mémoire : ailleurs, le bot relit les derniers messages quand
+    # on le mentionne. /reset vide donc celle-là, quel que soit le salon où la commande est lancée.
+    channel_id = bot.settings.channel_id
+    await bot.history.reset(channel_id)
+    logger.info("Historique du salon %s réinitialisé par %s (commande lancée dans le salon %s)",
+                channel_id, interaction.user, interaction.channel_id)
+    await interaction.followup.send(f"L'historique de conversation de <#{channel_id}> a été réinitialisé.")
 
 
 @app_commands.command(name="skip", description="Passe tout de suite au statut Discord suivant du bot")
