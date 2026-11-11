@@ -29,6 +29,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Vérificateur de code (règles dans ruff.toml). Version fixée : une
+      # nouvelle version de Ruff ne doit pas bloquer la CI d'elle-même.
+      - name: Run Ruff
+        run: |
+          pip install ruff==0.17.4
+          ruff check --output-format=github
+
       - name: Run tests
         run: python -m unittest
 

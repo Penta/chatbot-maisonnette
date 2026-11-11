@@ -1,0 +1,18 @@
+# Vérificateur de code Ruff, lancé par la CI avant les tests.
+# Commande : .venv\Scripts\python -m ruff check
+#
+# Peu de règles, choisies pour trouver de vraies erreurs sans tout réécrire :
+# - F    : erreurs de Pyflakes (nom mal tapé, import ou variable inutile…) ;
+# - E9   : fichiers qui ne se lisent pas (erreur de syntaxe…) ;
+# - E225 : espace manquante autour d'un opérateur (« x =1 »).
+# E225 est encore une règle « en essai » chez Ruff : `preview` l'active, et
+# `explicit-preview-rules` évite d'activer les autres règles en essai.
+# La version de Ruff est fixée dans la CI pour que ces règles ne changent pas
+# d'elles-mêmes.
+
+extend-exclude = [".venv", "memories"]
+
+[lint]
+preview = true
+explicit-preview-rules = true
+select = ["F", "E9", "E225"]

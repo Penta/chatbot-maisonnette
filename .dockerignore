@@ -25,4 +25,6 @@ venv/
 **/*.pyc
 
 .pytest_cache/
+.ruff_cache/
+ruff.toml
 tests/
