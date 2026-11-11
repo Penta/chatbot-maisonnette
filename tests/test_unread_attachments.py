@@ -47,6 +47,25 @@ class PickTest(unittest.TestCase):
                 picked = pick([attachment(name, None)], read_pdfs=True)
                 self.assertEqual(picked.unread, [f"[vidéo jointe « {name} » : tu ne peux pas voir les vidéos]"])
 
+    def test_ts_video_not_read_as_code(self):
+        # Un .ts peut être du TypeScript ou une vidéo MPEG-TS : Discord annonce alors video/mp2t. La vidéo,
+        # souvent plus grosse que 100 Ko, ne doit pas être lue comme du texte (et faire refuser le message).
+        clip = attachment("extrait.ts", "video/mp2t", size=5_000_000)
+        picked = pick([clip], read_pdfs=True)
+        self.assertEqual(picked.texts, [])
+        self.assertEqual(picked.unread, ["[vidéo jointe « extrait.ts » : tu ne peux pas voir les vidéos]"])
+
+    def test_announced_audio_not_read_as_text(self):
+        picked = pick([attachment("chanson.ts", "audio/mp2t")], read_pdfs=True)
+        self.assertEqual(picked.texts, [])
+        self.assertEqual(len(picked.unread), 1)
+
+    def test_typescript_still_read(self):
+        for content_type in ("text/plain", "application/typescript", None):
+            with self.subTest(content_type=content_type):
+                code = attachment("app.ts", content_type)
+                self.assertEqual(pick([code], read_pdfs=True).texts, [code])
+
     def test_extra_images_counted(self):
         shots = [image(f"capture{i}.png") for i in range(6)]
         picked = pick(shots, read_pdfs=True)
