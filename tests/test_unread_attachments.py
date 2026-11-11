@@ -119,5 +119,45 @@ class MentionReadTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[vidéo jointe « clip.mp4 » : tu ne peux pas voir les vidéos]", prompt)
 
 
+
+class SameOrderTest(unittest.IsolatedAsyncioTestCase):
+    """Penta envoie clip.mp4 et index.html en citant un message qui porte notes.txt : dans le salon comme dans une
+    mention, Claude reçoit la note sur la vidéo juste après le texte, puis les fichiers du message, puis ceux du
+    message cité."""
+
+    NOTE = "[vidéo jointe « clip.mp4 » : tu ne peux pas voir les vidéos]"
+
+    def assert_order(self, text: str):
+        positions = [text.index(self.NOTE), text.index("<p>page</p>"), text.index("à faire")]
+        self.assertEqual(positions, sorted(positions))
+
+    async def test_main_channel(self):
+        bot = mock.Mock()
+        bot.read_forward = mock.AsyncMock(return_value=(None, []))
+        bot.read_attachments = mock.AsyncMock(return_value=([], [("index.html", "<p>page</p>")], [self.NOTE]))
+        bot.read_gif = mock.AsyncMock(return_value=None)
+        bot.read_reply = mock.AsyncMock(return_value=("en réponse", [], [("notes.txt", "à faire")]))
+        bot.timestamp.return_value = "11/11/2026 18:00"
+        bot.message_body.return_value = "regarde"
+        message = mock.Mock(attachments=[], stickers=[])
+        message.author.display_name = message.author.name = "Penta"
+        pending = await ChatBot.read_main_message(bot, message, "regarde")
+        self.assert_order(pending.user_text)
+
+    async def test_mention(self):
+        bot = mock.Mock()
+        bot.settings.pdf_max_pages = 10
+        bot.attachments = reader()
+        bot.attachments.download_text_files = mock.AsyncMock(return_value=[("index.html", "<p>page</p>")])
+        bot.read_gif = mock.AsyncMock(return_value=None)
+        bot.read_reply = mock.AsyncMock(return_value=("en réponse", [], [("notes.txt", "à faire")]))
+        bot.timestamp.return_value = "11/11/2026 18:00"
+        page = attachment("index.html", "text/html")
+        message = mock.Mock(attachments=[video(), page], clean_content="@Rika regarde", guild=None)
+        message.author.display_name = message.author.name = "Penta"
+        bot.user.name = "Rika"
+        prompt, _ = await ChatBot.mention_part(bot, message)
+        self.assert_order(prompt)
+
 if __name__ == "__main__":
     unittest.main()

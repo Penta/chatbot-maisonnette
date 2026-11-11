@@ -577,16 +577,17 @@ class ChatBot(commands.Bot):
                 line["reply_to"] = message.reference.message_id  # citation retirée si ce message est supprimé
                 line["reply"] = reply
             line["content"] = self.message_body(message)
+        # Même ordre que dans une mention : GIF, ce qui n'est pas lu, fichiers du message, puis du message cité.
         markers = [gif[2] if gif else attachments_marker(images)] if images else []
         extra = gif[1] if gif else ""
+        if unread:  # gardé en mémoire, et donné à Claude dès maintenant (user_text ne lit pas les repères)
+            extra += " " + " ".join(unread)
+            markers += unread
         for name, text in text_files:
             extra += text_file_prompt(name, text)
             markers.append(text_file_marker(name))
         for name, text in reply_texts:
             extra += quoted_text_prompt(name, text)
-        if unread:  # gardé en mémoire, et donné à Claude dès maintenant (user_text ne lit pas les repères)
-            extra += " " + " ".join(unread)
-            markers += unread
         if markers:
             line["attachments"] = markers
         return PendingMessage(message, line, extra, images)
@@ -810,11 +811,9 @@ class ChatBot(commands.Bot):
         text = short_emojis(message.clean_content.replace(bot_name, "").strip()) or "(simple mention, sans texte)"
         reply_part = f" ({reply})" if reply else ""
         prompt = f"{self.timestamp(message)}, {author_name(message.author)} te mentionne{reply_part} et écrit : {text}"
+        # Même ordre que dans le salon dédié : GIF, ce qui n'est pas lu, fichiers du message, puis du message cité.
         if gif:
             prompt += gif[1]
-        for name, content in reply_texts:
-            prompt += quoted_text_prompt(name, content)
-
         if picked.unread:
             prompt += " " + " ".join(picked.unread)
         if picked.texts:
@@ -824,6 +823,8 @@ class ChatBot(commands.Bot):
             except TextFileError as exc:
                 await self.safe_reply(message, exc.user_message)
                 return None
+        for name, content in reply_texts:
+            prompt += quoted_text_prompt(name, content)
         return prompt, images
 
     # ------------------------------------------------------ réponses différées
