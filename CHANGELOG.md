@@ -8,6 +8,8 @@ Les versions les plus récentes sont en haut. Chaque entrée commence par un ré
 
 ## Version 5.18
 
+*Publiée le 11 novembre 2026*
+
 ### Corrections
 
 - **Dans un message transféré, Rika reconnaît les membres, rôles et salons mentionnés** comme dans un message normal.
